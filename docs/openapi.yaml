@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.3.0
+  version: 0.4.0
   description: |
     Контракт (F0A → F2). Реальные пути добавляются по фазам:
-    F1 — identity/auth ✅, F2 — sessions/QR ✅, F4 — requests/queue/ws-ticket ✅, F3 — catalog,
+    F1 ✅, F2 ✅, F4 ✅, F5 payments (Test Mode, мок-провайдер) ✅, F3 — catalog,
     F5 — payments. Breaking changes блокируются CI (oasdiff).
   contact:
     name: DROP IT
@@ -558,6 +558,99 @@ paths:
                   expires_in:
                     type: integer
                     enum: [30]
+
+  # ==========================================================
+  # F5 — payments (Test Mode, МОК-провайдер до ADR-004)
+  # ==========================================================
+  /v1/payments/{id}/confirm:
+    post:
+      summary: Подтверждение оплаты (гость)
+      description: |
+        GUARD: session == active AND request == pending, иначе 409 +
+        авто-cancel интента (не «заплачено за expired»).
+        Провайдер — мок до закрытия ADR-004/Q15.
+      security:
+        - deviceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payment_method:
+                  type: string
+                  description: Токен платёжного метода (Stripe SDK)
+      responses:
+        "200":
+          description: processing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment_id, status]
+                properties:
+                  payment_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [processing]
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /v1/stripe/webhook:
+    post:
+      summary: Webhook-intake (захват платежа)
+      description: |
+        Верификация подписи (tolerance 5 мин; clock-drift — отдельный
+        лог). Идемпотентность по (aggregate_id, event_type): дубль
+        вебхука с другим event_id — no-op 200, НЕ вторая проводка.
+        События захвата: payment_intent.succeeded | charge.succeeded.
+      security: []
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, type, payment_id, amount_minor]
+              properties:
+                event_id:
+                  type: string
+                type:
+                  type: string
+                payment_id:
+                  type: string
+                  format: uuid
+                amount_minor:
+                  type: integer
+      responses:
+        "200":
+          description: Обработано или no-op (дубль)
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
 
 components:
   securitySchemes:

@@ -106,6 +106,7 @@ pub fn router(env: ApiEnv) -> Router {
         .merge(guest)
         .merge(crate::sessions_routes::sessions_router())
         .merge(crate::requests_routes::requests_router())
+        .merge(crate::payments_routes::payments_router())
         .with_state(env)
 }
 
@@ -452,6 +453,7 @@ pub struct ApiEnv {
     pub repo: Option<std::sync::Arc<IdentityRepo>>,
     pub sessions: Option<std::sync::Arc<dropit_infra_db::SessionRepo>>,
     pub requests: Option<std::sync::Arc<dropit_infra_db::RequestRepo>>,
+    pub billing: Option<std::sync::Arc<dropit_infra_db::BillingRepo>>,
 }
 
 pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {
