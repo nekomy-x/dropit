@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: fmt / clippy / test / migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dropit
+          POSTGRES_PASSWORD: dropit_ci
+          POSTGRES_DB: dropit
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dropit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://dropit:dropit_ci@localhost:5432/dropit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace
+
+      # Проверка миграций на чистой БД CI (sqlx migrate run)
+      - name: sqlx migrate run
+        run: |
+          cargo install --locked sqlx-cli --no-default-features --features rustls,postgres
+          sqlx migrate run --source crates/infra-db/migrations
+
+      # Проверка, что миграции идемпотентны к повторному запуску
+      - name: sqlx migrate run (idempotency)
+        run: sqlx migrate run --source crates/infra-db/migrations
+
+  openapi:
+    name: openapi lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate openapi.yaml
+        run: npx --yes @redocly/cli lint docs/openapi.yaml --format minimal
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime image
+        run: docker build -f deploy/Dockerfile .

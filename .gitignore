@@ -1,0 +1,14 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# Env/secrets — никогда не коммитим
+.env
+deploy/.env
+*.pem
+*.key
+
+# Local
+/del/
+.DS_Store

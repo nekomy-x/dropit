@@ -1,0 +1,61 @@
+openapi: 3.1.0
+info:
+  title: DROP IT API
+  version: 0.1.0
+  description: |
+    Заготовка контракта (F0A). Реальные пути добавляются по фазам:
+    F1 — identity/auth, F2 — sessions/QR, F3 — catalog, F4 — requests/ws,
+    F5 — payments. Breaking changes блокируются CI (oasdiff).
+  contact:
+    name: DROP IT
+paths:
+  /healthz:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: Процесс жив
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /readyz:
+    get:
+      summary: Readiness
+      responses:
+        "200":
+          description: Готов принимать трафик
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+      required: [status]
+    ErrorEnvelope:
+      type: object
+      description: Единый формат ошибок; code — стабильный i18n-ключ
+      properties:
+        code:
+          type: string
+          examples: [session_closed, rate_limited]
+        message:
+          type: string
+        details:
+          description: Опциональные детали
+      required: [code, message]
+  responses:
+    Error:
+      description: Ошибка с единым envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"

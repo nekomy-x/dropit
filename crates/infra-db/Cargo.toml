@@ -1,0 +1,14 @@
+[package]
+name = "dropit-infra-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dropit-common = { path = "../common" }
+dropit-domain = { path = "../domain" }
+tokio.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
