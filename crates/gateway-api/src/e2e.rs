@@ -8,8 +8,6 @@
 //! (каждая роль на свой echo → 200; на чужой → 403; без токена → 401),
 //! refresh-ротацию и reuse-детекцию.
 
-#![cfg(test)]
-
 use axum::{
     body::Body,
     http::{Request, StatusCode},
@@ -22,7 +20,7 @@ use tower::ServiceExt; // oneshot
 use crate::auth::JwtKeys;
 use crate::routes::{router, ApiEnv};
 
-async fn test_repo() -> Option<IdentityRepo> {
+pub(crate) async fn test_repo() -> Option<IdentityRepo> {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://dropit:dropit_local@localhost:5432/dropit".into());
     dropit_infra_db::connect(&url)
@@ -31,14 +29,18 @@ async fn test_repo() -> Option<IdentityRepo> {
         .map(IdentityRepo::new)
 }
 
-async fn app_env(repo: Option<IdentityRepo>) -> ApiEnv {
+pub(crate) async fn app_env(
+    repo: Option<IdentityRepo>,
+    sessions: Option<dropit_infra_db::SessionRepo>,
+) -> ApiEnv {
     ApiEnv {
         keys: JwtKeys::from_secret(b"e2e-test-secret-key-32-bytes-xxxxx"),
         repo: repo.map(std::sync::Arc::new),
+        sessions: sessions.map(std::sync::Arc::new),
     }
 }
 
-async fn call(
+pub(crate) async fn call(
     env: &ApiEnv,
     method: &str,
     uri: &str,
@@ -75,7 +77,8 @@ async fn e2e_four_roles_rbac_matrix() {
             return;
         }
     };
-    let env = app_env(Some(repo.clone())).await;
+    let sessions_repo = dropit_infra_db::SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions_repo)).await;
 
     // --- Гость: device-token --------------------------------------
     let (status, body) = call(
@@ -195,7 +198,7 @@ async fn e2e_four_roles_rbac_matrix() {
 #[tokio::test]
 async fn e2e_login_requires_database() {
     // Без БД (repo = None) логины отвечают 503, а не паникой.
-    let env = app_env(None).await;
+    let env = app_env(None, None).await;
     let (s, body) = call(
         &env,
         "POST",

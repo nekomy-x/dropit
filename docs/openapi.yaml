@@ -1,17 +1,21 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Заготовка контракта (F0A). Реальные пути добавляются по фазам:
-    F1 — identity/auth, F2 — sessions/QR, F3 — catalog, F4 — requests/ws,
+    Контракт (F0A → F2). Реальные пути добавляются по фазам:
+    F1 — identity/auth ✅, F2 — sessions/QR ✅, F3 — catalog, F4 — requests/ws,
     F5 — payments. Breaking changes блокируются CI (oasdiff).
   contact:
     name: DROP IT
+servers:
+  - url: http://127.0.0.1:8080
+    description: local dev
 paths:
   /healthz:
     get:
       summary: Liveness
+      security: []
       responses:
         "200":
           description: Процесс жив
@@ -22,6 +26,7 @@ paths:
   /readyz:
     get:
       summary: Readiness
+      security: []
       responses:
         "200":
           description: Готов принимать трафик
@@ -29,7 +34,321 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+
+  # ==========================================================
+  # F1 — identity
+  # ==========================================================
+  /v1/guest/device:
+    post:
+      summary: Выдать device-token гостя
+      security: []
+      description: |
+        Без регистрации. Лимит 5/час/IP; выше — captcha (F8).
+        Device-token = UUIDv7 guest_device.id; передаётся как Bearer
+        в гостевых роутах (не JWT).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+                app_version:
+                  type: string
+      responses:
+        "200":
+          description: Device-token выдан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [device_token]
+                properties:
+                  device_token:
+                    type: string
+                    format: uuid
+        "429":
+          $ref: "#/components/responses/Error"
+
+  /v1/auth/{role}/login:
+    post:
+      summary: Логин DJ/клуба/админа (шаг 1 — пароль)
+      security: []
+      parameters:
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [dj, club, admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: |
+            Либо пара токенов (2FA не настроена), либо требование 2FA.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/TokenPair"
+                  - $ref: "#/components/schemas/TotpChallenge"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+
+  /v1/auth/{role}/2fa:
+    post:
+      summary: Логин (шаг 2 — TOTP-код)
+      security: []
+      parameters:
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [dj, club, admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, totp_code]
+              properties:
+                email:
+                  type: string
+                  format: email
+                totp_code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        "200":
+          description: Пара токенов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  /v1/auth/refresh:
+    post:
+      summary: Ротация refresh-токена
+      security: []
+      description: |
+        Каждый refresh аннулирует предыдущий токен (семья).
+        Reuse отозванного токена = кража → ревок всей семьи.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        "200":
+          description: Новая пара токенов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        "401":
+          $ref: "#/components/responses/Error"
+
+  # ==========================================================
+  # F2 — sessions / QR / join
+  # ==========================================================
+  /v1/sessions/join:
+    post:
+      summary: Скан QR гостем → session info + грант
+      description: |
+        Активный QR-токен → информация о сессии (клуб, DJ, статус,
+        цена!) + ГРАНТ session_guest. Грант обязателен для
+        POST /requests (F4): клиентский session_id на веру не
+        принимается. Повторный join = re-grant, не дубль.
+        QR ротируется на сессию: старый токен → 404.
+      security:
+        - deviceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qr_token]
+              properties:
+                qr_token:
+                  type: string
+                  minLength: 64
+                  description: 128 бит, hex
+      responses:
+        "200":
+          description: Session info + grant
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /v1/club/sessions:
+    post:
+      summary: Клуб открывает смену (сессию)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timezone]
+              properties:
+                dj_id:
+                  type: string
+                  format: uuid
+                pricing_policy_id:
+                  type: string
+                  format: uuid
+                timezone:
+                  type: string
+                  description: IANA-зона (DST-безопасное авто-закрытие)
+                  examples: [Europe/Madrid]
+      responses:
+        "201":
+          description: Сессия создана (status=created)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /v1/club/sessions/{id}/qr/generate:
+    post:
+      summary: QR-ротация сессии
+      description: |
+        Старый токен деактивируется, новый (128 бит) выдаётся
+        ОДИН раз в ответе. expires_at = плановое авто-закрытие
+        (следующий 07:00 в IANA-зоне клуба).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Новый QR-токен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, qr_token, expires_at]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  qr_token:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /v1/club/sessions/{id}/close:
+    patch:
+      summary: Закрыть смену
+      description: pending-запросы гаснут в expired (F4-воркер).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Сессия закрыта
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /v1/dj/sessions/{id}/open:
+    post:
+      summary: DJ открывает приём запросов
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Сессия active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: access-JWT (15 мин), role в клеймах
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: device-token гостя (UUIDv7, не JWT)
   schemas:
     Health:
       type: object
@@ -46,12 +365,75 @@ components:
       properties:
         code:
           type: string
-          examples: [session_closed, rate_limited]
+          examples: [session_closed, rate_limited, forbidden]
         message:
           type: string
         details:
           description: Опциональные детали
       required: [code, message]
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_in:
+          type: integer
+          description: TTL access-токена, сек
+      required: [access_token, refresh_token, token_type, expires_in]
+    TotpChallenge:
+      type: object
+      properties:
+        mfa_required:
+          type: boolean
+          enum: [true]
+      required: [mfa_required]
+    JoinResponse:
+      type: object
+      description: Ответ /v1/sessions/join
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        club_name:
+          type: string
+        dj_display_name:
+          type: string
+          description: null до назначения DJ
+        status:
+          type: string
+          enum: [created, active, paused_acceptance]
+        timezone:
+          type: string
+        price_minor:
+          type: integer
+          description: Цена запроса из действующей политики (минорные единицы)
+        grant_id:
+          type: string
+          format: uuid
+          description: Грант session_guest; основание для POST /requests (F4)
+      required: [session_id, club_name, status, timezone, grant_id]
+    SessionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [created, active, paused_acceptance, closed]
+        timezone:
+          type: string
+        dj_id:
+          anyOf:
+            - type: string
+              format: uuid
+            - type: "null"
+      required: [id, status, timezone]
   responses:
     Error:
       description: Ошибка с единым envelope

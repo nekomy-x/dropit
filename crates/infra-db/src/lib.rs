@@ -1,12 +1,17 @@
 //! DROP IT infra-db: доступ к PostgreSQL, репозитории, миграции.
 //!
-//! F0A: каркас + миграции. F1: репозиторий идентичности (identity).
+//! F0A: каркас + миграции. F1: идентичность (identity).
+//! F2: сессии, QR, join-гранты (sessions).
 
 pub mod identity;
 pub mod migrations;
+pub mod sessions;
 
 pub use identity::{
     connect, GuestDevice, IdentityError, IdentityRepo, PasswordSubject, RefreshTokenRow,
+};
+pub use sessions::{
+    QrTokenRow, SessionError, SessionGuestRow, SessionInfo, SessionRepo, SessionRow,
 };
 
 /// Имя миграционной директории (используется sqlx::migrate!).

@@ -4,6 +4,7 @@
 //! и чистые функции. Persistence живёт в infra-крейтах (будущие фазы).
 
 pub mod catalog;
+pub mod qr;
 pub mod request;
 pub mod session;
 

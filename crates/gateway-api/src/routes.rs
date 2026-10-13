@@ -104,6 +104,7 @@ pub fn router(env: ApiEnv) -> Router {
         .merge(club)
         .merge(admin)
         .merge(guest)
+        .merge(crate::sessions_routes::sessions_router())
         .with_state(env)
 }
 
@@ -448,9 +449,10 @@ async fn refresh(State(state): State<ApiEnv>, Json(req): Json<RefreshRequest>) -
 pub struct ApiEnv {
     pub keys: auth::JwtKeys,
     pub repo: Option<std::sync::Arc<IdentityRepo>>,
+    pub sessions: Option<std::sync::Arc<dropit_infra_db::SessionRepo>>,
 }
 
-fn api_error(err: ApiError, detail: &str) -> Response {
+pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {
     let envelope = ErrorEnvelope {
         code: err.code().to_string(),
         message: err.message().to_string(),

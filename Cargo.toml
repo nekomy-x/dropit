@@ -33,6 +33,7 @@ sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
 async-trait = "0.1"
+chrono-tz = "0.9"
 
 [profile.release]
 lto = true

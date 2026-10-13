@@ -3,9 +3,13 @@
 //! F0A: каркас + health. F1: device-token, логины, refresh, RBAC.
 
 mod auth;
+#[cfg(test)]
 mod e2e;
+#[cfg(test)]
+mod e2e_sessions;
 mod rbac;
 mod routes;
+mod sessions_routes;
 
 use std::net::SocketAddr;
 
@@ -25,7 +29,8 @@ async fn main() -> anyhow::Result<()> {
 
     let env = routes::ApiEnv {
         keys,
-        repo: None, // local: репо подключается при DROPIT_DATABASE_URL
+        repo: None, // подключается при DROPIT_DATABASE_URL (main-рантайм)
+        sessions: None,
     };
     let app = routes::router(env);
 

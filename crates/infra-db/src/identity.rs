@@ -68,6 +68,11 @@ impl IdentityRepo {
         Self { pool }
     }
 
+    /// Пул для построения других репозиториев (общее соединение).
+    pub fn pool(&self) -> PgPool {
+        self.pool.clone()
+    }
+
     // ---------------------------------------------------------
     // Парольные субъекты (таблица выбирается по роли)
     // ---------------------------------------------------------
@@ -97,6 +102,20 @@ impl IdentityRepo {
     // ---------------------------------------------------------
     // Гость: device-token
     // ---------------------------------------------------------
+
+    /// Ищет устройство по id (= device-token). Для join-гейта F2.
+    pub async fn find_guest_device(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<GuestDevice>, super::IdentityError> {
+        let row = sqlx::query_as::<_, GuestDevice>(
+            "SELECT id, account_id, platform, app_version, first_seen, last_seen              FROM guest_device WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
 
     /// Создаёт новое устройство; `id` = сам device-token (UUIDv7).
     pub async fn create_guest_device(
