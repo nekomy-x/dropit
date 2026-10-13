@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<title>DROP IT · DJ Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;400;600;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ============ DESIGN TOKENS ============ */
+:root {
+  --bg: #050505;
+  --bg-elev: #0b0b0c;
+  --bg-elev-2: #121214;
+  --bg-card: #141416;
+  --stroke: #232326;
+  --stroke-bright: #2e2e33;
+  --text: #f4f4f2;
+  --text-dim: #8a8a90;
+  --text-faint: #55555c;
+  --neon: #a6ff00;          /* неон-зелёный: primary CTA */
+  --neon-dim: rgba(166, 255, 0, 0.14);
+  --neon-glow: rgba(166, 255, 0, 0.45);
+  --red: #ff3860;           /* отклонение / ошибка */
+  --red-dim: rgba(255, 56, 96, 0.12);
+  --amber: #ffb800;         /* пауза / внимание */
+  --amber-dim: rgba(255, 184, 0, 0.12);
+  --blue: #4dd7ff;          /* инфо / время */
+  --font-display: 'Unbounded', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+  --r-lg: 20px;
+  --r-md: 14px;
+  --r-sm: 9px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-display);
+  min-height: 100vh;
+  overflow-x: hidden;
+  /* ночная атмосфера: тонкая сетка + виньетка */
+  background-image:
+    radial-gradient(ellipse 120% 60% at 50% -10%, rgba(166,255,0,0.045), transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 79px, rgba(255,255,255,0.022) 79px 80px),
+    repeating-linear-gradient(90deg, transparent 0 79px, rgba(255,255,255,0.022) 79px 80px);
+}
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+button:active { transform: scale(0.97); }
+
+/* Уменьшенные анимации */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+.phone {
+  max-width: 430px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: 0 18px 120px;
+  position: relative;
+}
+
+/* ============ ЧАСТИ ФЛЕШУ (поэтапный вход) ============ */
+.reveal { opacity: 0; transform: translateY(14px); animation: rise 0.7s var(--ease) forwards; }
+@keyframes rise { to { opacity: 1; transform: none; } }
+
+/* ============ ВЕРХНЯЯ ПАНЕЛЬ ============ */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 0 14px;
+  position: sticky; top: 0; z-index: 40;
+  background: linear-gradient(180deg, var(--bg) 62%, transparent);
+}
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 15px; letter-spacing: 0.06em; }
+.brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 12px var(--neon-glow); animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+
+.live {
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--neon);
+  background: var(--neon-dim); border: 1px solid rgba(166,255,0,0.25);
+  padding: 5px 12px; border-radius: 999px;
+}
+
+/* ============ ПЕРЕКЛЮЧАТЕЛЬ ПАУЗЫ ============ */
+.pause-wrap { padding: 4px 0 16px; }
+.pause-btn {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-radius: var(--r-md);
+  background: var(--bg-elev); border: 1px solid var(--stroke);
+  transition: border-color 0.25s, background 0.25s;
+}
+.pause-btn.open { border-color: rgba(166,255,0,0.35); }
+.pause-btn.paused { border-color: rgba(255,184,0,0.5); background: var(--amber-dim); }
+.pause-label { display: flex; flex-direction: column; gap: 3px; text-align: left; }
+.pause-title { font-size: 15px; font-weight: 600; }
+.pause-sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.pause-btn.paused .pause-title { color: var(--amber); }
+.pause-btn.paused .pause-sub { color: var(--amber); opacity: 0.75; }
+
+.switch { width: 58px; height: 32px; border-radius: 999px; background: var(--stroke); position: relative; flex-shrink: 0; transition: background 0.3s; }
+.switch::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px;
+  border-radius: 50%; background: #c9c9cf; transition: transform 0.3s var(--ease), background 0.3s;
+}
+.switch.on { background: var(--neon); box-shadow: 0 0 18px var(--neon-glow); }
+.switch.on::after { transform: translateX(26px); background: #050505; }
+
+/* ============ БАННЕР ПАУЗЫ ============ */
+.pause-banner {
+  display: none; align-items: center; gap: 12px;
+  background: var(--amber-dim); border: 1px solid rgba(255,184,0,0.45);
+  border-radius: var(--r-md); padding: 14px 18px; margin-bottom: 16px;
+  font-size: 13px; color: var(--amber); font-weight: 400;
+}
+.pause-banner.show { display: flex; animation: rise 0.4s var(--ease); }
+.pause-banner .icon { font-size: 18px; }
+
+/* ============ "СЕЙЧАС ИГРАЕТ" ============ */
+.now {
+  border-radius: var(--r-lg); overflow: hidden; margin-bottom: 20px;
+  background: linear-gradient(135deg, var(--bg-elev) 0%, var(--bg-elev-2) 100%);
+  border: 1px solid var(--stroke); position: relative;
+}
+.now::before { /* неоновая полоса-эквалайзер */
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(180deg, var(--neon), transparent 85%);
+}
+.now-head {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.25em;
+  text-transform: uppercase; color: var(--neon); padding: 16px 20px 8px;
+}
+.now-body { display: flex; align-items: center; gap: 16px; padding: 0 20px 18px; }
+.now-art {
+  width: 58px; height: 58px; border-radius: var(--r-sm); flex-shrink: 0;
+  background: linear-gradient(135deg, #1d2b10, #0a0f05);
+  display: grid; place-items: center;
+}
+.eq { display: flex; gap: 3px; align-items: flex-end; height: 22px; }
+.eq span { width: 3px; background: var(--neon); border-radius: 1px; animation: eq 0.9s ease-in-out infinite; }
+.eq span:nth-child(1) { animation-delay: 0s; } .eq span:nth-child(2) { animation-delay: 0.2s; height: 15px; }
+.eq span:nth-child(3) { animation-delay: 0.1s; } .eq span:nth-child(4) { animation-delay: 0.3s; height: 12px; }
+@keyframes eq { 0%, 100% { height: 8px; } 50% { height: 22px; } }
+.now-meta { min-width: 0; }
+.now-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-artist { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+.now-progress { height: 3px; background: var(--stroke); position: relative; }
+.now-progress span { position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: var(--neon); box-shadow: 0 0 8px var(--neon-glow); animation: grow 130s linear infinite; }
+@keyframes grow { from { width: 8%; } to { width: 100%; } }
+.now-time { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); padding: 8px 20px 14px; }
+
+/* ============ ОЧЕРЕДЬ ============ */
+.queue-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 14px; }
+.queue-title { font-size: 20px; font-weight: 800; letter-spacing: 0.02em; }
+.queue-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+
+.sort-switch { display: inline-flex; background: var(--bg-elev); border: 1px solid var(--stroke); border-radius: 999px; padding: 3px; margin: 0 2px 16px; }
+.sort-switch button {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 7px 14px; border-radius: 999px; color: var(--text-dim); transition: 0.25s;
+}
+.sort-switch button.active { background: var(--neon); color: #050505; font-weight: 700; }
+
+/* --- Карточка запроса --- */
+.req {
+  background: var(--bg-card); border: 1px solid var(--stroke); border-radius: var(--r-lg);
+  padding: 16px; margin-bottom: 12px; position: relative; overflow: hidden;
+  transition: transform 0.35s var(--ease), opacity 0.5s, border-color 0.3s;
+}
+.req.new { animation: cardIn 0.6s var(--ease); }
+@keyframes cardIn { from { opacity: 0; transform: translateY(-22px) scale(0.97); } }
+.req.resolving { opacity: 0; transform: translateX(40px); }
+
+.req-top { display: flex; gap: 14px; align-items: flex-start; }
+.req-art {
+  width: 52px; height: 52px; border-radius: var(--r-sm); flex-shrink: 0;
+  display: grid; place-items: center; font-size: 22px;
+}
+.req-body { flex: 1; min-width: 0; }
+.req-title { font-size: 15px; font-weight: 600; line-height: 1.25; }
+.req-artist { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+.req-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.chip {
+  font-family: var(--font-mono); font-size: 10px; padding: 4px 9px;
+  border-radius: 6px; background: var(--bg-elev-2); border: 1px solid var(--stroke); color: var(--text-dim);
+}
+.chip.hot { color: var(--neon); border-color: rgba(166,255,0,0.4); background: var(--neon-dim); font-weight: 700; }
+.chip.time { color: var(--blue); border-color: rgba(77,215,255,0.3); }
+.chip.money { color: var(--text); }
+.chip.isrc { color: var(--text-faint); }
+
+/* --- Действия --- */
+.req-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 14px; }
+.act {
+  padding: 13px 0; border-radius: var(--r-sm); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase; transition: 0.2s;
+  border: 1px solid var(--stroke-bright); background: var(--bg-elev-2); color: var(--text);
+}
+.act.accept { color: var(--neon); border-color: rgba(166,255,0,0.4); background: var(--neon-dim); }
+.act.accept:hover { background: var(--neon); color: #050505; box-shadow: 0 0 24px var(--neon-glow); }
+.act.reject { color: var(--red); border-color: rgba(255,56,96,0.35); background: var(--red-dim); }
+.act.reject:hover { background: var(--red); color: #fff; }
+.act.played:hover { background: var(--text); color: #050505; }
+
+/* --- Причины отклонения (раскрытие) --- */
+.reasons { display: none; margin-top: 12px; }
+.reasons.show { display: flex; flex-wrap: wrap; gap: 7px; animation: rise 0.3s var(--ease); }
+.reason {
+  font-family: var(--font-mono); font-size: 10px; padding: 8px 12px; border-radius: 999px;
+  border: 1px dashed var(--stroke-bright); color: var(--text-dim); transition: 0.2s;
+}
+.reason:hover { border-color: var(--red); color: var(--red); border-style: solid; }
+
+/* ============ ПУСТАЯ ОЧЕРЕДЬ ============ */
+.empty {
+  display: none; text-align: center; padding: 64px 24px; border: 1px dashed var(--stroke);
+  border-radius: var(--r-lg); color: var(--text-faint);
+}
+.empty.show { display: block; animation: rise 0.5s var(--ease); }
+.empty .icon { font-size: 40px; margin-bottom: 14px; opacity: 0.5; }
+.empty .t { font-size: 15px; color: var(--text-dim); font-weight: 600; }
+.empty .s { font-family: var(--font-mono); font-size: 11px; margin-top: 6px; }
+
+/* ============ НИЖНЯЯ ПАНЕЛЬ (статистика вечера) ============ */
+.dock {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: min(430px, 100vw); z-index: 50;
+  background: rgba(5, 5, 5, 0.82); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--stroke); padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+}
+.dock-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; }
+.dock-cell .v { font-size: 17px; font-weight: 800; }
+.dock-cell .v.money { color: var(--neon); }
+.dock-cell .k { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); margin-top: 3px; }
+
+/* ============ ТРЕВОЖНЫЙ ПАКЕТ (состояние офлайн) ============ */
+.offline {
+  position: fixed; inset: 0; z-index: 100; display: none;
+  background: rgba(5, 5, 5, 0.94); backdrop-filter: blur(6px);
+  place-items: center; text-align: center; padding: 32px;
+}
+.offline.show { display: grid; animation: rise 0.4s var(--ease); }
+.offline .t { font-size: 20px; font-weight: 800; margin-top: 18px; }
+.offline .s { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+.offline .ring {
+  width: 54px; height: 54px; margin: 0 auto; border-radius: 50%;
+  border: 3px solid var(--stroke); border-top-color: var(--amber);
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Обложки-заглушки по стилям (CSS-арт вместо base64) */
+.art-salsa { background: linear-gradient(135deg, #2b0a12, #12050a); }
+.art-bachata { background: linear-gradient(135deg, #0a2318, #041008); }
+.art-merengue { background: linear-gradient(135deg, #231a05, #100b02); }
+.art-kizomba { background: linear-gradient(135deg, #1a0526, #0b0212); }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ -->
+  <header class="topbar reveal" style="animation-delay: 0.05s">
+    <div class="brand"><span class="dot" aria-hidden="true"></span>DROP&nbsp;IT</div>
+    <div class="live"><span aria-hidden="true">◉</span>&nbsp;LIVE · BARRIO LATINO</div>
+  </header>
+
+  <!-- ПАУЗА ПРИЁМА -->
+  <section class="pause-wrap reveal" style="animation-delay: 0.15s">
+    <button class="pause-btn open" id="pauseBtn" aria-pressed="false" aria-label="Переключить приём запросов">
+      <span class="pause-label">
+        <span class="pause-title" id="pauseTitle">Приём запросов: открыт</span>
+        <span class="pause-sub" id="pauseSub">входящие запросы · авто-истечение 20 мин</span>
+      </span>
+      <span class="switch on" id="pauseSwitch" aria-hidden="true"></span>
+    </button>
+  </section>
+
+  <!-- БАННЕР ПАУЗЫ -->
+  <div class="pause-banner" id="pauseBanner" role="status">
+    <span class="icon" aria-hidden="true">⏸</span>
+    Приём на паузе — новые запросы отклоняются автоматически
+  </div>
+
+  <!-- СЕЙЧАС ИГРАЕТ -->
+  <section class="now reveal" style="animation-delay: 0.25s" aria-label="Сейчас играет">
+    <div class="now-head">● Сейчас играет</div>
+    <div class="now-body">
+      <div class="now-art" aria-hidden="true">
+        <div class="eq"><span></span><span></span><span></span><span></span></div>
+      </div>
+      <div class="now-meta">
+        <div class="now-title">Obsesión</div>
+        <div class="now-artist">Aventura · Bachata · 04:14</div>
+      </div>
+    </div>
+    <div class="now-progress" aria-hidden="true"><span></span></div>
+    <div class="now-time"><span>01:47</span><span>02:27</span></div>
+  </section>
+
+  <!-- ОЧЕРЕДЬ -->
+  <section class="reveal" style="animation-delay: 0.35s" aria-label="Очередь запросов">
+    <div class="queue-head">
+      <h1 class="queue-title">Очередь</h1>
+      <span class="queue-count" id="queueCount">6 живых запросов</span>
+    </div>
+    <div class="sort-switch" role="tablist" aria-label="Сортировка очереди">
+      <button class="active" id="sortNew" role="tab" aria-selected="true">Новые</button>
+      <button id="sortHot" role="tab" aria-selected="false">По запросам</button>
+    </div>
+    <div id="queue"></div>
+    <div class="empty" id="empty">
+      <div class="icon" aria-hidden="true">♪</div>
+      <div class="t">Запросов пока нет</div>
+      <div class="s">гости сканируют QR — первый придёт сюда</div>
+    </div>
+  </section>
+
+</div>
+
+<!-- НИЖНЯЯ ПАНЕЛЬ: СТАТИСТИКА ВЕЧЕРА -->
+<nav class="dock reveal" style="animation-delay: 0.45s" aria-label="Статистика вечера">
+  <div class="dock-grid">
+    <div class="dock-cell"><div class="v" id="stAccepted">2</div><div class="k">принято</div></div>
+    <div class="dock-cell"><div class="v" id="stRejected">1</div><div class="k">откл.</div></div>
+    <div class="dock-cell"><div class="v" id="stPlayed">1</div><div class="k">сыграно</div></div>
+    <div class="dock-cell"><div class="v money" id="stEarned">9,00 €</div><div class="k">доля DJ</div></div>
+  </div>
+</nav>
+
+<!-- ОФЛАЙН -->
+<div class="offline" id="offline" role="alert">
+  <div>
+    <div class="ring" aria-hidden="true"></div>
+    <div class="t">Переподключение…</div>
+    <div class="s">действия сохранены локально и синхронизируются</div>
+  </div>
+</div>
+
+<script>
+/* ============ ДАННЫЕ-ДЕМО (мок поверх REST-контракта gateway-api) ============
+   Контракт DJ-очереди (план F4, docs/openapi.yaml):
+   GET  /sessions/{id}/requests        → [{id, track, style, requests_count, amount_minor, created_at, status}]
+   POST /requests/{id}/accept|reject|played   (идемпотентно: no-op при повторе)
+   Сортировка/пауза — состояние UI + PATCH /sessions/{id}/pause.
+   ============================================================================ */
+const fmtEUR = (minor) => (minor / 100).toLocaleString('ru-RU', { minimumFractionDigits: 2 }) + ' €';
+
+const state = {
+  paused: false,
+  sort: 'new',
+  stats: { accepted: 2, rejected: 1, played: 1, earned: 900 },
+  requests: [
+    { id: 1, title: 'Juana la Cubana', artist: 'Fito Olivares', style: 'Cumbia', count: 7, amount: 2100, ago: 2,  isrc: 'USUM79900345' },
+    { id: 2, title: 'Bailando',        artist: 'Enrique Iglesias', style: 'Bachata', count: 3, amount: 900, ago: 4,  isrc: 'GBAHT0500123' },
+    { id: 3, title: 'Suavemente',      artist: 'Elvis Crespo',    style: 'Merengue', count: 2, amount: 600, ago: 7,  isrc: 'USUM79800244' },
+    { id: 4, title: 'Seduceme',        artist: 'Monchy y Alexandra', style: 'Bachata', count: 1, amount: 300, ago: 11, isrc: 'USRC10000812' },
+    { id: 5, title: 'La Bilirrubina',  artist: 'Juan Luis Guerra', style: 'Merengue', count: 2, amount: 600, ago: 14, isrc: 'USCA29600015' },
+    { id: 6, title: 'Tú y Yo',         artist: 'Monchy y Alexandra', style: 'Bachata', count: 1, amount: 300, ago: 18, isrc: 'USRC10000902' },
+  ],
+};
+
+const styleArt = { Cumbia: 'art-salsa', Bachata: 'art-bachata', Merengue: 'art-merengue', Kizomba: 'art-kizomba' };
+const styleGlyph = { Cumbia: '♪', Bachata: '♫', Merengue: '♩', Kizomba: '★' };
+const REJECT_REASONS = ['не тот стиль', 'уже играл', 'не в настроении вечера', 'позже'];
+
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Рендер очереди ---------- */
+function renderQueue() {
+  const q = $('queue');
+  const list = [...state.requests];
+  if (state.sort === 'hot') list.sort((a, b) => b.count - a.count || a.ago - b.ago);
+  else list.sort((a, b) => a.ago - b.ago);
+
+  q.innerHTML = '';
+  list.forEach((r) => q.appendChild(cardEl(r)));
+  $('queueCount').textContent = state.requests.length
+    ? `${state.requests.length} живых запросов` : 'пусто';
+  $('empty').classList.toggle('show', state.requests.length === 0);
+}
+
+function cardEl(r) {
+  const el = document.createElement('article');
+  el.className = 'req';
+  el.dataset.id = r.id;
+  el.innerHTML = `
+    <div class="req-top">
+      <div class="req-art ${styleArt[r.style] || 'art-salsa'}" aria-hidden="true">${styleGlyph[r.style] || '♪'}</div>
+      <div class="req-body">
+        <div class="req-title">${r.title}</div>
+        <div class="req-artist">${r.artist}</div>
+        <div class="req-meta">
+          <span class="chip hot">×${r.count}</span>
+          <span class="chip time">${r.ago} мин назад</span>
+          <span class="chip money">${fmtEUR(r.amount)}</span>
+          <span class="chip">${r.style}</span>
+          <span class="chip isrc" title="Копировать ISRC">${r.isrc}</span>
+        </div>
+      </div>
+    </div>
+    <div class="req-actions">
+      <button class="act accept" data-act="accept">Принять</button>
+      <button class="act reject" data-act="reject">Отклонить</button>
+      <button class="act played" data-act="played">Сыграна</button>
+    </div>
+    <div class="reasons"></div>`;
+  bindCard(el, r);
+  return el;
+}
+
+/* ---------- Действия DJ (идемпотентная семантика state-machine) ---------- */
+function bindCard(el, r) {
+  el.querySelectorAll('.act').forEach((btn) =>
+    btn.addEventListener('click', () => act(el, r, btn.dataset.act))
+  );
+  const isrcChip = el.querySelector('.chip.isrc');
+  isrcChip.addEventListener('click', () => {
+    navigator.clipboard?.writeText(r.isrc);
+    isrcChip.textContent = 'скопировано';
+    setTimeout(() => (isrcChip.textContent = r.isrc), 1200);
+  });
+}
+
+function act(el, r, a) {
+  if (a === 'reject' && !el.dataset.confirming) {
+    // первый клик — показать шаблоны причин (по заданию дизайнеру 1.5)
+    el.dataset.confirming = '1';
+    const reasons = el.querySelector('.reasons');
+    reasons.classList.add('show');
+    reasons.innerHTML = REJECT_REASONS.map((t, i) =>
+      `<button class="reason" data-i="${i}">${t}</button>`
+    ).join('');
+    reasons.querySelectorAll('.reason').forEach((b) =>
+      b.addEventListener('click', () => resolve(el, r, 'rejected', b.textContent))
+    );
+    return;
+  }
+  const map = { accept: 'accepted', played: 'played' };
+  resolve(el, r, map[a], null);
+}
+
+function resolve(el, r, status, reason) {
+  el.classList.add('resolving');
+  setTimeout(() => {
+    state.requests = state.requests.filter((x) => x.id !== r.id);
+    if (status === 'accepted') { state.stats.accepted++; state.stats.earned += r.amount; }
+    if (status === 'rejected') { state.stats.rejected++; }
+    if (status === 'played')   { state.stats.played++;   state.stats.earned += r.amount; }
+    renderStats();
+    renderQueue();
+  }, 320);
+}
+
+function renderStats() {
+  $('stAccepted').textContent = state.stats.accepted;
+  $('stRejected').textContent = state.stats.rejected;
+  $('stPlayed').textContent = state.stats.played;
+  $('stEarned').textContent = fmtEUR(state.stats.earned);
+}
+
+/* ---------- Сортировка ---------- */
+$('sortNew').addEventListener('click', () => setSort('new'));
+$('sortHot').addEventListener('click', () => setSort('hot'));
+function setSort(s) {
+  state.sort = s;
+  $('sortNew').classList.toggle('active', s === 'new');
+  $('sortHot').classList.toggle('active', s === 'hot');
+  $('sortNew').setAttribute('aria-selected', s === 'new');
+  $('sortHot').setAttribute('aria-selected', s === 'hot');
+  renderQueue();
+}
+
+/* ---------- Пауза приёма ---------- */
+$('pauseBtn').addEventListener('click', () => {
+  state.paused = !state.paused;
+  $('pauseBtn').classList.toggle('open', !state.paused);
+  $('pauseBtn').classList.toggle('paused', state.paused);
+  $('pauseSwitch').classList.toggle('on', !state.paused);
+  $('pauseBtn').setAttribute('aria-pressed', String(state.paused));
+  $('pauseTitle').textContent = state.paused ? 'Приём запросов: пауза' : 'Приём запросов: открыт';
+  $('pauseSub').textContent = state.paused
+    ? 'нажмите, чтобы возобновить приём'
+    : 'входящие запросы · авто-истечение 20 мин';
+  $('pauseBanner').classList.toggle('show', state.paused);
+});
+
+/* ---------- Демо: живые события очереди (эмуляция WS-канала F4) ---------- */
+const DEMO_NEW = [
+  { title: 'Vivir Mi Vida', artist: 'Marc Anthony', style: 'Salsa', count: 1, amount: 300, isrc: 'USUM71301229' },
+  { title: 'Propuesta Indecente', artist: 'Romeo Santos', style: 'Bachata', count: 4, amount: 1200, isrc: 'USUM71301102' },
+];
+let demoIdx = 0;
+function simulateIncoming() {
+  if (state.paused || demoIdx >= DEMO_NEW.length) return;
+  const n = { id: Date.now(), ago: 0, ...DEMO_NEW[demoIdx++] };
+  state.requests.unshift(n);
+  renderQueue();
+  const el = document.querySelector(`.req[data-id="${n.id}"]`);
+  if (el) el.classList.add('new');
+}
+setTimeout(simulateIncoming, 9000);
+setTimeout(simulateIncoming, 21000);
+
+/* ---------- Демо: офлайн/переподключение ---------- */
+setTimeout(() => {
+  $('offline').classList.add('show');
+  setTimeout(() => $('offline').classList.remove('show'), 2600);
+}, 34000);
+
+/* ---------- Тик минут "…мин назад" ---------- */
+setInterval(() => {
+  state.requests.forEach((r) => r.ago++);
+  renderQueue();
+}, 60000);
+
+/* ---------- Init ---------- */
+renderQueue();
+renderStats();
+</script>
+</body>
+</html>

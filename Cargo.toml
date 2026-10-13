@@ -21,11 +21,18 @@ thiserror = "1"
 anyhow = "1"
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate"] }
+sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tower = "0.4"
+tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["trace"] }
+argon2 = "0.5"
+jsonwebtoken = "9"
+totp-rs = { version = "5", features = ["gen_secret"] }
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.8"
+async-trait = "0.1"
 
 [profile.release]
 lto = true

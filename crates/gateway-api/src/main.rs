@@ -1,10 +1,12 @@
-//! DROP IT API Gateway (F0A: health + формат ошибок).
+//! DROP IT API Gateway (F1: identity + RBAC + health).
 //!
-//! Реальные роуты появляются в F1+ (identity) — здесь только каркас,
-//! health-check для Compose/CI и единый envelope ошибок.
+//! F0A: каркас + health. F1: device-token, логины, refresh, RBAC.
 
-use axum::{http::StatusCode, response::IntoResponse, Json, Router};
-use serde_json::json;
+mod auth;
+mod e2e;
+mod rbac;
+mod routes;
+
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -15,9 +17,17 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let app = Router::new()
-        .route("/healthz", axum::routing::get(healthz))
-        .route("/readyz", axum::routing::get(readyz));
+    let keys = auth::JwtKeys::from_secret(
+        std::env::var("DROPIT_JWT_SECRET")
+            .unwrap_or_else(|_| "dev-only-secret-change-me-32-bytes!!".into())
+            .as_bytes(),
+    );
+
+    let env = routes::ApiEnv {
+        keys,
+        repo: None, // local: репо подключается при DROPIT_DATABASE_URL
+    };
+    let app = routes::router(env);
 
     let addr: SocketAddr = std::env::var("DROPIT_BIND")
         .unwrap_or_else(|_| "0.0.0.0:8080".into())
@@ -29,19 +39,6 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     Ok(())
-}
-
-/// Liveness: процесс жив. Никаких проверок зависимостей.
-async fn healthz() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({ "status": "ok" })))
-}
-
-/// Readiness: сейчас version-only; в F0B добавит ping Postgres/Redis.
-async fn readyz() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        Json(json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") })),
-    )
 }
 
 async fn shutdown_signal() {

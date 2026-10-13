@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Admin panel (C4) base styles: neutral operations surface, amber accent. */
+
+@layer base {
+  html {
+    @apply bg-neutral-950;
+  }
+
+  body {
+    @apply min-h-screen bg-neutral-950 text-neutral-100;
+  }
+
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-neutral-950 transition-colors hover:bg-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-md border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-100 transition-colors hover:border-neutral-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .field-label {
+    @apply mb-1 block text-sm font-medium text-neutral-300;
+  }
+
+  .field-input {
+    @apply w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  }
+
+  .card {
+    @apply rounded-xl border border-neutral-800 bg-neutral-900 p-6;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold tracking-tight text-white;
+  }
+
+  .page-subtitle {
+    @apply mt-1 text-sm text-neutral-400;
+  }
+}

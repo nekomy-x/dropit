@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- CSRF token for the httpOnly-cookie session (Part I §3 of the tech map).
+         The backend renders this tag on the served HTML; a fallback constant
+         is used only for local development before F2 lands. -->
+    <meta name="csrf-token" content="dev-csrf-placeholder" />
+    <title>DROP IT — Club Panel</title>
+  </head>
+  <body class="bg-neutral-950 text-neutral-100 antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

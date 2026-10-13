@@ -21,3 +21,12 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+dropit-infra-db = { path = "../infra-db" }
+argon2.workspace = true
+jsonwebtoken.workspace = true
+totp-rs.workspace = true
+sha2.workspace = true
+hex.workspace = true
+rand.workspace = true
