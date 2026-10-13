@@ -56,6 +56,12 @@ jobs:
       - name: sqlx migrate run (idempotency)
         run: sqlx migrate run --source crates/infra-db/migrations
 
+      # cargo-deny: advisories (уязвимости) + licenses (F8)
+      - name: cargo-deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          arguments: --workspace --all-features
+
   openapi:
     name: openapi lint
     runs-on: ubuntu-latest

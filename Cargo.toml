@@ -34,6 +34,7 @@ hex = "0.4"
 rand = "0.8"
 async-trait = "0.1"
 chrono-tz = "0.9"
+aes-gcm = "0.10"
 
 [profile.release]
 lto = true

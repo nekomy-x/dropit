@@ -4,9 +4,11 @@
 //! Никогда float.
 
 pub mod auth;
+pub mod crypto;
 pub mod error;
 pub mod money;
 
 pub use auth::{AccessClaims, Role};
+pub use crypto::{decrypt_totp_secret, encrypt_totp_secret, SecretCryptoError};
 pub use error::{ApiError, ErrorEnvelope};
 pub use money::{MinorUnits, Money};

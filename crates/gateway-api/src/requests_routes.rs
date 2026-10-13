@@ -185,6 +185,28 @@ async fn create_request(
         return api_error(ApiError::SessionClosed, "no active session for guest");
     };
 
+    // Антифрод-грань (F8): лимит запросов/устройство/сессию.
+    if let Some(jobs) = state.jobs.clone() {
+        if let Some(verdict) = jobs
+            .fraud_check_request(session.id, guest_device_id)
+            .await
+            .unwrap_or(None)
+        {
+            use dropit_domain::FraudVerdict::*;
+            if let DenyDeviceRequestLimit { count, limit } = verdict {
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    Json(dropit_common::ErrorEnvelope {
+                        code: "rate_limited".into(),
+                        message: "Request limit for this session reached.".into(),
+                        details: Some(serde_json::json!({ "count": count, "limit": limit })),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
+
     // Создание с гейтами (пауза/закрытие/грант — внутри repo).
     match requests
         .create_request(

@@ -456,6 +456,7 @@ pub struct ApiEnv {
     pub requests: Option<std::sync::Arc<dropit_infra_db::RequestRepo>>,
     pub billing: Option<std::sync::Arc<dropit_infra_db::BillingRepo>>,
     pub payouts: Option<std::sync::Arc<dropit_infra_db::PayoutRepo>>,
+    pub jobs: Option<std::sync::Arc<dropit_infra_db::JobsRepo>>,
 }
 
 pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {
@@ -471,11 +472,11 @@ pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {
         .into_response()
 }
 
-/// Декодирует TOTP-секрет. F1: секреты в тестах хранятся как
-/// base32-строка в байтах (plain); прод-шифрование (AES-GCM, ключ из
-/// Vault) — F8. Формат: ascii base32.
+/// Декодирует TOTP-секрет. F8: формат v2 (AES-256-GCM, ключ из
+/// DROPIT_TOTP_KEY); легаси-plain base32 читается для совместимости
+/// (запись новых — только шифрованная).
 fn decode_totp_secret(enc: &[u8]) -> totp_rs::TOTP {
-    let base32 = String::from_utf8_lossy(enc).to_string();
+    let base32 = dropit_common::decrypt_totp_secret(enc).unwrap_or_default();
     use totp_rs::{Algorithm, Secret, TOTP};
     let bytes = Secret::Encoded(base32).to_bytes().unwrap_or_default();
     TOTP::new_unchecked(Algorithm::SHA1, 6, 1, 30, bytes)

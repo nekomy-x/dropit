@@ -6,6 +6,8 @@ mod auth;
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
+mod e2e_f8;
+#[cfg(test)]
 mod e2e_payments;
 #[cfg(test)]
 mod e2e_payouts;
@@ -44,6 +46,7 @@ async fn main() -> anyhow::Result<()> {
         requests: None,
         billing: None,
         payouts: None,
+        jobs: None,
     };
     let app = routes::router(env);
 

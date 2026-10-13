@@ -4,6 +4,7 @@
 //! и чистые функции. Persistence живёт в infra-крейтах (будущие фазы).
 
 pub mod catalog;
+pub mod fraud;
 pub mod payment;
 pub mod payout;
 pub mod qr;
@@ -13,6 +14,7 @@ pub mod session;
 pub use catalog::{
     canonical_key, validate_track, CatalogError, CatalogTrack, Source, TrackCounter, ValidatedTrack,
 };
+pub use fraud::{check_request_limit, check_session_devices, FraudVerdict};
 pub use payment::{compute_split, PaymentAction, PaymentStatus, Split, SplitError};
 pub use payout::{
     decide_payout, retry_backoff_secs, PayoutAction, PayoutDecision, PayoutStatus,
