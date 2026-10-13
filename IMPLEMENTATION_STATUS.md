@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** F0A + F0B + F1 + F2 + F4 завершены (код+тесты); F3-домен и F7-каркасы созданы параллельно
+**Этап:** F0A + F0B + F1 + F2 + F4 + F5 (Test Mode, мок-провайдер) завершены; F3-домен и F7-каркасы параллельно
 
 ---
 
@@ -67,6 +67,20 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | `crates/gateway-api/src/e2e_requests.rs` | **e2e-критерии F4**: запрос в очереди DJ ✅; пауза блокирует POST (409 session_paused), resume разблокирует ✅; чужой гость без гранта отклонён ✅; дубль Idempotency-Key = replay, в БД один запрос ✅; no-op на дублях accept/played, played из pending, accept после played → 409 ✅; hot-сортировка по счётчику той же песни ✅; ws-ticket одноразовый ✅; outbox-события записаны ✅ |
 | `docs/openapi.yaml` (0.3.0) | Контракты F4: requests, queue, DJ-действия, pause/resume, ws-ticket; Redocly ✅ |
 
+### F5 — платежи, Test Mode с МОК-провайдером (завершена)
+
+| Артефакт | Что внутри |
+|---|---|
+| `migrations/0005_payments.sql` | `payment` (стейт-машина Часть III, split_snapshot неизменяем после captured), `split` (материализация для выплат F6, инвариант Σ == amount), `ledger_entry` (двойная запись, append-only, счёт (account, currency)), `webhook_event` (event_id UNIQUE — delivery-дедуп; UNIQUE (aggregate_id, event_type) WHERE processed — semantic-дедуп) |
+| `crates/domain/src/payment.rs` | Стейт-машина Payment: все переходы техкарты, включая **cancelling→captured** (гонка) и **captured+Capture = NO-OP** (дубль вебхука); `compute_split` (округление вниз, остаток цента не теряется) — 8 тестов |
+| `crates/infra-db/src/billing.rs` | `BillingRepo`: `create_payment` (снимок SplitSnapshot), `confirm_payment` (GUARD: request pending + session active FOR UPDATE/SHARE), `handle_capture_webhook` (ОДНА TX: payment→captured + split-строки + ledger двойная проводка + outbox + processed-метка; delivery- и semantic-дедуп), `begin_cancel`, инвариант-чекеры `ledger_txn_invariant` / `split_invariant` |
+| `crates/gateway-api/src/payments.rs` | `PaymentProvider` trait + **MockStripe (МОК, помечен явно — правило 5)**: прод-Stripe после ADR-004/Q15; `verify_webhook_signature` (tolerance 5 мин, clock-drift — отдельная ошибка/лог) — 4 теста |
+| `crates/gateway-api/src/payments_routes.rs` | `POST /v1/payments/:id/confirm` (GUARD → 409 session_paused + АВТО-CANCEL интента), `POST /v1/stripe/webhook` (подпись → дедуп → capture TX) |
+| `crates/gateway-api/src/e2e_payments.rs` | **e2e chaos-минимум (Часть V)**: двойной вебхук с РАЗНЫМИ event_id → ОДНА проводка ledger ✅; delivery-дубль → no-op ✅; cancel-гонка cancelling→captured — деньги закрыты в ledger ✅; Σ ledger(txn) == 0 ✅; Σ split == amount (300/350/350 по Q1-дефолту) ✅; GUARD: пауза → 409 + интет cancelling ✅; мусорная подпись → 400 ✅ |
+| `docs/openapi.yaml` (0.4.0) | Контракты F5: confirm, webhook-intake; Redocly ✅ |
+
+**Важно:** провайдер — МОК (не Stripe): внешних вызовов нет, захват имитируется вебхуком с мок-подписью. Прод-подключение — после закрытия ADR-004 (Q15, схема сплитов) и Q11–Q13. Интерфейс `PaymentProvider` стабилен — замена мока на Stripe-клиент не меняет репо/роуты.
+
 ### F7 — каркасы панелей (параллельный трек, субагент)
 
 `apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind, 45 файлов): типизированные API-клиенты контракта Части IV (CSRF, httpOnly-cookie, Idempotency-Key), страницы панелей, валидация PlatformSettings (бипсисы 0–10000, мин<макс). npm не запускался (нет сети), сборка — при первом запуске разработчиком.
@@ -77,9 +91,9 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **48 passed / 0 failed** (8 common + 27 domain + 11 gateway + 2 infra, включая e2e F1/F2/F4) |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **61 passed / 0 failed** (8 common + 35 domain + 16 gateway + 2 infra, включая e2e F1/F2/F4/F5-chaos) |
 | OpenAPI 3.1 (Redocly lint) | ✅ valid (0 errors) |
-| Git-история | ✅ 6 коммитов: F0A → F0B+F1+F3+F7 → docs → F2 → docs → F4 |
+| Git-история | ✅ 8 коммитов: F0A → … → F4 → docs → F5 |
 
 ## 4. Что является mock/stub или отсутствует
 
@@ -101,13 +115,14 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | F0A/F0B | ✅ завершены |
 | **F1 Идентичность** | ✅ код + тесты; e2e-критерий (4 роли, wrong-role → 403) выполнен |
 | **F2 Сессии+QR** | ✅ код + тесты; e2e-критерий (скан QR → session info, чужой QR отклонён) выполнен |
-| **F4 Запросы+очередь** | ✅ код + тесты (без денег); e2e-критерий (запрос у DJ, пауза блокирует POST) выполнен; WS — только ticket-выдача, соединения gateway-ws — F5 |
+| **F4 Запросы+очередь** | ✅ код + тесты (без денег); WS — ticket-выдача, соединения gateway-ws — F6 |
+| **F5 Платежи Test Mode** | ✅ код + тесты, МОК-провайдер; chaos-минимум (двойной вебхук, cancel-гонка, инварианты) зелёный; прод-Stripe ждёт ADR-004/Q11–Q15 |
 | F3 Каталог | 🟡 домен-валидация готова; внешние интеграции — блок B5 |
-| F5/F6 Деньги | не начаты (ждут Q11–Q15; Stripe Test можно начинать по дефолтам) |
+| F6 Выплаты/сверка | не начата (payout-воркер, reconciliation, инвариант по payee) |
 | F7 Панели | 🟡 каркасы готовы; контракты F1/F2 в openapi.yaml |
 | F8/F9 | не начаты |
 
-**Критический путь: F5.** Фазы F1–F4 закрыты.
+**Критический путь пройден: F0→F1→F2→F4→F5 (Test Mode).** Осталось: F6 (выплаты/сверка), F3-интеграции (B5), UI, F8/F9.
 
 ## 7. Текущие блокеры
 
@@ -132,7 +147,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 
 ## 9. Следующий маленький этап
 
-**F5 (Stripe Test Mode)**: миграция `0005_payments.sql` (payment, split, ledger_entry), PaymentIntent через stripe-rust (test keys), webhook-intake с верификацией подписи, идемпотентность по (aggregate_id, event_type), outbox-relay → WS-уведомления, ledger двойная проводка, chaos-сценарии из техкарты Часть V. Прод-включение платежей — только после Q11–Q15. Параллельно можно: Flutter-заглушка гостя (скан QR из F2), React-панели подключить к живым контрактам F1–F4.
+**F6**: payout-воркер (порог 10 €, еженедельно), transfer-вебхуки, reconciliation-воркер (ежедневная сверка), инвариант-чекер ПО КАЖДОМУ payee (не глобально) + часовой poller in_flight, partition-manager, авто-закрытие сессий джобой. Требует решения Q16 (невостребованные) и финализации ADR-004. Параллельно: Flutter-заглушка гостя, подключение React-панелей к живым контрактам F1–F5.
 
 ---
 
@@ -155,3 +170,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 | 2026-10-13 | F4: `cargo test --workspace` | ✅ **48 passed / 0 failed** (e2e F4: полный request-флоу) |
 | 2026-10-13 | F4: OpenAPI 0.3.0 Redocly lint | ✅ valid |
 | 2026-10-13 | F4: `git commit` | ✅ `d752a29` |
+| 2026-10-13 | F5: миграция 0005 применена | ✅ 21 таблица |
+| 2026-10-13 | F5: `cargo test --workspace` | ✅ **61 passed / 0 failed** (chaos: двойной вебхук, cancel-гонка, инварианты) |
+| 2026-10-13 | F5: OpenAPI 0.4.0 Redocly lint | ✅ valid |
+| 2026-10-13 | F5: `git commit` | ✅ `7e93aa0` |
