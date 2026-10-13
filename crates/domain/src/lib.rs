@@ -5,6 +5,7 @@
 
 pub mod catalog;
 pub mod payment;
+pub mod payout;
 pub mod qr;
 pub mod request;
 pub mod session;
@@ -13,5 +14,9 @@ pub use catalog::{
     canonical_key, validate_track, CatalogError, CatalogTrack, Source, TrackCounter, ValidatedTrack,
 };
 pub use payment::{compute_split, PaymentAction, PaymentStatus, Split, SplitError};
+pub use payout::{
+    decide_payout, retry_backoff_secs, PayoutAction, PayoutDecision, PayoutStatus,
+    DEFAULT_PAYOUT_THRESHOLD_MINOR, MAX_PAYOUT_ATTEMPTS,
+};
 pub use request::{RequestAction, RequestStatus};
 pub use session::{SessionStatus, SessionTransition};

@@ -6,6 +6,7 @@
 pub mod billing;
 pub mod identity;
 pub mod migrations;
+pub mod payouts;
 pub mod requests;
 pub mod sessions;
 
@@ -13,6 +14,7 @@ pub use billing::{BillingError, BillingRepo, CommissionParams, PaymentRow, Split
 pub use identity::{
     connect, GuestDevice, IdentityError, IdentityRepo, PasswordSubject, RefreshTokenRow,
 };
+pub use payouts::{Payee, PayoutError, PayoutRepo, PayoutRow};
 pub use requests::{QueueItem, RequestError, RequestRepo, RequestRow};
 pub use sessions::{
     QrTokenRow, SessionError, SessionGuestRow, SessionInfo, SessionRepo, SessionRow,

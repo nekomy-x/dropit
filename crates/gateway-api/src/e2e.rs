@@ -39,6 +39,10 @@ pub(crate) async fn app_env(
         .as_ref()
         .map(|p| dropit_infra_db::BillingRepo::new(p.clone()))
         .map(std::sync::Arc::new);
+    let payouts = pool
+        .as_ref()
+        .map(|p| dropit_infra_db::PayoutRepo::new(p.clone()))
+        .map(std::sync::Arc::new);
     ApiEnv {
         keys: JwtKeys::from_secret(b"e2e-test-secret-key-32-bytes-xxxxx"),
         repo: repo.map(std::sync::Arc::new),
@@ -47,6 +51,7 @@ pub(crate) async fn app_env(
             .or_else(|| pool.clone().map(dropit_infra_db::RequestRepo::new))
             .map(std::sync::Arc::new),
         billing,
+        payouts,
     }
 }
 

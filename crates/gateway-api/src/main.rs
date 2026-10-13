@@ -8,11 +8,14 @@ mod e2e;
 #[cfg(test)]
 mod e2e_payments;
 #[cfg(test)]
+mod e2e_payouts;
+#[cfg(test)]
 mod e2e_requests;
 #[cfg(test)]
 mod e2e_sessions;
 mod payments;
 mod payments_routes;
+mod payouts_routes;
 mod rbac;
 mod requests_routes;
 mod routes;
@@ -40,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
         sessions: None,
         requests: None,
         billing: None,
+        payouts: None,
     };
     let app = routes::router(env);
 

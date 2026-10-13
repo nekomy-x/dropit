@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.4.0
+  version: 0.5.0
   description: |
     Контракт (F0A → F2). Реальные пути добавляются по фазам:
-    F1 ✅, F2 ✅, F4 ✅, F5 payments (Test Mode, мок-провайдер) ✅, F3 — catalog,
+    F1 ✅, F2 ✅, F4 ✅, F5 payments ✅, F6 payouts/reconciliation (Test Mode) ✅, F3 — catalog,
     F5 — payments. Breaking changes блокируются CI (oasdiff).
   contact:
     name: DROP IT
@@ -650,6 +650,124 @@ paths:
         "400":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+
+  # ==========================================================
+  # F6 — payouts / reconciliation (Test Mode)
+  # ==========================================================
+  /v1/admin/payouts/run:
+    post:
+      summary: Триггер цикла выплат
+      description: |
+        Прод: cron пн 10:00 UTC. НЕТТО по КАЖДОМУ payee
+        (pending − reversed), порог 10 € (ниже — перенос),
+        финальная выплата без порога при блокировке/уходе.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Цикл выполнен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payouts_created, total_minor]
+                properties:
+                  payouts_created:
+                    type: integer
+                  total_minor:
+                    type: integer
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /v1/admin/payouts:
+    get:
+      summary: Выплаты за неделю
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Список выплат
+        "403":
+          $ref: "#/components/responses/Error"
+
+  /v1/stripe/transfer-webhook:
+    post:
+      summary: Transfer-вебхуки (paid/failed)
+      description: |
+        Идемпотентно по stripe_transfer_id (event_id меняется между
+        доставками). transfer.failed: retry ≤5 → on_hold + инцидент,
+        сплиты возвращаются в pending.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, transfer_id]
+              properties:
+                event_id:
+                  type: string
+                type:
+                  type: string
+                  enum: [transfer.paid, transfer.failed]
+                transfer_id:
+                  type: string
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Обработано или no-op (дубль)
+        "404":
+          $ref: "#/components/responses/Error"
+
+  /v1/admin/reconciliation/run:
+    post:
+      summary: "Триггер сверки (cron 05:00 в проде)"
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Прогон создан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, status]
+                properties:
+                  run_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [ok, discrepancies, running, failed]
+
+  /v1/admin/incidents:
+    get:
+      summary: Открытые инциденты
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Список
+
+  /v1/admin/incidents/{id}/resolve:
+    post:
+      summary: Разобрать инцидент
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Закрыт
+        "404":
           $ref: "#/components/responses/Error"
 
 components:
