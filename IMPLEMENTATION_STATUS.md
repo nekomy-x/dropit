@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** F0A + F0B + F1 + F2 + F4 + F5 + F6 (Test Mode, мок-провайдер) завершены; F3-домен и F7-каркасы параллельно
+**Этап:** F0A + F0B + F1 + F2 + F4 + F5 + F6 + F8 (Test Mode) завершены; F3-домен и F7-каркасы параллельно
 
 ---
 
@@ -94,6 +94,17 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 
 **Важно:** transfer — МОК (transfer_id присваивается в репо); прод-Stripe-Transfers — после ADR-004/Q15. Q16 (невостребованные) закрыт механикой final-payout; политика-текст — владелец.
 
+### F8 — hardening, Test Mode (завершена)
+
+| Артефакт | Что внутри |
+|---|---|
+| `crates/domain/src/fraud.rs` | Антифрод-грань (VII): лимит 20 запросов/устройство/сессию → deny; 300 устройств/сессию → АЛЕРТ клубу (шаринг QR — принятая модель, не запрет) — 2 теста |
+| `crates/common/src/crypto.rs` | **AES-256-GCM для TOTP-секретов**: формат `v2:nonce:ct`, ключ из `DROPIT_TOTP_KEY` (32 байта hex), легаси-plain читается (миграция без downtime), GCM-тег ловит подмену, отсутствие ключа = ошибка (не тихий plain) — 5 тестов |
+| `crates/infra-db/src/jobs.rs` | `JobsRepo`: авто-закрытие сессий (07:00 IANA из QR-expires + неактивность 2 ч; pending-запросы → expired), TTL-интенты (15 мин → cancelling), антифрод-счётчики (гейт в POST /v1/requests → 429), GDPR: `anonymize_guest_device` (финансы НЕ удаляются, гранты ревок, platform затёрта), `retention_sweep` (180 дней), `export_guest_data` (DSR) |
+| `migrations/0007_gdpr.sql` | `gdpr_action` — трейл экспортов/анонимизаций |
+| `.github/workflows/ci.yml` + `deny.toml` | cargo-deny: advisories (vulnerability/yanked = deny), licenses (unlicensed = deny, GPL запрещён) |
+| `crates/gateway-api/src/e2e_f8.rs` | **e2e F8**: 21-й запрос → 429 ✅; стейл-интент → cancelling ✅; сессия авто-закрыта, pending погашены ✅; GDPR: анонимизация (финансы на месте, гранты ревок), retention-sweep, DSR-экспорт ✅; TOTP v2 roundtrip + легаси ✅ |
+
 ### F7 — каркасы панелей (параллельный трек, субагент)
 
 `apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind, 45 файлов): типизированные API-клиенты контракта Части IV (CSRF, httpOnly-cookie, Idempotency-Key), страницы панелей, валидация PlatformSettings (бипсисы 0–10000, мин<макс). npm не запускался (нет сети), сборка — при первом запуске разработчиком.
@@ -104,9 +115,9 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **67 passed / 0 failed** (8 common + 40 domain + 17 gateway + 2 infra, включая e2e F1/F2/F4/F5/F6) |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **75 passed / 0 failed** (13 common + 42 domain + 18 gateway + 2 infra, включая e2e F1/F2/F4/F5/F6/F8) |
 | OpenAPI 3.1 (Redocly lint) | ✅ valid (0 errors) |
-| Git-история | ✅ 10 коммитов: F0A → … → F5 → docs → F6 |
+| Git-история | ✅ 12 коммитов: F0A → … → F6 → docs → F8 |
 
 ## 4. Что является mock/stub или отсутствует
 
@@ -131,11 +142,12 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | **F4 Запросы+очередь** | ✅ код + тесты (без денег); WS — ticket-выдача, соединения gateway-ws — F6 |
 | **F5 Платежи Test Mode** | ✅ код + тесты, МОК-провайдер; прод-Stripe ждёт ADR-004/Q11–Q15 |
 | **F6 Выплаты/сверка** | ✅ код + тесты (Test Mode): цикл выплат, порог, финальные, on_hold+инциденты, сверка, инвариант payee |
+| **F8 Hardening** | ✅ антифрод-лимиты, TOTP-шифрование, GDPR-джобы, авто-закрытие/TTL-воркеры, cargo-deny |
 | F3 Каталог | 🟡 домен-валидация готова; внешние интеграции — блок B5 |
 | F7 Панели | 🟡 каркасы готовы; контракты F1/F2 в openapi.yaml |
 | F8/F9 | не начаты |
 
-**Весь бэкенд-путь F0→F1→F2→F4→F5→F6 пройден в Test Mode.** Осталось: прод-интеграции (ADR-004, B5), UI (Flutter + панели), F8 hardening, F9 нагрузка/пилот.
+**Весь бэкенд F0→F1→F2→F4→F5→F6→F8 пройден в Test Mode.** Осталось: прод-интеграции (ADR-004, B5), UI (Flutter + панели), F9 (нагрузка/пилот).
 
 ## 7. Текущие блокеры
 
@@ -161,13 +173,12 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 ## 9. Следующий маленький этап
 
 **Дальше (выбор владельца):**
-1. **F8 hardening** — антифрод-лимиты, 2FA-принуждение, GDPR-джобы, шифрование TOTP-секретов, Redis для ws-ticket (multi-node), cargo-deny;
-2. **Flutter-приложение гостя** — скан QR (F2), поиск, запрос (F4), оплата (F5) — контракты готовы в openapi.yaml;
-3. **React-панели** — подключение к живым контрактам (каркасы готовы);
-4. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии);
-5. **F9** — k6-нагрузка, пилот (после UI).
+1. **Flutter-приложение гостя** — скан QR (F2), поиск, запрос (F4), оплата (F5) — контракты готовы в openapi.yaml;
+2. **React-панели** — подключение к живым контрактам (каркасы готовы);
+3. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии);
+4. **F9** — k6-нагрузка (50 RPS API / 10k WS / payment-шторм), 24 ч soak, пилот, сторы.
 
-Автозакрытие сессий (джоба 07:00 IANA) — домен готов (`qr.rs`), воркер-триггер не написан: кандидат в F8.
+Джобы (авто-закрытие, TTL-интенты, retention) — методы JobsRepo; прод-cron-триггеры — воркер-бинарник `workers` при переходе к деплою. WS-соединения (gateway-ws) и NATS-релье outbox — с инфраструктурой F9/деплоя.
 
 ---
 
@@ -198,3 +209,6 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 | 2026-10-13 | F6: `cargo test --workspace` | ✅ **67 passed / 0 failed** (e2e F6: цикл выплат+сверка) |
 | 2026-10-13 | F6: OpenAPI 0.5.0 Redocly lint | ✅ valid |
 | 2026-10-13 | F6: `git commit` | ✅ `bf1d10d` |
+| 2026-10-13 | F8: миграция 0007 применена | ✅ 25 таблиц |
+| 2026-10-13 | F8: `cargo test --workspace` | ✅ **75 passed / 0 failed** (e2e F8: антифрод+джобы+GDPR+crypto) |
+| 2026-10-13 | F8: `git commit` | ✅ `cca8357` |
