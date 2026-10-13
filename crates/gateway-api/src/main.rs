@@ -6,8 +6,11 @@ mod auth;
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
+mod e2e_requests;
+#[cfg(test)]
 mod e2e_sessions;
 mod rbac;
+mod requests_routes;
 mod routes;
 mod sessions_routes;
 
@@ -31,6 +34,7 @@ async fn main() -> anyhow::Result<()> {
         keys,
         repo: None, // подключается при DROPIT_DATABASE_URL (main-рантайм)
         sessions: None,
+        requests: None,
     };
     let app = routes::router(env);
 

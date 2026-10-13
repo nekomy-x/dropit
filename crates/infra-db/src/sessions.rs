@@ -276,6 +276,44 @@ impl SessionRepo {
         Ok(row)
     }
 
+    /// Живая (не closed) сессия гостя по его грантам — последняя.
+    /// Основание для POST /requests: сервер НЕ верит клиентскому
+    /// session_id.
+    pub async fn find_active_session_of_guest(
+        &self,
+        guest_device_id: Uuid,
+    ) -> Result<Option<SessionRow>, SessionError> {
+        let row = sqlx::query_as::<_, SessionRow>(
+            "SELECT s.id, s.club_id, s.dj_id, s.status, s.pricing_policy_id, s.opened_at, \
+             s.closed_at, s.timezone, s.created_at \
+             FROM session s \
+             JOIN session_guest g ON g.session_id = s.id \
+             WHERE g.guest_device_id = $1 AND g.revoked_at IS NULL AND s.status <> 'closed' \
+             ORDER BY g.joined_at DESC LIMIT 1",
+        )
+        .bind(guest_device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Текущая сессия DJ (последняя не closed).
+    pub async fn find_current_dj_session(
+        &self,
+        dj_id: Uuid,
+    ) -> Result<Option<SessionRow>, SessionError> {
+        let row = sqlx::query_as::<_, SessionRow>(
+            "SELECT id, club_id, dj_id, status, pricing_policy_id, opened_at, closed_at, \
+             timezone, created_at FROM session \
+             WHERE dj_id = $1 AND status <> 'closed' \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(dj_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
     /// Информация о сессии для гостя: клуб, DJ, статус, цена.
     /// Цена — из действующей tariff-политики клуба.
     pub async fn session_info_for_guest(

@@ -32,11 +32,16 @@ pub(crate) async fn test_repo() -> Option<IdentityRepo> {
 pub(crate) async fn app_env(
     repo: Option<IdentityRepo>,
     sessions: Option<dropit_infra_db::SessionRepo>,
+    requests: Option<dropit_infra_db::RequestRepo>,
 ) -> ApiEnv {
+    let pool = repo.as_ref().map(|r| r.pool());
     ApiEnv {
         keys: JwtKeys::from_secret(b"e2e-test-secret-key-32-bytes-xxxxx"),
         repo: repo.map(std::sync::Arc::new),
         sessions: sessions.map(std::sync::Arc::new),
+        requests: requests
+            .or_else(|| pool.map(dropit_infra_db::RequestRepo::new))
+            .map(std::sync::Arc::new),
     }
 }
 
@@ -78,7 +83,7 @@ async fn e2e_four_roles_rbac_matrix() {
         }
     };
     let sessions_repo = dropit_infra_db::SessionRepo::new(repo.pool());
-    let env = app_env(Some(repo.clone()), Some(sessions_repo)).await;
+    let env = app_env(Some(repo.clone()), Some(sessions_repo), None).await;
 
     // --- Гость: device-token --------------------------------------
     let (status, body) = call(
@@ -198,7 +203,7 @@ async fn e2e_four_roles_rbac_matrix() {
 #[tokio::test]
 async fn e2e_login_requires_database() {
     // Без БД (repo = None) логины отвечают 503, а не паникой.
-    let env = app_env(None, None).await;
+    let env = app_env(None, None, None).await;
     let (s, body) = call(
         &env,
         "POST",

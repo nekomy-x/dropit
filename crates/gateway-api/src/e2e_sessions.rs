@@ -20,7 +20,7 @@ async fn e2e_session_flow() {
         }
     };
     let sessions = SessionRepo::new(repo.pool());
-    let env = crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone())).await;
+    let env = crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
 
     // --- Фикстуры: клуб, DJ, сессия, QR --------------------------
     let pool = repo.pool();

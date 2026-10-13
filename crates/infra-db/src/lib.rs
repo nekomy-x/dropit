@@ -5,11 +5,13 @@
 
 pub mod identity;
 pub mod migrations;
+pub mod requests;
 pub mod sessions;
 
 pub use identity::{
     connect, GuestDevice, IdentityError, IdentityRepo, PasswordSubject, RefreshTokenRow,
 };
+pub use requests::{QueueItem, RequestError, RequestRepo, RequestRow};
 pub use sessions::{
     QrTokenRow, SessionError, SessionGuestRow, SessionInfo, SessionRepo, SessionRow,
 };

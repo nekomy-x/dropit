@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.2.0
+  version: 0.3.0
   description: |
     Контракт (F0A → F2). Реальные пути добавляются по фазам:
-    F1 — identity/auth ✅, F2 — sessions/QR ✅, F3 — catalog, F4 — requests/ws,
+    F1 — identity/auth ✅, F2 — sessions/QR ✅, F4 — requests/queue/ws-ticket ✅, F3 — catalog,
     F5 — payments. Breaking changes блокируются CI (oasdiff).
   contact:
     name: DROP IT
@@ -338,6 +338,227 @@ paths:
         "409":
           $ref: "#/components/responses/Error"
 
+  # ==========================================================
+  # F4 — requests / queue / ws-ticket
+  # ==========================================================
+  /v1/requests:
+    post:
+      summary: Запрос трека (гость)
+      description: |
+        Гейты: живой session_guest-грант + session.status == active
+        (клиентский session_id на веру НЕ принимается). Пауза → 409
+        session_paused. Idempotency-Key обязателен: дубль → replay
+        сохранённого ответа (не второй запрос). F4 — без денег
+        (price 0); F5 обернёт в payment intent.
+      security:
+        - deviceToken: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 8
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [track_id]
+              properties:
+                track_id:
+                  type: string
+                  format: uuid
+                  description: track_cache.id (серверно-валидированный, F3)
+                style:
+                  type: string
+                  maxLength: 64
+      responses:
+        "201":
+          description: Запрос создан (или replay дубля)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [request_id, status, session_id]
+                properties:
+                  request_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [pending]
+                  session_id:
+                    type: string
+                    format: uuid
+                  queue_position:
+                    anyOf:
+                      - type: integer
+                      - type: "null"
+        "403":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+
+  /v1/my/requests:
+    get:
+      summary: Запросы гостя (история + статусы)
+      security:
+        - deviceToken: []
+      responses:
+        "200":
+          description: Список запросов гостя в активной сессии
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueResponse"
+
+  /v1/dj/queue:
+    get:
+      summary: Очередь запросов DJ
+      description: |
+        sort=new — по времени; sort=hot — по счётчику той же песни
+        (canonical-ключ source:source_id), затем по времени.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [new, hot]
+            default: new
+      responses:
+        "200":
+          description: Активные запросы (pending/accepted)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueResponse"
+
+  /v1/dj/requests/{id}/accept:
+    post:
+      summary: DJ принимает запрос
+      description: Дубль accept на accepted — no-op (200, noop=true), не 500.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Запрос accepted (или no-op)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionResult"
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /v1/dj/requests/{id}/reject:
+    post:
+      summary: DJ отклоняет запрос
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 200
+      responses:
+        "200":
+          description: Запрос rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionResult"
+
+  /v1/dj/requests/{id}/played:
+    post:
+      summary: DJ отметил сыгранным
+      description: |
+        Разрешён из pending (DJ сыграл, не нажав accept) и из accepted.
+        Дубль played — no-op. accept после played → 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Запрос played
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActionResult"
+
+  /v1/dj/acceptance/pause:
+    post:
+      summary: Пауза приёма запросов
+      description: Блокирует POST /v1/requests (409 session_paused).
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: paused_acceptance
+        "409":
+          $ref: "#/components/responses/Error"
+
+  /v1/dj/acceptance/resume:
+    post:
+      summary: Возобновить приём
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: active
+
+  /v1/ws/ticket:
+    post:
+      summary: Одноразовый билет WS (TTL 30 с)
+      description: |
+        JWT в query НЕ передаётся (утечки в логи Cloudflare/Loki).
+        Билет одноразовый, передаётся в Sec-WebSocket-Protocol.
+      security:
+        - bearerAuth: []
+        - deviceToken: []
+      responses:
+        "200":
+          description: Билет выдан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expires_in]
+                properties:
+                  ticket:
+                    type: string
+                  expires_in:
+                    type: integer
+                    enum: [30]
+
 components:
   securitySchemes:
     bearerAuth:
@@ -417,6 +638,63 @@ components:
           format: uuid
           description: Грант session_guest; основание для POST /requests (F4)
       required: [session_id, club_name, status, timezone, grant_id]
+    QueueResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QueueItem"
+      required: [items]
+    QueueItem:
+      type: object
+      description: Карточка запроса в очереди DJ / списке гостя
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, accepted, rejected, played, expired]
+        style:
+          anyOf:
+            - type: string
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        title:
+          type: string
+        artist:
+          type: string
+        cover_url:
+          anyOf:
+            - type: string
+            - type: "null"
+        preview_url:
+          anyOf:
+            - type: string
+            - type: "null"
+        isrc:
+          anyOf:
+            - type: string
+            - type: "null"
+        same_track_count:
+          type: integer
+          description: Сколько раз эту же песню (canonical-ключ) запросили в сессии
+      required: [id, status, created_at, title, artist, same_track_count]
+    ActionResult:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        noop:
+          type: boolean
+          description: true — повтор действия уже выполненного (no-op)
+      required: [request_id, status, noop]
     SessionResponse:
       type: object
       properties:
