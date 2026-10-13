@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** F0A + F0B + F1 (код) завершены; F3-домен и F7-каркасы созданы параллельно
+**Этап:** F0A + F0B + F1 + F2 завершены (код+тесты); F3-домен и F7-каркасы созданы параллельно
 
 ---
 
@@ -42,6 +42,17 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | `crates/gateway-api/src/rbac.rs` | `AuthContext`-экстрактор, единый envelope ошибок 401/403 |
 | `crates/gateway-api/src/e2e.rs` | **e2e-критерий приёмки F1**: RBAC-матрица 4 ролей (своя роль → 200, чужая → **403** с `code:"forbidden"`, без токена → 401), device-token, refresh-ротация + reuse-детекция + ревок семьи; без БД — явный 503 |
 
+### F2 — сессии, QR, join гостя (завершена)
+
+| Артефакт | Что внутри |
+|---|---|
+| `migrations/0003_sessions.sql` | `pricing_policy` (история: valid_to у старой), `session` (статусы стейт-машины, IANA-зона), `qr_token` (sha256-хеш, partial unique «один активный на сессию»), `session_guest` (UNIQUE грант, re-grant при повторном join) |
+| `crates/domain/src/qr.rs` | Валидация формата QR (128 бит hex), `next_close_at` — «следующий 07:00 в IANA-зоне» (DST-безопасно, Q5), `should_auto_close` (порог неактивности 2 ч) — 5 тестов, включая переход часов ЕС |
+| `crates/infra-db/src/sessions.rs` | `SessionRepo`: create/find, `apply_transition` (транзит стейт-машины, гонки → InvalidTransition), `issue_qr_token` (ротация в транзакции), `find_active_qr` (истёк = QrInvalid), `grant_session_guest` (ON CONFLICT → re-grant), `find_live_grant`, `session_info_for_guest` (клуб/DJ/цена) |
+| `crates/gateway-api/src/sessions_routes.rs` | Роуты: `POST /v1/sessions/join` (device-token Bearer, формат-чек → хеш → активный QR → грант → session info), `POST /v1/club/sessions`, `qr/generate` (128 бит, expires = плановое закрытие), `qr/activate/deactivate` (каркас), `close`, `POST /v1/dj/sessions/:id/open` |
+| `crates/gateway-api/src/e2e_sessions.rs` | **e2e-критерий F2**: скан тест-QR → session info (клуб/DJ/статус/зона); чужой QR → 404; мусорный формат → 400; неизвестное устройство → 401; ротация убивает старый токен; закрытая сессия → 409 session_closed; re-grant = тот же grant_id; грант по чужому session_id отсутствует |
+| `docs/openapi.yaml` (0.2.0) | Контракты F1+F2 полностью; Redocly-валидация ✅ |
+
 ### F3 — домен каталога (параллельный трек, субагент)
 
 `crates/domain/src/catalog.rs`: `CatalogTrack`, `Source`, `canonical_key("itunes:12345")`, `validate_track` (whitelist домены mzstatic/deezer, только https, лимиты полей, ISRC 12 A-Z0-9, контроль-символы), `TrackCounter` (счётчик «той же песни» по canonical-ключу). **22 теста** (15 новых).
@@ -56,8 +67,9 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **39 passed / 0 failed** (8 common + 22 domain + 9 gateway, включая e2e-матрицу ролей) |
-| Git-история | ✅ 2 коммита: F0A baseline, F0B+F1+F3+F7 |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **46 passed / 0 failed** (8 common + 28 domain + 10 gateway, включая e2e F1 и F2) |
+| OpenAPI 3.1 (Redocly lint) | ✅ valid (0 errors) |
+| Git-история | ✅ 4 коммита: F0A → F0B+F1+F3+F7 → docs → F2 |
 
 ## 4. Что является mock/stub или отсутствует
 
@@ -78,14 +90,14 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | F0A/F0B | ✅ завершены |
 | **F1 Идентичность** | ✅ код + тесты; e2e-критерий (4 роли, wrong-role → 403) выполнен |
-| F2 Сессии+QR | ⏳ следующая: миграция `0003_sessions.sql`, join-грант, QR-ротация |
+| **F2 Сессии+QR** | ✅ код + тесты; e2e-критерий (скан QR → session info, чужой QR отклонён) выполнен |
 | F3 Каталог | 🟡 домен-валидация готова; внешние интеграции — блок B5 |
-| F4 Запросы+WS | не начата |
+| F4 Запросы+WS | ⏳ следующая: request-lifecycle, WS-ticket, очередь DJ |
 | F5/F6 Деньги | не начаты (ждут Q11–Q15) |
-| F7 Панели | 🟡 каркасы готовы; контракты дорастают в F2+ |
+| F7 Панели | 🟡 каркасы готовы; контракты F1/F2 в openapi.yaml |
 | F8/F9 | не начаты |
 
-**Критический путь: F2 → F4 → F5.**
+**Критический путь: F4 → F5.**
 
 ## 7. Текущие блокеры
 
@@ -110,7 +122,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 
 ## 9. Следующий маленький этап
 
-**F2**: миграция `0003_sessions.sql` (session, qr_token, session_guest, pricing_policy), POST /v1/sessions/join с грантом, QR-генерация (128-бит + hash), авто-закрытие по IANA-TZ. Параллельно: F4-домен (WS-ticket) можно готовить после фиксации контрактов.
+**F4**: миграция `0004_requests.sql` (request, track_cache-ссылки, счётчики), домен-переходы запросов DJ (accept/reject/played уже есть в domain), POST /v1/requests с грант-гейтом (живой session_guest + status == active), пауза приёма, WS-ticket (одноразовый, TTL 30 с) и очередь DJ. После — F5 (Stripe, требует Q11–Q15).
 
 ---
 
@@ -125,3 +137,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 | 2026-10-13 | F1: `cargo test --workspace` | ✅ **39 passed / 0 failed** (включая e2e RBAC-матрицу) |
 | 2026-10-13 | F1: `cargo clippy -D warnings` / `fmt --check` | ✅ 0 ошибок / чисто |
 | 2026-10-13 | F1: `git commit` | ✅ `0bfc694` |
+| 2026-10-13 | F2: миграции 0002+0003 применены в compose-БД | ✅ 13 таблиц |
+| 2026-10-13 | F2: `cargo test --workspace` | ✅ **46 passed / 0 failed** (e2e F2: QR-флоу полный) |
+| 2026-10-13 | F2: OpenAPI 0.2.0 Redocly lint | ✅ valid |
+| 2026-10-13 | F2: `git commit` | ✅ `458db86` |
