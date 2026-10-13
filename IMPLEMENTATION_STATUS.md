@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** F0A + F0B + F1 + F2 завершены (код+тесты); F3-домен и F7-каркасы созданы параллельно
+**Этап:** F0A + F0B + F1 + F2 + F4 завершены (код+тесты); F3-домен и F7-каркасы созданы параллельно
 
 ---
 
@@ -57,6 +57,16 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 
 `crates/domain/src/catalog.rs`: `CatalogTrack`, `Source`, `canonical_key("itunes:12345")`, `validate_track` (whitelist домены mzstatic/deezer, только https, лимиты полей, ISRC 12 A-Z0-9, контроль-символы), `TrackCounter` (счётчик «той же песни» по canonical-ключу). **22 теста** (15 новых).
 
+### F4 — запросы и очередь DJ, без денег (завершена)
+
+| Артефакт | Что внутри |
+|---|---|
+| `migrations/0004_requests.sql` | `track_cache` (UNIQUE(source,source_id), canonical_key), `request` (version — optimistic locking, снимок price_minor), `idempotency_response` (replay-ответы, TTL), `outbox` (ADR-002: события запросов) |
+| `crates/infra-db/src/requests.rs` | `RequestRepo`: `create_request` (TX: FOR SHARE active-гейт + живой грант + INSERT + outbox; replay по Idempotency-Key; чужой гость с тем же ключом → конфликт), `dj_queue(new|hot)` (hot — счётчик по canonical-ключу), `apply_action` (no-op семантика + version-гонки → no-op, не перезапись; outbox-события) |
+| `crates/gateway-api/src/requests_routes.rs` | Роуты: `POST /v1/requests` (Idempotency-Key обязателен; пауза → 409 session_paused), `GET /v1/my/requests`, `GET /v1/dj/queue?sort=`, `accept/reject/played` (no-op → 200+noop:true; недопустимый переход → 409), `acceptance/pause/resume`, `POST /v1/ws/ticket` (одноразовый, TTL 30 с, in-memory F4 → Redis F5/F8) |
+| `crates/gateway-api/src/e2e_requests.rs` | **e2e-критерии F4**: запрос в очереди DJ ✅; пауза блокирует POST (409 session_paused), resume разблокирует ✅; чужой гость без гранта отклонён ✅; дубль Idempotency-Key = replay, в БД один запрос ✅; no-op на дублях accept/played, played из pending, accept после played → 409 ✅; hot-сортировка по счётчику той же песни ✅; ws-ticket одноразовый ✅; outbox-события записаны ✅ |
+| `docs/openapi.yaml` (0.3.0) | Контракты F4: requests, queue, DJ-действия, pause/resume, ws-ticket; Redocly ✅ |
+
 ### F7 — каркасы панелей (параллельный трек, субагент)
 
 `apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind, 45 файлов): типизированные API-клиенты контракта Части IV (CSRF, httpOnly-cookie, Idempotency-Key), страницы панелей, валидация PlatformSettings (бипсисы 0–10000, мин<макс). npm не запускался (нет сети), сборка — при первом запуске разработчиком.
@@ -67,9 +77,9 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **46 passed / 0 failed** (8 common + 28 domain + 10 gateway, включая e2e F1 и F2) |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **48 passed / 0 failed** (8 common + 27 domain + 11 gateway + 2 infra, включая e2e F1/F2/F4) |
 | OpenAPI 3.1 (Redocly lint) | ✅ valid (0 errors) |
-| Git-история | ✅ 4 коммита: F0A → F0B+F1+F3+F7 → docs → F2 |
+| Git-история | ✅ 6 коммитов: F0A → F0B+F1+F3+F7 → docs → F2 → docs → F4 |
 
 ## 4. Что является mock/stub или отсутствует
 
@@ -91,13 +101,13 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | F0A/F0B | ✅ завершены |
 | **F1 Идентичность** | ✅ код + тесты; e2e-критерий (4 роли, wrong-role → 403) выполнен |
 | **F2 Сессии+QR** | ✅ код + тесты; e2e-критерий (скан QR → session info, чужой QR отклонён) выполнен |
+| **F4 Запросы+очередь** | ✅ код + тесты (без денег); e2e-критерий (запрос у DJ, пауза блокирует POST) выполнен; WS — только ticket-выдача, соединения gateway-ws — F5 |
 | F3 Каталог | 🟡 домен-валидация готова; внешние интеграции — блок B5 |
-| F4 Запросы+WS | ⏳ следующая: request-lifecycle, WS-ticket, очередь DJ |
-| F5/F6 Деньги | не начаты (ждут Q11–Q15) |
+| F5/F6 Деньги | не начаты (ждут Q11–Q15; Stripe Test можно начинать по дефолтам) |
 | F7 Панели | 🟡 каркасы готовы; контракты F1/F2 в openapi.yaml |
 | F8/F9 | не начаты |
 
-**Критический путь: F4 → F5.**
+**Критический путь: F5.** Фазы F1–F4 закрыты.
 
 ## 7. Текущие блокеры
 
@@ -122,7 +132,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 
 ## 9. Следующий маленький этап
 
-**F4**: миграция `0004_requests.sql` (request, track_cache-ссылки, счётчики), домен-переходы запросов DJ (accept/reject/played уже есть в domain), POST /v1/requests с грант-гейтом (живой session_guest + status == active), пауза приёма, WS-ticket (одноразовый, TTL 30 с) и очередь DJ. После — F5 (Stripe, требует Q11–Q15).
+**F5 (Stripe Test Mode)**: миграция `0005_payments.sql` (payment, split, ledger_entry), PaymentIntent через stripe-rust (test keys), webhook-intake с верификацией подписи, идемпотентность по (aggregate_id, event_type), outbox-relay → WS-уведомления, ledger двойная проводка, chaos-сценарии из техкарты Часть V. Прод-включение платежей — только после Q11–Q15. Параллельно можно: Flutter-заглушка гостя (скан QR из F2), React-панели подключить к живым контрактам F1–F4.
 
 ---
 
@@ -141,3 +151,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 | 2026-10-13 | F2: `cargo test --workspace` | ✅ **46 passed / 0 failed** (e2e F2: QR-флоу полный) |
 | 2026-10-13 | F2: OpenAPI 0.2.0 Redocly lint | ✅ valid |
 | 2026-10-13 | F2: `git commit` | ✅ `458db86` |
+| 2026-10-13 | F4: миграция 0004 применена | ✅ 17 таблиц |
+| 2026-10-13 | F4: `cargo test --workspace` | ✅ **48 passed / 0 failed** (e2e F4: полный request-флоу) |
+| 2026-10-13 | F4: OpenAPI 0.3.0 Redocly lint | ✅ valid |
+| 2026-10-13 | F4: `git commit` | ✅ `d752a29` |
