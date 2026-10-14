@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** бэкенд F0–F8 + панельные эндпоинты + UI (гость, DJ, панели live) — всё Test Mode
+**Этап:** бэкенд F0–F8 + панели + WS-live + UI (гость, DJ, панели) — всё Test Mode
 
 ---
 
@@ -125,6 +125,15 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 - изначально 24 эндпоинта были 501-заглушками; после панельных эндпоинтов (коммит d71fe2d) осталось 3: inviteDj, createClub, listGuests
 - **Сборка проверена**: `tsc --noEmit` — 0 ошибок в обоих app; `vite build` — успешно (web-club 187 КБ, web-admin 197 КБ)
 
+### gateway-ws: live-обновления (MVP, коммит `115b5b9`)
+
+| Артефакт | Что внутри |
+|---|---|
+| `crates/gateway-api/src/ws.rs` | `WsHub` — broadcast-каналы по топикам: `queue:{session}` (DJ-очередь) и `guest:{device}` (статус гостя); `GET /v1/ws?ticket=` — апгрейд, билет одноразовый (GETDEL), первый кадр-подписка с авторизацией владения (гость — только свой канал, DJ — только своя смена); события: request.created (с названием трека и бейджем ×N по canonical-ключу), accepted/rejected (причина летит гостю), played, session.paused/resumed |
+| Интеграция | push-точки в POST /v1/requests, dj accept/reject/played (no-op-дубли НЕ пушат), pause/resume |
+| `e2e_ws.rs` | DJ и гость получают created/accepted/paused; билет одноразовый (второй → None); утечки между гостями нет |
+| Прод-TODO | multi-node: Redis Pub/Sub-релей между узлами (задокументировано; MVP single-node) |
+
 ### UI-трек: Flutter-приложение DJ (каркас)
 
 `apps/mobile-dj/` — dizayn-zadanie §1 (экраны читаются в темноте одним
@@ -157,8 +166,8 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **76 passed / 0 failed** (13 common + 42 domain + 19 gateway + 2 infra, включая e2e панелей) |
-| OpenAPI 3.1 (Redocly lint) | ✅ valid (0.6.0, панельные роуты) |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **80 passed / 0 failed** (13 + 42 + 23 gateway + 2, включая e2e WS) |
+| OpenAPI 3.1 (Redocly lint) | ✅ valid (0.7.0, WS-контракт) |
 | Git-история | ✅ 12 коммитов: F0A → … → F6 → docs → F8 |
 
 ## 4. Что является mock/stub или отсутствует
@@ -216,7 +225,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 
 **Дальше (выбор владельца):**
 1. **Хвосты панелей** — inviteDj (email-инвайт), createClub (верификация), listGuests (антифрод-скоринг);
-2. **«Сейчас играет» + WS** — live-обновление очереди DJ и статусов гостя (gateway-ws, требует инфраструктуры);
+2. **WS в клиентах** — подключить приложения DJ/гостя к /v1/ws (хаб готов: контракты в openapi 0.7.0);
 3. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии);
 4. **F9** — k6-нагрузка, soak, пилот, сторы.
 
@@ -264,3 +273,5 @@ Flutter SDK на хосте не установлен: `flutter test` для mob
 | 2026-10-13 | Панельные эндпоинты: клиенты live | ✅ tsc+vite зелёные |
 | 2026-10-13 | Панельные эндпоинты: коммит | ✅ `d71fe2d` |
 | 2026-10-13 | DJ-приложение (Flutter, §1) | ✅ коммит `925ec20` |
+| 2026-10-13 | gateway-ws MVP: e2e | ✅ DJ+гость, билеты, изоляция |
+| 2026-10-13 | gateway-ws MVP: коммит | ✅ `115b5b9` |
