@@ -278,6 +278,38 @@ impl RequestRepo {
         Ok(rows)
     }
 
+    /// Название трека из кэша (для WS-карточки).
+    pub async fn find_queue_item_title(
+        &self,
+        track_cache_id: Uuid,
+    ) -> Result<Option<String>, RequestError> {
+        let title: Option<String> =
+            sqlx::query_scalar("SELECT title FROM track_cache WHERE id = $1")
+                .bind(track_cache_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(title)
+    }
+
+    /// Сколько раз этот трек (canonical) запрошен в сессии (бейдж ×N).
+    pub async fn same_track_count(
+        &self,
+        session_id: Uuid,
+        track_cache_id: Uuid,
+    ) -> Result<i64, RequestError> {
+        let (c,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM request r \
+             JOIN track_cache t ON t.id = r.track_cache_id \
+             WHERE r.session_id = $1 AND t.canonical_key = \
+             (SELECT canonical_key FROM track_cache WHERE id = $2)",
+        )
+        .bind(session_id)
+        .bind(track_cache_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(c)
+    }
+
     pub async fn find_request(&self, id: Uuid) -> Result<Option<RequestRow>, RequestError> {
         let row = sqlx::query_as::<_, RequestRow>(
             "SELECT id, session_id, guest_device_id, track_cache_id, style, price_minor, \

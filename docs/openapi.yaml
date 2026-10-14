@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.6.0
+  version: 0.7.0
   description: |
     Контракт (F0A → F2). Реальные пути добавляются по фазам:
     F1 ✅, F2 ✅, F4 ✅, F5 ✅, F6 ✅, panel endpoints ✅, F3 — catalog,
@@ -944,6 +944,33 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "200": { description: Запросы/принято/сыграно/доход }
+
+  # ==========================================================
+  # gateway-ws (MVP single-node)
+  # ==========================================================
+  /v1/ws:
+    get:
+      summary: WebSocket live-обновлений (апгрейд)
+      description: |
+        GET /v1/ws?ticket=… — апгрейд до WS. Билет одноразовый
+        (POST /v1/ws/ticket, TTL 30 c, GETDEL-семантика). Первый
+        кадр-подписка: {"subscribe":"queue","id":"<session_id>"}
+        (DJ: только своя смена) или {"subscribe":"guest","id":"<device>"}
+        (гость: только свой канал). Сервер шлёт JSON-события:
+        request.created (с title и same_track_count), request.accepted,
+        request.rejected (с reason), request.played, session.paused,
+        session.resumed. Прод-multi-node: Redis Pub/Sub-релей.
+      security: []
+      parameters:
+        - name: ticket
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "101":
+          description: Switching Protocols
+        "401":
+          $ref: "#/components/responses/Error"
 
 components:
   securitySchemes:

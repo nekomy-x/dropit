@@ -17,6 +17,8 @@ mod e2e_payouts;
 mod e2e_requests;
 #[cfg(test)]
 mod e2e_sessions;
+#[cfg(test)]
+mod e2e_ws;
 mod panel_routes;
 mod payments;
 mod payments_routes;
@@ -25,6 +27,7 @@ mod rbac;
 mod requests_routes;
 mod routes;
 mod sessions_routes;
+mod ws;
 
 use std::net::SocketAddr;
 
@@ -50,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         billing: None,
         payouts: None,
         jobs: None,
+        ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
     };
     let app = routes::router(env);
 

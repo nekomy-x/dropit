@@ -57,6 +57,7 @@ pub(crate) async fn app_env(
         billing,
         payouts,
         jobs,
+        ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
     }
 }
 

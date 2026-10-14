@@ -109,6 +109,7 @@ pub fn router(env: ApiEnv) -> Router {
         .merge(crate::payments_routes::payments_router())
         .merge(crate::payouts_routes::payouts_router())
         .merge(crate::panel_routes::panel_router())
+        .merge(crate::ws::ws_router())
         .with_state(env)
 }
 
@@ -458,6 +459,8 @@ pub struct ApiEnv {
     pub billing: Option<std::sync::Arc<dropit_infra_db::BillingRepo>>,
     pub payouts: Option<std::sync::Arc<dropit_infra_db::PayoutRepo>>,
     pub jobs: Option<std::sync::Arc<dropit_infra_db::JobsRepo>>,
+    /// WebSocket-хаб live-обновлений (gateway-ws MVP).
+    pub ws: Option<std::sync::Arc<crate::ws::WsHub>>,
 }
 
 pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {

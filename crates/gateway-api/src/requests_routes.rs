@@ -230,6 +230,26 @@ async fn create_request(
             let _ = requests
                 .save_idempotency_response(&idem_key, guest_device_id, row.id, &response_body)
                 .await;
+            // WS-push: новая карточка в очередь DJ + статус гостю.
+            if let Some(hub) = state.ws.clone() {
+                // Название трека для карточки (кэш).
+                let title = requests
+                    .find_queue_item_title(row.track_cache_id)
+                    .await
+                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let same = requests
+                    .same_track_count(row.session_id, row.track_cache_id)
+                    .await
+                    .unwrap_or(1);
+                hub.publish(crate::ws::events::request_created(
+                    row.session_id,
+                    row.id,
+                    guest_device_id,
+                    &title,
+                    same,
+                ));
+            }
             (
                 StatusCode::CREATED,
                 Json(RequestCreatedResponse {
@@ -443,15 +463,49 @@ async fn dj_action(
         .apply_action(request_id, action, reject_reason)
         .await
     {
-        Ok((row, noop)) => (
-            StatusCode::OK,
-            Json(ActionResultResponse {
-                request_id: row.id,
-                status: row.status,
-                noop,
-            }),
-        )
-            .into_response(),
+        Ok((row, noop)) => {
+            // WS-push: смена статуса (гость + очередь DJ), если не no-op.
+            if !noop {
+                if let Some(hub) = state.ws.clone() {
+                    let ev = match action {
+                        RequestAction::Accept => crate::ws::events::request_accepted(
+                            row.session_id,
+                            row.id,
+                            row.guest_device_id,
+                        ),
+                        RequestAction::Reject => crate::ws::events::request_rejected(
+                            row.session_id,
+                            row.id,
+                            row.guest_device_id,
+                            row.reject_reason.as_deref(),
+                        ),
+                        RequestAction::Play => crate::ws::events::request_played(
+                            row.session_id,
+                            row.id,
+                            row.guest_device_id,
+                        ),
+                        // Expire — системный переход (воркер F8), не
+                        // HTTP-действие DJ: сюда не приходит.
+                        RequestAction::Expire => crate::ws::events::request_rejected(
+                            row.session_id,
+                            row.id,
+                            row.guest_device_id,
+                            None,
+                        ),
+                    };
+                    hub.publish(ev);
+                }
+            }
+            (
+                StatusCode::OK,
+                Json(ActionResultResponse {
+                    request_id: row.id,
+                    status: row.status,
+                    noop,
+                }),
+            )
+                .into_response()
+        }
         // Недопустимый переход (например accept после played).
         Err(_) => api_error(ApiError::Conflict, "invalid request transition"),
     }
@@ -494,11 +548,22 @@ async fn dj_acceptance(
         return api_error(ApiError::NotFound, "no active DJ session");
     };
     match sessions.apply_transition(session.id, transition).await {
-        Ok(s) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "session_id": s.id, "status": s.status })),
-        )
-            .into_response(),
+        Ok(s) => {
+            // WS-push: баннер паузы всем участникам сессии.
+            if let Some(hub) = state.ws.clone() {
+                let ev = if matches!(transition, dropit_domain::SessionTransition::Pause) {
+                    crate::ws::events::session_paused(s.id)
+                } else {
+                    crate::ws::events::session_resumed(s.id)
+                };
+                hub.publish(ev);
+            }
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "session_id": s.id, "status": s.status })),
+            )
+                .into_response()
+        }
         Err(_) => api_error(ApiError::Conflict, "invalid session transition"),
     }
 }
@@ -512,6 +577,11 @@ async fn dj_acceptance(
 static WS_TICKETS: std::sync::OnceLock<
     std::sync::Mutex<HashMap<String, (Uuid, std::time::Instant)>>,
 > = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn consume_ws_ticket_for_test(ticket: &str) -> Option<Uuid> {
+    consume_ws_ticket(ticket)
+}
 
 fn ws_tickets() -> &'static std::sync::Mutex<HashMap<String, (Uuid, std::time::Instant)>> {
     WS_TICKETS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
