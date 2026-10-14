@@ -4,6 +4,7 @@ import '../api/api_client.dart';
 import '../api/queue_state.dart';
 import '../api/ws_client.dart';
 import '../main.dart';
+import 'skeletons.dart';
 
 /// Очередь запросов — ГЛАВНЫЙ экран (§1.4).
 ///
@@ -100,7 +101,7 @@ class _QueueScreenState extends State<QueueScreen> {
 
   Widget _body() {
     if (_busy && _items == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonList(); // скелетоны очереди (§5)
     }
     if (_error != null) {
       return ListView(

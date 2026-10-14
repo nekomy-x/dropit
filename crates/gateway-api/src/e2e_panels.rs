@@ -152,9 +152,19 @@ async fn e2e_panel_routes() {
     assert_eq!(s, StatusCode::OK);
     let items = body["items"].as_array().unwrap();
     assert_eq!(items.len(), 2, "pricing history: {body}");
-    // Старая закрыта (valid_to NOT NULL), новая действует.
-    assert!(!items[0]["valid_to"].is_null(), "old policy closed (Q6)");
-    assert!(items[1]["valid_to"].is_null(), "new policy active");
+    // Q6: старая закрыта (valid_to NOT NULL), новая действует.
+    // Порядок при равных микросекундах не гарантирован — ищем
+    // по значению политики.
+    let old = items
+        .iter()
+        .find(|i| i["price_minor"] == 300)
+        .expect("old 300 policy");
+    let new = items
+        .iter()
+        .find(|i| i["price_minor"] == 500)
+        .expect("new 500 policy");
+    assert!(!old["valid_to"].is_null(), "old policy closed (Q6)");
+    assert!(new["valid_to"].is_null(), "new policy active");
 
     // Некорректная цена отклоняется.
     let (s, _) = call(

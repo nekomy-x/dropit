@@ -23,10 +23,50 @@ use crate::routes::{router, ApiEnv};
 pub(crate) async fn test_repo() -> Option<IdentityRepo> {
     let url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://dropit:dropit_local@localhost:5432/dropit".into());
-    dropit_infra_db::connect(&url)
-        .await
-        .ok()
-        .map(IdentityRepo::new)
+    let pool = dropit_infra_db::connect(&url).await.ok()?;
+    // Чистим транзакционные данные от прошлых прогонов — тесты
+    // создают клубы с фиксированными email (UNIQUE). Схему (миграции)
+    // НЕ трогаем; это тестовая БД, финансы чистим осознанно.
+    let tables = [
+        "audit_log",
+        "gdpr_action",
+        "incident",
+        "reconciliation_run",
+        "payout",
+        "split",
+        "ledger_entry",
+        "payment",
+        "idempotency_key",
+        "idempotency_response",
+        "device_token_issue",
+        "outbox_event",
+        "request",
+        "session_guest",
+        "qr_token",
+        "session",
+        "dj",
+        "club",
+        "admin_user",
+        "guest_device",
+        "refresh_token",
+        "login_attempt",
+        "pricing_policy",
+        "track_cache",
+        "webhook_event",
+    ];
+    for t in tables {
+        let _ = sqlx::query(&format!("TRUNCATE TABLE {t} CASCADE"))
+            .execute(&pool)
+            .await;
+    }
+    let _ = sqlx::query(
+        "UPDATE platform_settings SET commission_mode='unset', commission_percent_bp=NULL, \
+         commission_fixed_minor=NULL, min_price_minor=NULL, max_price_minor=NULL, \
+         dj_share_of_remainder_bp=NULL WHERE id=1",
+    )
+    .execute(&pool)
+    .await;
+    Some(IdentityRepo::new(pool))
 }
 
 pub(crate) async fn app_env(
@@ -72,6 +112,11 @@ pub(crate) async fn call(
     let mut req = Request::builder().method(method).uri(uri);
     if let Some(t) = token {
         req = req.header("authorization", format!("Bearer {t}"));
+    }
+    // Idempotency-Key обязателен на POST /v1/requests (правило
+    // денег): подставляем уникальный, если тест не задал свой.
+    if method == "POST" && uri == "/v1/requests" {
+        req = req.header("idempotency-key", uuid::Uuid::now_v7().to_string());
     }
     let req = match body {
         Some(b) => req

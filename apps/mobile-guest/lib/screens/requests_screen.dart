@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../api/api_client.dart';
 import '../api/ws_client.dart';
 import '../main.dart';
+import 'skeletons.dart';
 
 /// My requests: история + статусы гостя (обновление вручную;
 /// WS-обновления — gateway-ws, F9-инфраструктура).
@@ -53,8 +54,8 @@ class _RequestsScreenState extends State<RequestsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('My requests')),
       body: SafeArea(
-        child: _busy
-            ? const Center(child: CircularProgressIndicator())
+        child: _busy && _items == null
+            ? const SkeletonList() // скелетоны вместо спиннера (§5)
             : _error != null
                 ? Center(
                     child: Column(

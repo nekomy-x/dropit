@@ -96,7 +96,7 @@ async fn club_dashboard(ctx: AuthContext, State(state): State<ApiEnv>) -> Respon
          SELECT (SELECT id FROM s), (SELECT status FROM s), \
          (SELECT count(*) FROM request r JOIN session ss ON ss.id = r.session_id \
           WHERE ss.club_id = $1 AND ss.created_at > now() - interval '24 hours'), \
-         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0) FROM split sp \
+         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0)::bigint FROM split sp \
           WHERE sp.payee_type = 'club' AND sp.payee_id = $1)",
     )
     .bind(ctx.subject_id())
@@ -302,14 +302,14 @@ async fn club_earnings(
     };
     let row = sqlx::query_as::<_, (i64, i64, i64)>(&format!(
         "SELECT \
-         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0) FROM split sp \
+         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0)::bigint FROM split sp \
           JOIN payment p ON p.id = sp.payment_id \
           WHERE sp.payee_type = 'club' AND sp.payee_id = $1 \
           AND p.captured_at > now() - interval '{interval}'), \
          (SELECT count(*) FROM payment p JOIN request r ON r.id = p.request_id \
           JOIN session s ON s.id = r.session_id WHERE s.club_id = $1 AND p.status = 'captured' \
           AND p.captured_at > now() - interval '{interval}'), \
-         (SELECT COALESCE(sum(p.amount_minor), 0) FROM payment p JOIN request r ON r.id = p.request_id \
+         (SELECT COALESCE(sum(p.amount_minor), 0)::bigint FROM payment p JOIN request r ON r.id = p.request_id \
           JOIN session s ON s.id = r.session_id WHERE s.club_id = $1 AND p.status = 'captured' \
           AND p.captured_at > now() - interval '{interval}')"
     ))
@@ -408,7 +408,7 @@ async fn admin_dashboard(ctx: AuthContext, State(state): State<ApiEnv>) -> Respo
          (SELECT count(*) FROM session WHERE status <> 'closed'), \
          (SELECT count(*) FROM request WHERE created_at > now() - interval '24 hours'), \
          (SELECT count(*) FROM request WHERE created_at > now() - interval '1 minute'), \
-         (SELECT COALESCE(sum(amount_minor), 0) FROM payment WHERE status IN ('captured', 'partially_refunded', 'refunded') \
+         (SELECT COALESCE(sum(amount_minor), 0)::bigint FROM payment WHERE status IN ('captured', 'partially_refunded', 'refunded') \
           AND created_at > now() - interval '24 hours')",
     )
     .fetch_one(&pool)
@@ -439,7 +439,7 @@ async fn admin_clubs(ctx: AuthContext, State(state): State<ApiEnv>) -> Response 
     };
     let rows = sqlx::query_as::<_, (Uuid, String, String, String, i64)>(
         "SELECT c.id, c.name, c.email, c.status, \
-         (SELECT COALESCE(sum(p.amount_minor), 0) FROM payment p \
+         (SELECT COALESCE(sum(p.amount_minor), 0)::bigint FROM payment p \
           JOIN request r ON r.id = p.request_id JOIN session s ON s.id = r.session_id \
           WHERE s.club_id = c.id AND p.status IN ('captured', 'partially_refunded')) \
          FROM club c ORDER BY c.created_at DESC LIMIT 100",
@@ -746,12 +746,12 @@ async fn admin_platform_settings_patch(
     // Сбросы в NULL идут CASE WHEN $clear THEN NULL.
     let res = sqlx::query(
         "UPDATE platform_settings SET \
-         commission_mode = COALESCE($2, commission_mode), \
-         commission_percent_bp = CASE WHEN $3 THEN NULL ELSE COALESCE($4, commission_percent_bp) END, \
-         commission_fixed_minor = CASE WHEN $5 THEN NULL ELSE COALESCE($6, commission_fixed_minor) END, \
-         min_price_minor = CASE WHEN $7 THEN NULL ELSE COALESCE($8, min_price_minor) END, \
-         max_price_minor = CASE WHEN $9 THEN NULL ELSE COALESCE($10, max_price_minor) END, \
-         dj_share_of_remainder_bp = CASE WHEN $11 THEN NULL ELSE COALESCE($12, dj_share_of_remainder_bp) END, \
+         commission_mode = COALESCE($1::text, commission_mode), \
+         commission_percent_bp = CASE WHEN $2::boolean THEN NULL ELSE COALESCE($3::int, commission_percent_bp) END, \
+         commission_fixed_minor = CASE WHEN $4::boolean THEN NULL ELSE COALESCE($5::bigint, commission_fixed_minor) END, \
+         min_price_minor = CASE WHEN $6::boolean THEN NULL ELSE COALESCE($7::bigint, min_price_minor) END, \
+         max_price_minor = CASE WHEN $8::boolean THEN NULL ELSE COALESCE($9::bigint, max_price_minor) END, \
+         dj_share_of_remainder_bp = CASE WHEN $10::boolean THEN NULL ELSE COALESCE($11::int, dj_share_of_remainder_bp) END, \
          updated_at = now() \
          WHERE id = 1",
     )
@@ -868,7 +868,7 @@ async fn dj_stats_today(ctx: AuthContext, State(state): State<ApiEnv>) -> Respon
           WHERE s.dj_id = $1 AND r.status = 'accepted'), \
          (SELECT count(*) FROM request r JOIN session s ON s.id = r.session_id \
           WHERE s.dj_id = $1 AND r.status = 'played'), \
-         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0) FROM split sp \
+         (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0)::bigint FROM split sp \
           WHERE sp.payee_type = 'dj' AND sp.payee_id = $1)",
     )
     .bind(ctx.subject_id())

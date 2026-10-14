@@ -140,7 +140,7 @@ impl IdentityRepo {
     /// Считает device-token, выданные IP за последний час (лимит 5/ч, B).
     pub async fn count_device_tokens_for_ip(&self, ip: &str) -> Result<i64, super::IdentityError> {
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM device_token_issue WHERE ip = $1 AND at > now() - interval '1 hour'",
+            "SELECT count(*) FROM device_token_issue WHERE ip = $1::inet AND at > now() - interval '1 hour'",
         )
         .bind(ip)
         .fetch_one(&self.pool)
@@ -150,7 +150,7 @@ impl IdentityRepo {
 
     /// Фиксирует выдачу device-token (для лимита/аудита).
     pub async fn record_device_token_issue(&self, ip: &str) -> Result<(), super::IdentityError> {
-        sqlx::query("INSERT INTO device_token_issue (ip) VALUES ($1)")
+        sqlx::query("INSERT INTO device_token_issue (ip) VALUES ($1::inet)")
             .bind(ip)
             .execute(&self.pool)
             .await?;

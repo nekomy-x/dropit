@@ -45,14 +45,56 @@ async fn main() -> anyhow::Result<()> {
             .as_bytes(),
     );
 
+    // БД (Test Mode: DATABASE_URL или DROPIT_DATABASE_URL). Без неё
+    // сервер стартует, но data-роуты отвечают 503 (README: как
+    // поднять compose + seed).
+    let db_url = std::env::var("DATABASE_URL")
+        .or_else(|_| std::env::var("DROPIT_DATABASE_URL"))
+        .ok();
+    let (repo, sessions, requests, billing, payouts, jobs) = if let Some(url) = db_url {
+        match dropit_infra_db::connect(&url).await {
+            Ok(pool) => {
+                tracing::info!("database connected (pool ready)");
+                let pool = std::sync::Arc::new(pool);
+                (
+                    Some(std::sync::Arc::new(dropit_infra_db::IdentityRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::SessionRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::RequestRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::BillingRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::PayoutRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::JobsRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
+                )
+            }
+            Err(e) => {
+                tracing::warn!("database unreachable ({e}) — data routes will 503");
+                (None, None, None, None, None, None)
+            }
+        }
+    } else {
+        tracing::warn!("DATABASE_URL not set — data routes will 503");
+        (None, None, None, None, None, None)
+    };
+
     let env = routes::ApiEnv {
         keys,
-        repo: None, // подключается при DROPIT_DATABASE_URL (main-рантайм)
-        sessions: None,
-        requests: None,
-        billing: None,
-        payouts: None,
-        jobs: None,
+        repo,
+        sessions,
+        requests,
+        billing,
+        payouts,
+        jobs,
         ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
     };
     let app = routes::router(env);

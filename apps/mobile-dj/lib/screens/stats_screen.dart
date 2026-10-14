@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
 import '../main.dart';
+import 'skeletons.dart';
 
 /// Статистика вечера (§1.7): принято/отклонено/сыграно, заработано
 /// (доля DJ), пик по времени.
@@ -39,6 +40,35 @@ class _StatsScreenState extends State<StatsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_busy && _stats == null) {
+      // Скелетоны больших чисел (§5).
+      return Scaffold(
+        appBar: AppBar(title: const Text('Tonight')),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: const Column(children: [SkeletonBox(height: 44, width: 120)]),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Row(children: [
+              Expanded(child: SkeletonStatTile()),
+              SizedBox(width: 8),
+              Expanded(child: SkeletonStatTile()),
+            ]),
+            const SizedBox(height: 8),
+            const Row(children: [
+              Expanded(child: SkeletonStatTile()),
+              SizedBox(width: 8),
+              Expanded(child: SkeletonStatTile()),
+            ]),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Tonight')),
       body: RefreshIndicator(

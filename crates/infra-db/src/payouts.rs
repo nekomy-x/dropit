@@ -105,7 +105,7 @@ impl PayoutRepo {
             "SELECT s.payee_type, s.payee_id, \
              COALESCE(sum(s.amount_minor - s.reversed_minor), 0)::bigint AS net_minor \
              FROM split s \
-             WHERE s.status = 'pending' \
+             WHERE s.status = 'pending' AND s.payee_id IS NOT NULL \
              GROUP BY s.payee_type, s.payee_id",
         )
         .fetch_all(&self.pool)
@@ -391,7 +391,7 @@ impl PayoutRepo {
               JOIN payment p ON p.id::text = l.ref \
               JOIN split s2 ON s2.payment_id = p.id AND s2.payee_type = s.payee_type AND s2.payee_id = s.payee_id \
               WHERE l.account = 'payable:' || s.payee_type) AS ledger_sum \
-             FROM split s GROUP BY s.payee_type, s.payee_id",
+             FROM split s WHERE s.payee_id IS NOT NULL GROUP BY s.payee_type, s.payee_id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -427,10 +427,12 @@ impl PayoutRepo {
         .execute(&self.pool)
         .await?;
 
-        // Ожидаемо: Σ ledger по payable+revenue (сумма захваченного).
+        // Ожидаемо: Σ ledger по revenue:platform (заблокированная
+        // сумма = −P за каждый захват; двойная запись: Σ всех
+        // проводок = 0).
         let (expected,): (i64,) = sqlx::query_as(
-            "SELECT COALESCE(sum(amount_minor), 0)::bigint FROM ledger_entry \
-             WHERE entry_type = 'capture'",
+            "SELECT COALESCE(-sum(amount_minor), 0)::bigint FROM ledger_entry \
+             WHERE entry_type = 'capture' AND account = 'revenue:platform'",
         )
         .fetch_one(&self.pool)
         .await?;

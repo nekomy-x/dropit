@@ -161,9 +161,9 @@ async fn e2e_payment_chaos() {
     // Сплит по Q1-дефолту: 300/350/350.
     let (platform, club, dj): (i64, i64, i64) = sqlx::query_as(
         "SELECT \
-         sum(CASE WHEN payee_type = 'platform' THEN amount_minor ELSE 0 END), \
-         sum(CASE WHEN payee_type = 'club' THEN amount_minor ELSE 0 END), \
-         sum(CASE WHEN payee_type = 'dj' THEN amount_minor ELSE 0 END) \
+         sum(CASE WHEN payee_type = 'platform' THEN amount_minor ELSE 0 END)::bigint, \
+         sum(CASE WHEN payee_type = 'club' THEN amount_minor ELSE 0 END)::bigint, \
+         sum(CASE WHEN payee_type = 'dj' THEN amount_minor ELSE 0 END)::bigint \
          FROM split WHERE payment_id = $1",
     )
     .bind(payment.id)

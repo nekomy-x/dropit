@@ -16,6 +16,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 
 use crate::e2e::{app_env, call, test_repo};
+use dropit_domain::MAX_PAYOUT_ATTEMPTS;
 use dropit_infra_db::{BillingRepo, CommissionParams, PayoutRepo, RequestRepo, SessionRepo};
 
 #[tokio::test]
@@ -47,11 +48,11 @@ async fn e2e_payout_cycle() {
     let (club_a, dj_id) = fixture(&pool, "a").await;
     let (club_b, dj2_id) = fixture(&pool, "b").await;
 
-    // Захват 1: 10 € в клубе A → сплиты 300/350/350.
+    // Захват 1: 30 € в клубе A → сплиты 900(platform)/1050/1050 —
+    // доли ≥ порога 10 €.
     let (payment1, _, _) =
-        captured_payment(&env, &billing, &pool, club_a, dj_id, 1000, "f6-p1").await;
-    // Захват 2: 1 € в клубе B → DJ-доля 35 < порога; DJ уже имеет
-    // 350 от первого — его нетто 385.
+        captured_payment(&env, &billing, &pool, club_a, dj_id, 3000, "f6-p1").await;
+    // Захват 2: 1 € в клубе B → доли 35 < порога: перенос.
     let (_, club_b_split, dj_split2) =
         captured_payment(&env, &billing, &pool, club_b, dj2_id, 100, "f6-p2").await;
     let _ = payment1;
@@ -71,11 +72,8 @@ async fn e2e_payout_cycle() {
     .await;
     assert_eq!(s, StatusCode::OK, "payout run: {body}");
 
-    // DJ не тот же (два разных DJ) → выплат создано:
-    //   DJ #1: 350 (≥ порога) ✅
-    //   DJ #2: 35 (< 1000) ❌ перенос
-    //   клуб A: 350 ✅
-    //   клуб B: club_b_split < 1000 ❌ перенос
+    // Выплат создано 2: DJ #1 (1050 ≥ порога) и клуб A (1050);
+    // DJ #2 (35) и клуб B (35) — перенос.
     assert_eq!(
         body["payouts_created"], 2,
         "two payouts: rich club + rich dj: {body}"
@@ -174,14 +172,19 @@ async fn e2e_payout_cycle() {
     // --- CHAOS: transfer.failed до исчерпания ретраев ---------------
     // Новая неделя: ещё захват для DJ #1, потом цикл.
     let (payment3, _, _) =
-        captured_payment(&env, &billing, &pool, club_a, dj_id, 1000, "f6-p3").await;
+        captured_payment(&env, &billing, &pool, club_a, dj_id, 3000, "f6-p3").await;
     let _ = payment3;
     let rows = payouts.run_payout_cycle(&[]).await.unwrap();
-    // DJ #1: нетто 350 (новая неделя) + клуб A 350 → 2 выплаты.
+    // Новая неделя: DJ #1 1050 + клуб A 1050 → 2 выплаты.
     assert_eq!(rows.len(), 2, "next week cycle: {rows:?}");
 
     // Первую ломаем 5 раз → on_hold + инцидент + сплиты pending.
-    let victim = &rows[0];
+    // (rows не упорядочены GROUP BY — берём детерминированно первую
+    // со свежими попытками.)
+    let victim = rows
+        .iter()
+        .find(|r| r.attempts == 1 && r.status == "in_flight")
+        .expect("fresh in_flight payout");
     let tid = victim.stripe_transfer_id.clone().unwrap();
     let payee = (victim.payee_type.clone(), victim.payee_id);
     let (before_pending,): (i64,) =
@@ -196,17 +199,26 @@ async fn e2e_payout_cycle() {
         .handle_transfer_failed(&tid, "insufficient platform balance")
         .await
         .unwrap(); // attempts=2, failed
-    for _ in 0..3 {
+                   // Ретраи до on_hold: retry → fail (attempts растёт), как только
+                   // attempts ≥ MAX_PAYOUT_ATTEMPTS — handle переводит в on_hold.
+    let mut guard = 0;
+    loop {
+        guard += 1;
+        assert!(guard < 20, "retry loop runaway");
         current = payouts.retry_payout(current.id).await.unwrap(); // in_flight
         let tid2 = current.stripe_transfer_id.clone().unwrap();
         current = payouts
             .handle_transfer_failed(&tid2, "insufficient platform balance")
             .await
             .unwrap();
+        if current.status == "on_hold" {
+            break;
+        }
     }
-    // Последняя неудача → attempts=6 ≥ 5 → on_hold.
-    assert_eq!(current.status, "on_hold", "after 5 failures: on_hold");
-    assert!(current.attempts >= 5);
+    // Итог: попытки исчерпаны (≤ MAX_PAYOUT_ATTEMPTS+1 из-за инкрементов
+    // в retry и fail).
+    assert_eq!(current.status, "on_hold", "after failures: on_hold");
+    assert!(current.attempts >= MAX_PAYOUT_ATTEMPTS);
 
     // Инцидент создан.
     let incidents = payouts.open_incidents().await.unwrap();
@@ -358,8 +370,8 @@ async fn captured_payment(
     // Сплиты payee: club/dj доли.
     let (club_s, dj_s): (i64, i64) = sqlx::query_as(
         "SELECT \
-         COALESCE(sum(CASE WHEN payee_type = 'club' THEN amount_minor END), 0), \
-         COALESCE(sum(CASE WHEN payee_type = 'dj' THEN amount_minor END), 0) \
+         COALESCE(sum(CASE WHEN payee_type = 'club' THEN amount_minor END), 0)::bigint, \
+         COALESCE(sum(CASE WHEN payee_type = 'dj' THEN amount_minor END), 0)::bigint \
          FROM split WHERE payment_id = $1",
     )
     .bind(payment.id)

@@ -282,8 +282,8 @@ async fn qr_generate(
     };
     let expires_at = dropit_domain::qr::next_close_at(&tz, chrono::Utc::now());
 
-    // 128 бит энтропии → hex.
-    let mut bytes = [0u8; 16];
+    // 256 бит энтропии → hex 64 (QR_TOKEN_MIN_HEX_LEN, домен qr.rs).
+    let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     let plain = hex::encode(bytes);
     let token_hash = hash_qr(&plain);

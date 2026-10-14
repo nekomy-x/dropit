@@ -1,53 +1,112 @@
-# DROP IT
+# DROP IT — платформа заказа музыки в ночных клубах
 
-Платформа заказа музыки в ночных клубах: гость сканирует QR сессии, находит трек и платит за отправку запроса диджею. Решение о воспроизведении принимает диджей.
+Гость сканирует QR сессии → платит за запрос трека → DJ решает, играть ли.
+Клуб и DJ получают доли; платформа — комиссию.
 
-## Статус
+**Состояние: Test Mode (мок-Stripe, без внешних интеграций).**
+Полная документация — `IMPLEMENTATION_STATUS.md`; план — `tehnicheskaya-karta.md`.
 
-**Этап:** F0A (фундамент). См. `IMPLEMENTATION_STATUS.md` — что сделано, что проверено, что блокируется.
+---
 
-**Важно:** Rust toolchain может отсутствовать в среде — статус сборки/тестов честно отражён в `IMPLEMENTATION_STATUS.md`, а не предполагается.
+## Потрогать за 5 минут (Test Mode)
 
-## Структура
+### 1. База (однократно)
 
-```
-Cargo.toml               # Rust workspace
-crates/
-  common/                # деньги (minor units), ошибки, идентификаторы
-  domain/                # чистые домены: state machines сессий/запросов
-  infra-db/              # sqlx, миграции
-  gateway-api/           # REST-бинарник (Axum)
-docs/
-  adr/                   # ADR-001..006 (004 — открыт: Stripe схема)
-  openapi.yaml           # контракт API (растёт по фазам)
-deploy/
-  docker-compose.yml     # local: Postgres + Redis (NATS — с F5)
-  Dockerfile
-  .env.example           # БЕЗ реальных секретов
-.github/workflows/ci.yml # fmt / clippy / test / миграции / openapi lint
+```sh
+docker compose up -d        # Postgres 16 (deploy-postgres-1)
+# миграции:
+for f in crates/infra-db/migrations/*.sql; do
+  docker cp "$f" deploy-postgres-1:/tmp/m.sql
+  docker exec deploy-postgres-1 psql -U dropit -d dropit -v ON_ERROR_STOP=1 -f /tmp/m.sql
+done
 ```
 
-## Локальный запуск
+### 2. Демо-данные
 
-```bash
-# инфраструктура
-docker compose -f deploy/docker-compose.yml up -d
-
-# приложение (нужен Rust toolchain)
-cp deploy/.env.example deploy/.env
-export DATABASE_URL=postgres://dropit:dropit_local@localhost:5432/dropit
-cargo run -p dropit-gateway-api
-
-# проверки
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+```sh
+export DATABASE_URL="postgres://dropit:dropit_local@localhost:5432/dropit"
+cargo run -p dropit-gateway-api --bin seed_demo
 ```
 
-## Правила проекта
+Создаёт клуб/DJ/админа и 5 треков:
+- клуб `demo@club.test` / `demo-club-pass`
+- DJ `demo@dj.test` / `demo-dj-pass`
+- админ `demo@admin.test` / `demo-admin-pass` + TOTP-ключ
+  `JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP` (введите в Google Authenticator)
 
-1. Суммы — только целые минорные единицы (ADR-003). Float в деньгах запрещён.
-2. Бизнес-параметры (комиссия, пределы цен, доли) — конфигурация; значения задаёт владелец.
-3. Stripe — не подключён; production-платежи запрещены (ADR-004 открыт).
-4. Секреты только в `.env`/секретном хранилище — никогда в репозитории.
-5. Mock/stub явно помечаются в коде и документации.
+### 3. Сервер
+
+```sh
+cargo run -p dropit-gateway-api --bin dropit-api   # 127.0.0.1:8080
+```
+
+### 4. Живой флоу (curl)
+
+```sh
+B=http://127.0.0.1:8080
+# логины
+DJ=$(curl -s -X POST $B/v1/auth/dj/login -H "Content-Type: application/json" \
+  -d '{"email":"demo@dj.test","password":"demo-dj-pass"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+GUEST=$(curl -s -X POST $B/v1/guest/device -H "Content-Type: application/json" \
+  -d '{"platform":"ios"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['device_token'])")
+
+# сессия + QR (клубом)
+CLUB=$(curl -s -X POST $B/v1/auth/club/login -H "Content-Type: application/json" \
+  -d '{"email":"demo@club.test","password":"demo-club-pass"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+DJ_ID=$(docker exec deploy-postgres-1 psql -U dropit -d dropit -tAc "SELECT id FROM dj WHERE email='demo@dj.test'")
+S=$(curl -s -X POST $B/v1/club/sessions -H "Content-Type: application/json" -H "Authorization: Bearer $CLUB" \
+  -d "{\"dj_id\":\"$DJ_ID\",\"timezone\":\"Europe/Madrid\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")
+QR=$(curl -s -X POST $B/v1/club/sessions/$S/qr/generate -H "Authorization: Bearer $CLUB" \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['qr_token'])")
+
+# гость: join по QR → открытие смены DJ → запрос
+curl -s -X POST $B/v1/sessions/join -H "Content-Type: application/json" -H "Authorization: Bearer $GUEST" -d "{\"qr_token\":\"$QR\"}"
+curl -s -X POST $B/v1/dj/sessions/$S/open -H "Authorization: Bearer $DJ"
+TRACK=$(docker exec deploy-postgres-1 psql -U dropit -d dropit -tAc "SELECT id FROM track_cache LIMIT 1")
+R=$(curl -s -X POST $B/v1/requests -H "Content-Type: application/json" -H "Authorization: Bearer $GUEST" \
+  -H "Idempotency-Key: smoke1" -d "{\"track_id\":\"$TRACK\"}")
+
+# DJ: очередь → принять
+curl -s "$B/v1/dj/queue?sort=new" -H "Authorization: Bearer $DJ"
+curl -s -X POST $B/v1/dj/requests/$(echo $R | python3 -c "import sys,json;print(json.load(sys.stdin)['request_id'])")/accept \
+  -H "Authorization: Bearer $DJ"
+```
+
+### 5. Панели (собранные)
+
+```sh
+cd apps/web-club  && npm install && npm run dev   # панель клуба
+cd apps/web-admin && npm install && npm run dev   # панель админа
+```
+
+### Приложения (Flutter)
+
+`apps/mobile-guest/`, `apps/mobile-dj/` — каркасы с темой и WS-live
+(см. README внутри; `flutter run` при установленном SDK).
+
+---
+
+## Что работает (Test Mode)
+
+| Модуль | Статус |
+|---|---|
+| Identity (JWT, 2FA, RBAC, refresh-ротация) | ✅ |
+| Сессии, QR (IANA-зоны, авто-закрытие) | ✅ |
+| Запросы треков, очередь DJ, пауза приёма | ✅ |
+| Платежи (МОК-провайдер, вебхуки, идемпотентность, ledger) | ✅ |
+| Выплаты (порог, финальные, on_hold+инциденты, сверка) | ✅ |
+| Антифрод, GDPR-джобы, TOTP-шифрование | ✅ |
+| WS-live (очередь DJ, статусы гостя) | ✅ |
+| Панельные эндпоинты (dashboard, тарифы, настройки) | ✅ |
+| Панели клуба/админа (React) | ✅ live |
+| Приложения гость/DJ (Flutter) | ✅ каркасы |
+
+**80 тестов / clippy 0 / OpenAPI 0.7.0.** Прод-внешние интеграции
+(Stripe Connect, музыкальный каталог) — ждут решений владельца
+(Q11–Q15, B5): см. `IMPLEMENTATION_STATUS.md`.
+
+## Не прод
+
+- Stripe — мок (реальные деньги НЕ проводятся);
+- каталог — 5 демо-треков (лицензии B5);
+- секреты — dev-значения по умолчанию.
