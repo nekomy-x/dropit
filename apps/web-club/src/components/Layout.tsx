@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { clearTokens } from '../api/client';
 
 const NAV_ITEMS: ReadonlyArray<{ to: string; label: string }> = [
   { to: '/dashboard', label: 'Dashboard' },
@@ -10,15 +11,17 @@ const NAV_ITEMS: ReadonlyArray<{ to: string; label: string }> = [
 
 /**
  * Authenticated shell: sidebar navigation + content outlet.
- * F7 skeleton: the session cookie is the source of truth; a real logout
- * endpoint (`POST /v1/auth/club/logout`) arrives with the F1/F2 backend.
+ * Auth is an in-memory Bearer token (see api/client.ts); "sign out" drops
+ * it. TODO(httpOnly-cookie-auth): real server-side logout once the
+ * httpOnly cookie sessions land on the backend.
  */
 export default function Layout() {
   const navigate = useNavigate();
 
-  // Minimal guard: without a session the API returns 401 and pages redirect
+  // Minimal guard: without a token the API returns 401 and pages redirect
   // to /login themselves; here we just wire the manual "sign out" action.
   const signOut = () => {
+    clearTokens();
     navigate('/login', { replace: true });
   };
 

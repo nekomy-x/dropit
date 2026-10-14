@@ -1,8 +1,9 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { clearTokens } from '../api/client';
 
 const NAV_SECTIONS: ReadonlyArray<{
   title: string;
-  items: ReadonlyArray<{ to: string; label: string }>;
+  items: ReadonlyArray<{ to: string; label: string; live?: boolean }>;
 }> = [
   {
     title: 'Operations',
@@ -16,8 +17,9 @@ const NAV_SECTIONS: ReadonlyArray<{
   {
     title: 'Finance & safety',
     items: [
+      { to: '/payouts', label: 'Payouts', live: true },
+      { to: '/incidents', label: 'Incidents', live: true },
       { to: '/payments', label: 'Payments' },
-      { to: '/incidents', label: 'Incidents' },
       { to: '/audit-log', label: 'Audit log' },
     ],
   },
@@ -29,11 +31,18 @@ const NAV_SECTIONS: ReadonlyArray<{
 
 /**
  * Admin shell: grouped sidebar navigation + content outlet.
- * Logout endpoint (`POST /v1/auth/admin/logout`) ships with the F1 backend.
+ * Auth is an in-memory Bearer token (see api/client.ts); "sign out" drops
+ * it. TODO(httpOnly-cookie-auth): real server-side logout once the
+ * httpOnly cookie sessions land on the backend. Items marked `live` are
+ * backed by implemented backend routes (F6); the rest render
+ * waiting-for-backend empty states.
  */
 export default function Layout() {
   const navigate = useNavigate();
-  const signOut = () => navigate('/login', { replace: true });
+  const signOut = () => {
+    clearTokens();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <div className="flex min-h-screen">
@@ -55,7 +64,7 @@ export default function Layout() {
               </p>
               <ul className="space-y-1">
                 {section.items.map((item) => (
-                  <li key={item.to}>
+                  <li key={item.to} className="flex items-center gap-2">
                     <NavLink
                       to={item.to}
                       className={({ isActive }) =>
@@ -68,6 +77,14 @@ export default function Layout() {
                     >
                       {item.label}
                     </NavLink>
+                    {item.live ? (
+                      <span
+                        className="rounded bg-green-900/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-green-300"
+                        title="Backend endpoint implemented"
+                      >
+                        live
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>

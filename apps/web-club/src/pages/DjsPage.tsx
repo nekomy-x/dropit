@@ -3,9 +3,9 @@ import {
   ApiRequestError,
   getDjs,
   inviteDj,
+  NotImplementedStubError,
   type Dj,
   type DjInviteRequest,
-  type Page,
 } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
 import ErrorState from '../components/ErrorState';
@@ -17,10 +17,27 @@ interface InviteState {
   success: boolean;
 }
 
-/** DJs page: list of invited DJs + invite form (email is sent by the backend). */
+/** Waiting-for-backend notice: GET /v1/club/djs is not implemented yet. */
+function WaitingForBackend() {
+  return (
+    <p
+      className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
+      role="status"
+    >
+      DJ roster is waiting for the backend — <code>GET /v1/club/djs</code> and{' '}
+      <code>POST /v1/club/djs/invite</code> are not implemented yet (F3+).
+    </p>
+  );
+}
+
+/**
+ * DJs page — reference-data CRUD is a "backend not implemented yet" surface:
+ * both client methods reject locally with a 501 stub until the backend ships
+ * the club DJ endpoints.
+ */
 export default function DjsPage() {
   const fetchDjs = useCallback(() => getDjs(), []);
-  const { data, loading, error, reload } = useAsyncData<Page<Dj>>(fetchDjs);
+  const { data, loading, error } = useAsyncData<{ items: Dj[] }>(fetchDjs);
 
   const [invite, setInvite] = useState<DjInviteRequest>({
     email: '',
@@ -39,12 +56,13 @@ export default function DjsPage() {
       await inviteDj(invite);
       setInvite({ email: '', displayName: '' });
       setInviteState({ submitting: false, error: null, success: true });
-      reload();
     } catch (err) {
       setInviteState({
         submitting: false,
         error:
-          err instanceof ApiRequestError ? err.message : 'Invite failed',
+          err instanceof ApiRequestError || err instanceof NotImplementedStubError
+            ? err.message
+            : 'Invite failed',
         success: false,
       });
     }
@@ -65,52 +83,14 @@ export default function DjsPage() {
           <div className="mt-4">
             {loading ? <Loading label="Loading DJs…" /> : null}
             {error ? (
-              <ErrorState
-                message={error.message}
-                code={error.code}
-                onRetry={reload}
-              />
-            ) : null}
-            {data ? (
-              data.items.length === 0 ? (
-                <p className="text-sm text-neutral-400">
-                  No DJs yet — invite your first DJ using the form.
-                </p>
+              error.notImplemented ? (
+                <WaitingForBackend />
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                      <th className="py-2 pr-4 font-medium">Name</th>
-                      <th className="py-2 pr-4 font-medium">Email</th>
-                      <th className="py-2 pr-4 font-medium">Stripe</th>
-                      <th className="py-2 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.items.map((dj) => (
-                      <tr
-                        key={dj.id}
-                        className="border-b border-neutral-800/60"
-                      >
-                        <td className="py-2.5 pr-4 font-medium text-neutral-100">
-                          {dj.displayName}
-                        </td>
-                        <td className="py-2.5 pr-4 text-neutral-400">
-                          {dj.email}
-                        </td>
-                        <td className="py-2.5 pr-4 text-neutral-400">
-                          {dj.stripeOnboardingStatus}
-                        </td>
-                        <td className="py-2.5">
-                          <span className="rounded-full bg-neutral-800 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-neutral-300">
-                            {dj.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <ErrorState message={error.message} code={error.code} />
               )
+            ) : null}
+            {data && data.items.length === 0 ? (
+              <p className="text-sm text-neutral-400">No DJs yet.</p>
             ) : null}
           </div>
         </section>
@@ -154,12 +134,6 @@ export default function DjsPage() {
                 {inviteState.error}
               </p>
             ) : null}
-            {inviteState.success ? (
-              <p className="text-sm text-green-300" role="status">
-                Invitation sent. The DJ will receive an email with sign-up
-                instructions.
-              </p>
-            ) : null}
 
             <button
               type="submit"
@@ -172,6 +146,11 @@ export default function DjsPage() {
             >
               {inviteState.submitting ? 'Inviting…' : 'Send invitation'}
             </button>
+
+            <p className="text-xs text-neutral-500">
+              Invitations are a backend-not-implemented stub — the request is
+              rejected locally (501) until the endpoint ships.
+            </p>
           </form>
         </section>
       </div>

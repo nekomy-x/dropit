@@ -10,7 +10,8 @@ import EarningsPage from './pages/EarningsPage';
 export default function App() {
   return (
     <Routes>
-      {/* Login is standalone (no sidebar) until the session cookie exists. */}
+      {/* Login is standalone (no sidebar) — Bearer token is stored in memory
+          after the password/2FA steps (see api/client.ts). */}
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<Layout />}>
@@ -21,7 +22,8 @@ export default function App() {
         <Route path="/earnings" element={<EarningsPage />} />
       </Route>
 
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      {/* Sessions is the only fully live club flow (F2) — the default. */}
+      <Route path="*" element={<Navigate to="/sessions" replace />} />
     </Routes>
   );
 }

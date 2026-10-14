@@ -1,86 +1,50 @@
 import { useCallback } from 'react';
 import { getProfile, type ClubProfile } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
-import ErrorState from '../components/ErrorState';
-import Loading from '../components/Loading';
 
-/** GET /v1/club/profile — overview card for the club home screen. */
+/**
+ * Dashboard — "backend not implemented yet": GET /v1/club/profile has no
+ * backend route yet, so the client method rejects locally with a 501 stub
+ * and the page renders a waiting-for-backend empty state. The live club
+ * surface is the Sessions page (F2).
+ */
 export default function DashboardPage() {
   const fetchProfile = useCallback(() => getProfile(), []);
-  const { data, loading, error, reload } = useAsyncData<ClubProfile>(fetchProfile);
+  const { data, loading, error } = useAsyncData<ClubProfile>(fetchProfile);
+
+  void data;
 
   return (
     <div>
       <h1 className="page-title">Dashboard</h1>
       <p className="page-subtitle">
-        Club overview. Live session metrics arrive with the F2 backend.
+        Club overview. Live session management is on the Sessions page.
       </p>
 
       <div className="mt-6">
-        {loading ? <Loading label="Loading club profile…" /> : null}
-
-        {error ? (
-          <ErrorState
-            message={error.message}
-            code={error.code}
-            onRetry={reload}
-          />
+        {loading ? (
+          <p className="text-sm text-neutral-400">Loading club profile…</p>
         ) : null}
 
-        {data ? (
-          <div className="grid gap-6 md:grid-cols-2">
-            <section className="card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Club profile
-              </h2>
-              <dl className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-neutral-400">Name</dt>
-                  <dd className="font-medium text-white">{data.name}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-neutral-400">Address</dt>
-                  <dd className="font-medium text-neutral-200">{data.address}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-neutral-400">Country</dt>
-                  <dd className="font-medium text-neutral-200">{data.country}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-neutral-400">Status</dt>
-                  <dd>
-                    <span className="rounded-full bg-green-900/40 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-green-300">
-                      {data.status}
-                    </span>
-                  </dd>
-                </div>
-              </dl>
-            </section>
-
-            <section className="card">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Stripe payouts
-              </h2>
-              <p className="mt-4 text-sm text-neutral-300">
-                Onboarding status:{' '}
-                <span className="font-semibold text-white">
-                  {data.stripeOnboardingStatus}
-                </span>
-              </p>
-              <p className="mt-2 text-sm text-neutral-400">
-                A verified Stripe account is required before guests can pay for
-                requests in your sessions (see the payout policy in the
-                technical map, Part V).
-              </p>
-              <a
-                href="#stripe"
-                className="btn-secondary mt-4 inline-flex"
-                aria-disabled="true"
-              >
-                Start onboarding
-              </a>
-            </section>
-          </div>
+        {error ? (
+          error.notImplemented ? (
+            <p
+              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
+              role="status"
+            >
+              Club profile is waiting for the backend —{' '}
+              <code>GET /v1/club/profile</code> is not implemented yet. Head to{' '}
+              <a href="/sessions" className="text-brand-500 hover:text-brand-600">
+                Sessions
+              </a>{' '}
+              for the live shift flow (open session, QR, close).
+            </p>
+          ) : (
+            <p className="text-sm text-red-300" role="alert">
+              {error.message}
+              {error.code ? ` (${error.code})` : ''}
+            </p>
+          )
         ) : null}
       </div>
     </div>

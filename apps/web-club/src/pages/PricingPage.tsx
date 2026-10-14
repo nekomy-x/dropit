@@ -3,7 +3,7 @@ import {
   ApiRequestError,
   createPricing,
   getPricing,
-  type Page,
+  NotImplementedStubError,
   type PricingPolicy,
 } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
@@ -33,12 +33,14 @@ function validatePriceMinor(value: string): string | null {
 }
 
 /**
- * Pricing page: history of pricing_policy rows + form for a new price.
- * Every change creates a NEW row (Q6) — paid requests keep their snapshot.
+ * Pricing page — "backend not implemented yet": GET/POST /v1/club/pricing
+ * have no backend routes yet (pricing_policy reference data lands with F3+).
+ * The client methods reject locally with a 501 stub; the page renders a
+ * waiting-for-backend empty state.
  */
 export default function PricingPage() {
   const fetchPricing = useCallback(() => getPricing(), []);
-  const { data, loading, error, reload } = useAsyncData<Page<PricingPolicy>>(
+  const { data, loading, error, reload } = useAsyncData<{ items: PricingPolicy[] }>(
     fetchPricing,
   );
 
@@ -59,19 +61,22 @@ export default function PricingPage() {
     try {
       // djShareBp: null = platform default share (Q1: 30% commission,
       // remainder 50/50 club/DJ) — per-club override UI lands with F7 design.
-      await createPricing({ priceMinor: Number(priceMinor), djShareBp: null }, crypto.randomUUID());
+      await createPricing(
+        { priceMinor: Number(priceMinor), djShareBp: null },
+        crypto.randomUUID(),
+      );
       setPriceMinor('');
       reload();
     } catch (err) {
       setSubmitError(
-        err instanceof ApiRequestError ? err.message : 'Could not save pricing',
+        err instanceof ApiRequestError || err instanceof NotImplementedStubError
+          ? err.message
+          : 'Could not save pricing',
       );
     } finally {
       setSubmitting(false);
     }
   };
-
-  const activePolicy = data?.items.find((p) => p.validTo === null) ?? null;
 
   return (
     <div>
@@ -81,20 +86,30 @@ export default function PricingPage() {
         only — paid requests keep the price they were created with.
       </p>
 
+      {loading ? <Loading label="Loading pricing history…" /> : null}
+      {error ? (
+        error.notImplemented ? (
+          <p
+            className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
+            role="status"
+          >
+            Pricing is waiting for the backend —{' '}
+            <code>GET/POST /v1/club/pricing</code> are not implemented yet
+            (F3+). The form below is a local 501 stub until then.
+          </p>
+        ) : (
+          <ErrorState message={error.message} code={error.code} onRetry={reload} />
+        )
+      ) : null}
+
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
         <section className="card">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
             Current price
           </h2>
-          {activePolicy ? (
-            <p className="mt-4 text-3xl font-bold text-white">
-              {formatMinor(activePolicy.priceMinor)}
-            </p>
-          ) : (
-            <p className="mt-4 text-sm text-neutral-400">
-              No active pricing policy yet.
-            </p>
-          )}
+          <p className="mt-4 text-sm text-neutral-400">
+            Unknown until the pricing backend lands.
+          </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <div>
@@ -146,57 +161,47 @@ export default function PricingPage() {
             History
           </h2>
           <div className="mt-4">
-            {loading ? <Loading label="Loading pricing history…" /> : null}
-            {error ? (
-              <ErrorState
-                message={error.message}
-                code={error.code}
-                onRetry={reload}
-              />
-            ) : null}
-            {data ? (
-              data.items.length === 0 ? (
-                <p className="text-sm text-neutral-400">
-                  No pricing policies yet.
-                </p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                      <th className="py-2 pr-4 font-medium">Price</th>
-                      <th className="py-2 pr-4 font-medium">Valid from</th>
-                      <th className="py-2 pr-4 font-medium">Valid to</th>
-                      <th className="py-2 font-medium">DJ share</th>
+            {data && data.items.length > 0 ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
+                    <th className="py-2 pr-4 font-medium">Price</th>
+                    <th className="py-2 pr-4 font-medium">Valid from</th>
+                    <th className="py-2 pr-4 font-medium">Valid to</th>
+                    <th className="py-2 font-medium">DJ share</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((policy) => (
+                    <tr
+                      key={policy.id}
+                      className="border-b border-neutral-800/60"
+                    >
+                      <td className="py-2.5 pr-4 font-medium text-neutral-100">
+                        {formatMinor(policy.priceMinor)}
+                      </td>
+                      <td className="py-2.5 pr-4 text-neutral-400">
+                        {new Date(policy.validFrom).toLocaleDateString()}
+                      </td>
+                      <td className="py-2.5 pr-4 text-neutral-400">
+                        {policy.validTo
+                          ? new Date(policy.validTo).toLocaleDateString()
+                          : 'active'}
+                      </td>
+                      <td className="py-2.5 text-neutral-400">
+                        {policy.djShareBp === null
+                          ? 'platform default'
+                          : `${(policy.djShareBp / 100).toFixed(1)} %`}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {data.items.map((policy) => (
-                      <tr
-                        key={policy.id}
-                        className="border-b border-neutral-800/60"
-                      >
-                        <td className="py-2.5 pr-4 font-medium text-neutral-100">
-                          {formatMinor(policy.priceMinor)}
-                        </td>
-                        <td className="py-2.5 pr-4 text-neutral-400">
-                          {new Date(policy.validFrom).toLocaleDateString()}
-                        </td>
-                        <td className="py-2.5 pr-4 text-neutral-400">
-                          {policy.validTo
-                            ? new Date(policy.validTo).toLocaleDateString()
-                            : 'active'}
-                        </td>
-                        <td className="py-2.5 text-neutral-400">
-                          {policy.djShareBp === null
-                            ? 'platform default'
-                            : `${(policy.djShareBp / 100).toFixed(1)} %`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            ) : null}
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-neutral-400">
+                No pricing policies yet — waiting for the backend.
+              </p>
+            )}
           </div>
         </section>
       </div>

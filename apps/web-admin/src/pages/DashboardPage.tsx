@@ -1,13 +1,18 @@
 import { useCallback } from 'react';
 import { getDashboardNow, type DashboardNow } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
-import ErrorState from '../components/ErrorState';
-import Loading from '../components/Loading';
 
-/** GET /v1/admin/dashboard/now — sessions, req/min, turnover, open incidents. */
+/**
+ * Dashboard — "backend not implemented yet": GET /v1/admin/dashboard/now
+ * has no backend route yet, so the client method rejects locally with a
+ * 501 stub and the page renders a waiting-for-backend empty state.
+ * The live admin surface is Payouts + Incidents (F6).
+ */
 export default function DashboardPage() {
   const fetchNow = useCallback(() => getDashboardNow(), []);
-  const { data, loading, error, reload } = useAsyncData<DashboardNow>(fetchNow);
+  const { data, loading, error } = useAsyncData<DashboardNow>(fetchNow);
+
+  void data;
 
   return (
     <div>
@@ -17,62 +22,34 @@ export default function DashboardPage() {
       </p>
 
       <div className="mt-6">
-        {loading ? <Loading label="Loading platform metrics…" /> : null}
-        {error ? (
-          <ErrorState
-            message={error.message}
-            code={error.code}
-            onRetry={reload}
-          />
+        {loading ? (
+          <p className="text-sm text-neutral-400">Loading platform metrics…</p>
         ) : null}
-        {data ? (
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-            <div className="card">
-              <p className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Active sessions
-              </p>
-              <p className="mt-3 text-3xl font-bold text-white">
-                {data.activeSessions}
-              </p>
-            </div>
-            <div className="card">
-              <p className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Requests / minute
-              </p>
-              <p className="mt-3 text-3xl font-bold text-white">
-                {data.requestsPerMinute}
-              </p>
-            </div>
-            <div className="card">
-              <p className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Turnover today
-              </p>
-              <p className="mt-3 text-3xl font-bold text-brand-500">
-                {(data.turnoverTodayMinor / 100).toFixed(2)}{' '}
-                {data.currency}
-              </p>
-            </div>
-            <div className="card">
-              <p className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-                Open incidents
-              </p>
-              <p
-                className={`mt-3 text-3xl font-bold ${
-                  data.openIncidents > 0 ? 'text-red-400' : 'text-white'
-                }`}
-              >
-                {data.openIncidents}
-              </p>
-              {data.openIncidents > 0 ? (
-                <a
-                  href="/incidents"
-                  className="mt-2 inline-block text-xs font-medium text-brand-500 hover:text-brand-600"
-                >
-                  Review incidents →
-                </a>
-              ) : null}
-            </div>
-          </div>
+
+        {error ? (
+          error.notImplemented ? (
+            <p
+              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
+              role="status"
+            >
+              Live platform metrics are waiting for the backend —{' '}
+              <code>GET /v1/admin/dashboard/now</code> is not implemented yet.
+              The live admin functions are{' '}
+              <a href="/payouts" className="text-brand-500 hover:text-brand-600">
+                Payouts
+              </a>{' '}
+              and{' '}
+              <a href="/incidents" className="text-brand-500 hover:text-brand-600">
+                Incidents
+              </a>{' '}
+              (F6).
+            </p>
+          ) : (
+            <p className="text-sm text-red-300" role="alert">
+              {error.message}
+              {error.code ? ` (${error.code})` : ''}
+            </p>
+          )
         ) : null}
       </div>
     </div>

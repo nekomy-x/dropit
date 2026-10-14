@@ -1,14 +1,6 @@
 import { useCallback, useState } from 'react';
-import {
-  listPayments,
-  type AdminPayment,
-  type Page,
-  type PaymentFilters,
-  type PaymentStatus,
-} from '../api/client';
+import { listPayments, type AdminPayment, type PaymentStatus } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
-import ErrorState from '../components/ErrorState';
-import Loading from '../components/Loading';
 
 const STATUS_OPTIONS: ReadonlyArray<PaymentStatus> = [
   'captured',
@@ -18,32 +10,22 @@ const STATUS_OPTIONS: ReadonlyArray<PaymentStatus> = [
   'cancelled',
 ];
 
-const STATUS_BADGE: Record<PaymentStatus, string> = {
-  intent: 'bg-neutral-800 text-neutral-300',
-  processing: 'bg-blue-900/40 text-blue-300',
-  captured: 'bg-green-900/40 text-green-300',
-  partially_refunded: 'bg-amber-900/40 text-amber-300',
-  refunded: 'bg-amber-900/40 text-amber-300',
-  failed: 'bg-red-900/40 text-red-300',
-  cancelling: 'bg-neutral-800 text-neutral-300',
-  cancelled: 'bg-neutral-800 text-neutral-500',
-};
-
-/** GET /v1/admin/payments?filters — payment operations table. */
+/**
+ * Payments — "backend not implemented yet": GET /v1/admin/payments has no
+ * backend route yet (the payment surface implemented in F5 is the guest
+ * confirm flow + Stripe webhooks), so the client method rejects locally
+ * with a 501 stub and the page renders a waiting-for-backend empty state.
+ * The disabled filter controls below reserve the UI for the real endpoint.
+ */
 export default function PaymentsPage() {
-  const [status, setStatus] = useState<PaymentStatus | ''>('');
-  const [clubId, setClubId] = useState('');
+  const [status] = useState<PaymentStatus | ''>('');
+  const [clubId] = useState('');
 
-  const filters: PaymentFilters = {};
-  if (status !== '') filters.status = status;
-  if (clubId.trim() !== '') filters.clubId = clubId.trim();
+  void status;
+  void clubId;
 
-  const fetchPayments = useCallback(
-    () => listPayments(filters),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [status, clubId],
-  );
-  const { data, loading, error, reload } = useAsyncData<Page<AdminPayment>>(
+  const fetchPayments = useCallback(() => listPayments(), []);
+  const { data, loading, error } = useAsyncData<{ items: AdminPayment[] }>(
     fetchPayments,
   );
 
@@ -52,10 +34,67 @@ export default function PaymentsPage() {
       <h1 className="page-title">Payments</h1>
       <p className="page-subtitle">
         All guest payments with their lifecycle status. Split details per
-        payment (`/payments/:id/splits`) arrive with the F5 backend.
+        payment arrive with the payments admin endpoint.
       </p>
 
-      <div className="mt-6 flex flex-wrap items-end gap-4">
+      <div className="mt-6">
+        {loading ? (
+          <p className="text-sm text-neutral-400">Loading payments…</p>
+        ) : null}
+
+        {error ? (
+          error.notImplemented ? (
+            <p
+              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
+              role="status"
+            >
+              The payments table is waiting for the backend —{' '}
+              <code>GET /v1/admin/payments</code> is not implemented yet
+              (F5 implements the guest confirm flow and webhooks; the admin
+              read endpoint is still pending). The filters below are inert
+              stubs.
+            </p>
+          ) : (
+            <p className="text-sm text-red-300" role="alert">
+              {error.message}
+              {error.code ? ` (${error.code})` : ''}
+            </p>
+          )
+        ) : null}
+      </div>
+
+      {data && data.items.length > 0 ? (
+        <div className="card mt-6 overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
+                <th className="py-3 px-6 font-medium">Payment</th>
+                <th className="py-3 px-4 font-medium">Amount</th>
+                <th className="py-3 px-4 font-medium">Status</th>
+                <th className="py-3 px-6 font-medium">Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((payment) => (
+                <tr key={payment.id} className="border-b border-neutral-800/60">
+                  <td className="py-3 px-6 font-mono text-xs text-neutral-400">
+                    {payment.id}
+                  </td>
+                  <td className="py-3 px-4 font-medium text-neutral-100">
+                    {(payment.amountMinor / 100).toFixed(2)} {payment.currency}
+                  </td>
+                  <td className="py-3 px-4 text-neutral-400">{payment.status}</td>
+                  <td className="py-3 px-6 text-neutral-400">
+                    {new Date(payment.createdAt).toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <div className="mt-6 flex flex-wrap items-end gap-4 opacity-50" aria-hidden="true">
         <div>
           <label htmlFor="payment-status" className="field-label">
             Status
@@ -64,7 +103,7 @@ export default function PaymentsPage() {
             id="payment-status"
             className="field-input"
             value={status}
-            onChange={(e) => setStatus(e.target.value as PaymentStatus | '')}
+            disabled
           >
             <option value="">All</option>
             {STATUS_OPTIONS.map((option) => (
@@ -84,74 +123,10 @@ export default function PaymentsPage() {
             placeholder="UUID"
             className="field-input"
             value={clubId}
-            onChange={(e) => setClubId(e.target.value)}
+            disabled
+            readOnly
           />
         </div>
-      </div>
-
-      <div className="mt-6">
-        {loading ? <Loading label="Loading payments…" /> : null}
-        {error ? (
-          <ErrorState
-            message={error.message}
-            code={error.code}
-            onRetry={reload}
-          />
-        ) : null}
-        {data ? (
-          data.items.length === 0 ? (
-            <p className="text-sm text-neutral-400">
-              No payments match the current filters.
-            </p>
-          ) : (
-            <div className="card overflow-x-auto p-0">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                    <th className="py-3 px-6 font-medium">Payment</th>
-                    <th className="py-3 px-4 font-medium">Amount</th>
-                    <th className="py-3 px-4 font-medium">Status</th>
-                    <th className="py-3 px-4 font-medium">Refunded</th>
-                    <th className="py-3 px-6 font-medium">Created</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((payment) => (
-                    <tr
-                      key={payment.id}
-                      className="border-b border-neutral-800/60"
-                    >
-                      <td className="py-3 px-6 font-mono text-xs text-neutral-400">
-                        {payment.id}
-                      </td>
-                      <td className="py-3 px-4 font-medium text-neutral-100">
-                        {(payment.amountMinor / 100).toFixed(2)}{' '}
-                        {payment.currency}
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${
-                            STATUS_BADGE[payment.status]
-                          }`}
-                        >
-                          {payment.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-neutral-400">
-                        {payment.refundedMinor > 0
-                          ? `${(payment.refundedMinor / 100).toFixed(2)} ${payment.currency}`
-                          : '—'}
-                      </td>
-                      <td className="py-3 px-6 text-neutral-400">
-                        {new Date(payment.createdAt).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        ) : null}
       </div>
     </div>
   );
