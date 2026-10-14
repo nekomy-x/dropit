@@ -562,6 +562,42 @@ paths:
   # ==========================================================
   # F5 — payments (Test Mode, МОК-провайдер до ADR-004)
   # ==========================================================
+  /v1/requests/{id}/payment:
+    post:
+      summary: Создание платёж-интента (гость)
+      description: |
+        Цена — из ДЕЙСТВУЮЩЕГО тарифа клуба (Q6), дефолт 3 €.
+        GUARD: request pending + session active. Провайдер — мок
+        (client_secret фиктивный, Test Mode до ADR-004).
+      security:
+        - deviceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Интент создан
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment_id, amount_minor, client_secret, status]
+                properties:
+                  payment_id: { type: string, format: uuid }
+                  request_id: { type: string, format: uuid }
+                  amount_minor: { type: integer }
+                  currency: { type: string }
+                  client_secret: { type: string }
+                  status: { type: string, enum: [intent] }
+        "409":
+          $ref: "#/components/responses/Error"
+
   /v1/payments/{id}/confirm:
     post:
       summary: Подтверждение оплаты (гость)

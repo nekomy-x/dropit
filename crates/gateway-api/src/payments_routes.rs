@@ -67,8 +67,152 @@ pub struct WebhookAck {
 
 pub fn payments_router() -> Router<ApiEnv> {
     Router::new()
+        .route("/v1/requests/:id/payment", post(create_payment_intent))
         .route("/v1/payments/:id/confirm", post(confirm_payment))
         .route("/v1/stripe/webhook", post(stripe_webhook))
+}
+
+// ============================================================
+// Create intent (гость): POST /v1/requests/:id/payment
+// ============================================================
+
+/// Создание платёж-интента для запроса. Цена — из ДЕЙСТВУЮЩЕГО
+/// тарифа клуба (Q6; комиссии платформы по умолчанию 30%/50-50
+/// ДО platform-settings). Idempotency-Key обязателен.
+/// Провайдер — мок (Test Mode): intent_id детерминирован.
+#[derive(serde::Serialize)]
+struct PaymentIntentResponse {
+    payment_id: Uuid,
+    request_id: Uuid,
+    amount_minor: i64,
+    currency: String,
+    /// Мок-провайдер: «client_secret» для «Stripe SDK» клиента.
+    client_secret: String,
+    status: String,
+}
+
+async fn create_payment_intent(
+    State(state): State<ApiEnv>,
+    Path(request_id): Path<Uuid>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let billing = match state.billing.clone() {
+        Some(b) => b,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let sessions = match state.sessions.clone() {
+        Some(s) => s,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    // Гость: device-token.
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+    let Some(token) = bearer else {
+        return crate::rbac::auth_error_response(ApiError::Unauthorized);
+    };
+    let Ok(guest_device_id) = Uuid::parse_str(&token) else {
+        return crate::rbac::auth_error_response(ApiError::Unauthorized);
+    };
+    let Some(idem_key) = headers
+        .get("idempotency-key")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string)
+    else {
+        return api_error(ApiError::ValidationError, "Idempotency-Key header required");
+    };
+
+    // Запрос: принадлежит гостю, статус pending.
+    let requests = match state.requests.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let row = match requests.find_request(request_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return api_error(ApiError::NotFound, "request not found"),
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    };
+    if row.guest_device_id != guest_device_id {
+        return api_error(ApiError::NotFound, "request not found");
+    }
+    if row.status != "pending" {
+        return api_error(ApiError::Conflict, "request is not pending");
+    }
+    // Сессия активна.
+    let session = match sessions.find_session(row.session_id).await {
+        Ok(Some(s)) => s,
+        _ => return api_error(ApiError::Internal, "db error"),
+    };
+    if session.status != "active" {
+        return api_error(ApiError::SessionClosed, "session is not active");
+    }
+
+    // Цена: действующий тариф клуба (Q6) или дефолт 300 (3 €).
+    let pool = state.repo.as_ref().map(|r| r.pool());
+    let price_minor: i64 = match pool {
+        Some(p) => sqlx::query_scalar::<_, i64>(
+            "SELECT price_minor FROM pricing_policy \
+             WHERE club_id = $1 AND valid_to IS NULL ORDER BY valid_from DESC LIMIT 1",
+        )
+        .bind(session.club_id)
+        .fetch_optional(&p)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(300),
+        None => 300,
+    };
+
+    // Создание payment (мок intent_id стабилен по ключу).
+    let intent_id = format!("pi_mock_{}", idem_key);
+    match billing
+        .create_payment(
+            request_id,
+            price_minor,
+            &idem_key,
+            &intent_id,
+            &dropit_infra_db::CommissionParams {
+                commission_bp: 3000,
+                dj_share_bp: 5000,
+                currency: "EUR".into(),
+            },
+        )
+        .await
+    {
+        Ok(payment) => (
+            StatusCode::CREATED,
+            Json(PaymentIntentResponse {
+                payment_id: payment.id,
+                request_id,
+                amount_minor: payment.amount_minor,
+                currency: "EUR".into(),
+                client_secret: format!(
+                    "{}__mock_secret",
+                    payment.stripe_payment_intent_id.clone().unwrap_or_default()
+                ),
+                status: payment.status,
+            }),
+        )
+            .into_response(),
+        Err(_) => api_error(ApiError::Internal, "db error"),
+    }
 }
 
 // ============================================================
