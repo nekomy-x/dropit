@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** бэкенд F0–F8 (Test Mode) + UI-трек (Flutter-гость, панели) запущены
+**Этап:** бэкенд F0–F8 + панельные эндпоинты + UI (Flutter-гость, панели live) — всё Test Mode
 
 ---
 
@@ -111,11 +111,18 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 
 **Каркас** (субагент, 45 файлов): типизированные API-клиенты, страницы, Layout, валидация PlatformSettings.
 
+**Панельные эндпоинты** (`panel_routes.rs`, коммит `d71fe2d`, e2e в `e2e_panels.rs`):
+- клуб: dashboard (сессия/запросы/доход), profile GET/PATCH, **pricing с историей Q6** (новая строка закрывает старую valid_to), earnings (today/week/month), djs, payouts;
+- админ: dashboard/now, clubs + **блокировка/пауза с записью в audit_log**, payments + splits, audit-log, **platform-settings GET/PATCH** (NULL-семантика с clear-флагами, только валидация диапазонов — значения задаёт владелец, Q11), djs;
+- DJ: shift, stats/today (§1.7);
+- e2e: settings roundtrip + NULL-clear + range-reject, pricing Q6, блокировка + аудит, RBAC-негативы;
+- клиенты панелей переведены на live-имплементации (осталось 3 заглушки: inviteDj, createClub, listGuests).
+
 **Подключение к живым контрактам** (субагент, openapi.yaml 0.5.0):
 - логин-флоу: `TokenPair | TotpChallenge` → 2FA-шаг → refresh-ротация; Bearer в памяти (НЕ localStorage); 401 → /login
 - web-club живое: createSession (timezone + dj_id), qr/generate (qr_token строка), close session
 - web-admin живое: **PayoutsPage** (список + Run cycle), **IncidentsPage** (список + Resolve), reconciliation/run
-- 24 нереализованных эндпоинта помечены «backend not implemented yet» с локальными 501-заглушками (dashboard, CRUD clubs, payments, audit-log, platform-settings — кандидаты в след. фазы)
+- изначально 24 эндпоинта были 501-заглушками; после панельных эндпоинтов (коммит d71fe2d) осталось 3: inviteDj, createClub, listGuests
 - **Сборка проверена**: `tsc --noEmit` — 0 ошибок в обоих app; `vite build` — успешно (web-club 187 КБ, web-admin 197 КБ)
 
 ### UI-трек: Flutter-приложение гостя (каркас)
@@ -128,8 +135,8 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **75 passed / 0 failed** (13 common + 42 domain + 18 gateway + 2 infra, включая e2e F1/F2/F4/F5/F6/F8) |
-| OpenAPI 3.1 (Redocly lint) | ✅ valid (0 errors) |
+| `cargo test --workspace` (хост, БД из compose) | ✅ **76 passed / 0 failed** (13 common + 42 domain + 19 gateway + 2 infra, включая e2e панелей) |
+| OpenAPI 3.1 (Redocly lint) | ✅ valid (0.6.0, панельные роуты) |
 | Git-история | ✅ 12 коммитов: F0A → … → F6 → docs → F8 |
 
 ## 4. Что является mock/stub или отсутствует
@@ -186,8 +193,8 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 ## 9. Следующий маленький этап
 
 **Дальше (выбор владельца):**
-1. **Дожать нереализованные эндпоинты панелей** (24 шт. с 501-заглушками: dashboard, CRUD, payments, audit-log, platform-settings) — чисто бэкенд-работа, могу автономно;
-2. **Приложение DJ (Flutter)** — dizayn-zadanie §1: логин 2FA, очередь, «сейчас играет», статистика;
+1. **Приложение DJ (Flutter)** — dizayn-zadanie §1: логин 2FA, очередь, «сейчас играет», статистика (shift/stats эндпоинты готовы);
+2. **Хвосты панелей** — inviteDj (email-инвайт), createClub (верификация), listGuests (антифрод-скоринг);
 3. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии);
 4. **F9** — k6-нагрузка, soak, пилот, сторы.
 
@@ -231,3 +238,6 @@ Flutter SDK на хосте не установлен: `flutter test` для mob
 | 2026-10-13 | UI: панели — `npm install` + `tsc --noEmit` | ✅ 0 ошибок в обоих app |
 | 2026-10-13 | UI: панели — `vite build` | ✅ обе собираются (187/197 КБ) |
 | 2026-10-13 | UI: панели подключены к контрактам | ✅ коммит `1d22ddb` |
+| 2026-10-13 | Панельные эндпоинты: e2e | ✅ settings/pricing/блокировка/RBAC |
+| 2026-10-13 | Панельные эндпоинты: клиенты live | ✅ tsc+vite зелёные |
+| 2026-10-13 | Панельные эндпоинты: коммит | ✅ `d71fe2d` |
