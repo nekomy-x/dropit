@@ -15,7 +15,7 @@
  *     - GET  /v1/admin/incidents      → {items: [{id, kind, message}]}
  *     - POST /v1/admin/incidents/:id/resolve → {resolved: true}
  *
- *   NOT IMPLEMENTED YET on the backend — local 501 stubs:
+ *   LIVE: dashboard/now, clubs list/patch, djs, payments, audit-log, platform-settings;
  *     - GET /v1/admin/dashboard/now
  *     - CRUD /v1/admin/clubs (+ :id GET/PATCH)
  *     - GET /v1/admin/djs, GET /v1/admin/guests
@@ -423,47 +423,94 @@ export function resolveIncident(id: string): Promise<{ resolved: boolean }> {
 }
 
 // ---------------------------------------------------------------------------
-// NOT IMPLEMENTED YET — local 501 stubs ("backend not implemented yet")
+// LIVE panel endpoints (panel_routes.rs) + remaining 501 stubs
 // ---------------------------------------------------------------------------
-// The gateway has no admin dashboard/clubs/djs/guests/payments/audit-log/
-// platform-settings routes. These signatures keep the pages compiling and
-// render explicit "waiting for backend" states; each call rejects locally
-// with a 501-style error instead of hitting the network.
-// TODO(backend): implement the admin reference-data endpoints, then
-// replace the stub bodies with real `request<T>()` calls.
-// ---------------------------------------------------------------------------
+// dashboard/now, clubs (list + patch-status), djs, payments, audit-log,
+// platform-settings are LIVE. Guests listing and club creation remain
+// backend TODOs (marked below).
 
-/** backend not implemented yet */
+/** GET /v1/admin/dashboard/now — live. */
 export function getDashboardNow(): Promise<DashboardNow> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/dashboard/now'));
+  return request<Record<string, unknown>>('/admin/dashboard/now').then((r) => ({
+    activeSessions: Number(r.active_sessions ?? 0),
+    requestsPerMinute: Number(r.requests_per_minute ?? 0),
+    turnoverTodayMinor: Number(r.turnover_today_minor ?? 0),
+    currency: String(r.currency ?? 'EUR'),
+    openIncidents: 0,
+  }));
 }
 
-/** backend not implemented yet */
-export function listClubs(): Promise<{ items: Club[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/clubs'));
+/** GET /v1/admin/clubs — live. */
+export async function listClubs(): Promise<{ items: Club[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/clubs');
+  return {
+    items: r.items.map((it) => ({
+      id: String(it.id),
+      name: String(it.name ?? ''),
+      slug: '',
+      address: '',
+      country: '',
+      email: String(it.email ?? ''),
+      phone: '',
+      logoUrl: null,
+      stripeAccountId: null,
+      stripeOnboardingStatus: 'pending',
+      status: ((it.status as Club['status']) ?? 'active'),
+      createdAt: '',
+    })),
+  };
 }
 
-/** backend not implemented yet */
+/** backend not implemented yet: создание клуба */
 export function createClub(_input: ClubCreateInput): Promise<Club> {
   return Promise.reject(new NotImplementedStubError('POST /v1/admin/clubs'));
 }
 
-/** backend not implemented yet */
+/** backend not implemented yet: карточка клуба */
 export function getClub(_id: string): Promise<Club> {
   return Promise.reject(new NotImplementedStubError('GET /v1/admin/clubs/:id'));
 }
 
-/** backend not implemented yet */
-export function patchClub(_id: string, _patch: ClubPatchInput): Promise<Club> {
-  return Promise.reject(new NotImplementedStubError('PATCH /v1/admin/clubs/:id'));
+/** PATCH /v1/admin/clubs/:id — live (статус: блокировка/пауза; аудит пишется). */
+export function patchClub(id: string, patch: ClubPatchInput): Promise<Club> {
+  const body: Record<string, unknown> = {};
+  if (patch.status !== undefined) body.status = patch.status;
+  return request<Record<string, unknown>>(
+    `/admin/clubs/${encodeURIComponent(id)}`,
+    { method: 'PATCH', body },
+  ).then((r) => ({
+    id: String(r.id ?? id),
+    name: '',
+    slug: '',
+    address: '',
+    country: '',
+    email: '',
+    phone: '',
+    logoUrl: null,
+    stripeAccountId: null,
+    stripeOnboardingStatus: 'pending',
+    status: ((r.status as Club['status']) ?? patch.status ?? 'active'),
+    createdAt: '',
+  }));
 }
 
-/** backend not implemented yet */
-export function listDjs(): Promise<{ items: AdminDj[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/djs'));
+/** GET /v1/admin/djs — live. */
+export async function listDjs(): Promise<{ items: AdminDj[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/djs');
+  return {
+    items: r.items.map((it) => ({
+      id: String(it.id),
+      clubId: (it.club_id as string | null) ?? null,
+      email: String(it.email ?? ''),
+      displayName: String(it.display_name ?? ''),
+      stripeOnboardingStatus: 'pending',
+      status: ((it.status as AdminDj['status']) ?? 'active'),
+      createdAt: '',
+    })),
+  };
 }
 
-/** backend not implemented yet */
+/** backend not implemented yet: список гостей */
 export function listGuests(): Promise<{ items: AdminGuest[] }> {
   return Promise.reject(new NotImplementedStubError('GET /v1/admin/guests'));
 }
@@ -474,26 +521,74 @@ export interface PaymentFilters {
   cursor?: string;
 }
 
-/** backend not implemented yet */
-export function listPayments(_filters: PaymentFilters = {}): Promise<{
+/** GET /v1/admin/payments — live (лимит, фильтры — TODO бэкенда). */
+export async function listPayments(_filters: PaymentFilters = {}): Promise<{
   items: AdminPayment[];
 }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/payments'));
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/payments');
+  return {
+    items: r.items.map((it) => ({
+      id: String(it.id),
+      requestId: String(it.request_id ?? ''),
+      amountMinor: Number(it.amount_minor ?? 0),
+      currency: 'EUR',
+      status: ((it.status as AdminPayment['status']) ?? 'intent'),
+      refundedMinor: 0,
+      failureReason: null,
+      createdAt: String(it.created_at ?? ''),
+      capturedAt: null,
+    })),
+  };
 }
 
-/** backend not implemented yet */
-export function getAuditLog(): Promise<{ items: AuditLogEntry[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/audit-log'));
+/** GET /v1/admin/audit-log — live. */
+export async function getAuditLog(): Promise<{ items: AuditLogEntry[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/audit-log');
+  return {
+    items: r.items.map((it) => ({
+      id: crypto.randomUUID(),
+      actorType: String(it.actor_type ?? ''),
+      actorId: String(it.actor_id ?? ''),
+      action: String(it.action ?? ''),
+      entity: String(it.entity ?? ''),
+      diff: null,
+      at: String(it.at ?? ''),
+    })),
+  };
 }
 
-/** backend not implemented yet */
+/** GET /v1/admin/platform-settings — live (NULL = не задано владельцем). */
 export function getPlatformSettings(): Promise<PlatformSettings> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/platform-settings'));
+  return request<Record<string, unknown>>('/admin/platform-settings').then(mapSettings);
 }
 
-/** backend not implemented yet */
+function mapSettings(r: Record<string, unknown>): PlatformSettings {
+  return {
+    commissionMode: (r.commission_mode === 'fixed' ? 'fixed' : 'percent'),
+    commissionPercentBp: Number(r.commission_percent_bp ?? 0),
+    commissionFixedMinor: Number(r.commission_fixed_minor ?? 0),
+    minPriceMinor: Number(r.min_price_minor ?? 0),
+    maxPriceMinor: Number(r.max_price_minor ?? 0),
+    djShareOfRemainderBp: Number(r.dj_share_of_remainder_bp ?? 0),
+    currency: String(r.currency ?? 'EUR'),
+    updatedAt: String(r.updated_at ?? ''),
+  };
+}
+
+/** PATCH /v1/admin/platform-settings — live (валидация диапазонов + аудит). */
 export function patchPlatformSettings(
-  _patch: PlatformSettingsPatch,
+  patch: PlatformSettingsPatch,
 ): Promise<PlatformSettings> {
-  return Promise.reject(new NotImplementedStubError('PATCH /v1/admin/platform-settings'));
+  const body: Record<string, unknown> = {};
+  if (patch.commissionMode !== undefined) body.commission_mode = patch.commissionMode;
+  if (patch.commissionPercentBp !== undefined) body.commission_percent_bp = patch.commissionPercentBp;
+  if (patch.commissionFixedMinor !== undefined) body.commission_fixed_minor = patch.commissionFixedMinor;
+  if (patch.minPriceMinor !== undefined) body.min_price_minor = patch.minPriceMinor;
+  if (patch.maxPriceMinor !== undefined) body.max_price_minor = patch.maxPriceMinor;
+  if (patch.djShareOfRemainderBp !== undefined)
+    body.dj_share_of_remainder_bp = patch.djShareOfRemainderBp;
+  return request<Record<string, unknown>>('/admin/platform-settings', {
+    method: 'PATCH',
+    body,
+  }).then(mapSettings);
 }

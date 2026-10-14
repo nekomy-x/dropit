@@ -8,6 +8,8 @@ mod e2e;
 #[cfg(test)]
 mod e2e_f8;
 #[cfg(test)]
+mod e2e_panels;
+#[cfg(test)]
 mod e2e_payments;
 #[cfg(test)]
 mod e2e_payouts;
@@ -15,6 +17,7 @@ mod e2e_payouts;
 mod e2e_requests;
 #[cfg(test)]
 mod e2e_sessions;
+mod panel_routes;
 mod payments;
 mod payments_routes;
 mod payouts_routes;

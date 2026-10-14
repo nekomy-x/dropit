@@ -12,7 +12,7 @@
  *     - POST /v1/club/sessions/:id/qr/generate → {session_id, qr_token, expires_at}
  *     - PATCH /v1/club/sessions/:id/close → SessionResponse
  *
- *   NOT IMPLEMENTED YET on the backend — methods below are local 501 stubs
+ *   Most endpoints are LIVE (panel_routes.rs); inviteDj is a 501 stub
  *   (club profile/pricing/DJs/earnings are F3+):
  *     - GET/PATCH /v1/club/profile
  *     - GET/POST /v1/club/pricing
@@ -364,50 +364,132 @@ export function closeSession(sessionId: string): Promise<SessionResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// NOT IMPLEMENTED YET — local 501 stubs ("backend not implemented yet")
+// LIVE endpoints (panel_routes.rs): profile / pricing / djs / earnings
 // ---------------------------------------------------------------------------
-// The backend (F0–F8) has no /v1/club/profile, /v1/club/pricing,
-// /v1/club/djs, /v1/club/earnings routes. These signatures keep the pages
-// compiling and render explicit "waiting for backend" states; each call
-// rejects locally with a 501-style error instead of hitting the network.
-// TODO(backend): implement the club reference-data endpoints (F3+), then
-// replace the stub bodies with real `request<T>()` calls.
-// ---------------------------------------------------------------------------
+// The backend implements these since the panel-endpoints milestone
+// (see docs/openapi.yaml "Панельные роуты"). Responses use snake_case;
+// mapped to the camelCase types below.
 
-/** backend not implemented yet */
-export function getProfile(): Promise<ClubProfile> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/club/profile'));
+/** GET /v1/club/profile — live. */
+export async function getProfile(): Promise<ClubProfile> {
+  const r = await request<Record<string, unknown>>('/club/profile');
+  return {
+    id: String(r.id),
+    name: String(r.name ?? ''),
+    slug: String(r.slug ?? ''),
+    address: String(r.address ?? ''),
+    country: String(r.country ?? ''),
+    email: String(r.email ?? ''),
+    phone: String(r.phone ?? ''),
+    logoUrl: (r.logo_url as string | null) ?? null,
+    stripeAccountId: null,
+    stripeOnboardingStatus: ((r.stripe_onboarding_status as ClubProfile['stripeOnboardingStatus']) ?? 'pending'),
+    status: ((r.status as ClubProfile['status']) ?? 'active'),
+    createdAt: '',
+  };
 }
 
-/** backend not implemented yet */
-export function patchProfile(_patch: ClubProfilePatch): Promise<ClubProfile> {
-  return Promise.reject(new NotImplementedStubError('PATCH /v1/club/profile'));
+/** PATCH /v1/club/profile — live. */
+export function patchProfile(patch: ClubProfilePatch): Promise<ClubProfile> {
+  // camelCase → snake_case body.
+  const body: Record<string, unknown> = {};
+  if (patch.name !== undefined) body.name = patch.name;
+  if (patch.address !== undefined) body.address = patch.address;
+  if (patch.country !== undefined) body.country = patch.country;
+  if (patch.phone !== undefined) body.phone = patch.phone;
+  if (patch.logoUrl !== undefined) body.logo_url = patch.logoUrl;
+  return request<Record<string, unknown>>('/club/profile', {
+    method: 'PATCH',
+    body,
+  }).then(getProfileMapping);
 }
 
-/** backend not implemented yet */
-export function getPricing(): Promise<{ items: PricingPolicy[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/club/pricing'));
+async function getProfileMapping(r: Record<string, unknown>): Promise<ClubProfile> {
+  return {
+    id: String(r.id),
+    name: String(r.name ?? ''),
+    slug: String(r.slug ?? ''),
+    address: String(r.address ?? ''),
+    country: String(r.country ?? ''),
+    email: String(r.email ?? ''),
+    phone: String(r.phone ?? ''),
+    logoUrl: (r.logo_url as string | null) ?? null,
+    stripeAccountId: null,
+    stripeOnboardingStatus: ((r.stripe_onboarding_status as ClubProfile['stripeOnboardingStatus']) ?? 'pending'),
+    status: ((r.status as ClubProfile['status']) ?? 'active'),
+    createdAt: '',
+  };
 }
 
-/** backend not implemented yet */
+/** GET /v1/club/pricing — live (история Q6: valid_to у старых). */
+export async function getPricing(): Promise<{ items: PricingPolicy[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/club/pricing');
+  return {
+    items: r.items.map((it) => ({
+      id: String(it.id),
+      clubId: '',
+      priceMinor: Number(it.price_minor),
+      djShareBp: (it.dj_share_bp as number | null) ?? null,
+      validFrom: String(it.valid_from),
+      validTo: (it.valid_to as string | null) ?? null,
+      createdAt: String(it.valid_from),
+    })),
+  };
+}
+
+/** POST /v1/club/pricing — live (новая строка, старая закрывается). */
 export function createPricing(
-  _input: { priceMinor: number; djShareBp: number | null },
+  input: { priceMinor: number; djShareBp: number | null },
   _idempotencyKey: string,
 ): Promise<PricingPolicy> {
-  return Promise.reject(new NotImplementedStubError('POST /v1/club/pricing'));
+  return request<Record<string, unknown>>('/club/pricing', {
+    method: 'POST',
+    body: {
+      price_minor: input.priceMinor,
+      dj_share_bp: input.djShareBp,
+    },
+  }).then((r) => ({
+    id: String(r.id),
+    clubId: '',
+    priceMinor: Number(r.price_minor),
+    djShareBp: (r.dj_share_bp as number | null) ?? null,
+    validFrom: new Date().toISOString(),
+    validTo: null,
+    createdAt: new Date().toISOString(),
+  }));
 }
 
-/** backend not implemented yet */
-export function getDjs(): Promise<{ items: Dj[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/club/djs'));
+/** GET /v1/club/djs — live. */
+export async function getDjs(): Promise<{ items: Dj[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>('/club/djs');
+  return {
+    items: r.items.map((it) => ({
+      id: String(it.id),
+      clubId: null,
+      email: String(it.email ?? ''),
+      displayName: String(it.display_name ?? ''),
+      stripeAccountId: null,
+      stripeOnboardingStatus: 'pending',
+      status: ((it.status as Dj['status']) ?? 'active'),
+      createdAt: '',
+    })),
+  };
 }
 
-/** backend not implemented yet */
+/** backend not implemented yet: приглашение DJ (email + инвайт-флоу) */
 export function inviteDj(_input: DjInviteRequest): Promise<Dj> {
   return Promise.reject(new NotImplementedStubError('POST /v1/club/djs/invite'));
 }
 
-/** backend not implemented yet */
-export function getEarnings(_period: string): Promise<EarningsSummary> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/club/earnings'));
+/** GET /v1/club/earnings?period= — live. */
+export function getEarnings(period: string): Promise<EarningsSummary> {
+  return request<Record<string, unknown>>(
+    `/club/earnings?period=${encodeURIComponent(period)}`,
+  ).then((r) => ({
+    period: String(r.period ?? period),
+    grossMinor: Number(r.gross_minor ?? 0),
+    netMinor: Number(r.net_minor ?? 0),
+    currency: 'EUR',
+    requestsCount: Number(r.payments ?? 0),
+  }));
 }

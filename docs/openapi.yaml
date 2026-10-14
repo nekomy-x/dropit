@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: DROP IT API
-  version: 0.5.0
+  version: 0.6.0
   description: |
     Контракт (F0A → F2). Реальные пути добавляются по фазам:
-    F1 ✅, F2 ✅, F4 ✅, F5 payments ✅, F6 payouts/reconciliation (Test Mode) ✅, F3 — catalog,
+    F1 ✅, F2 ✅, F4 ✅, F5 ✅, F6 ✅, panel endpoints ✅, F3 — catalog,
     F5 — payments. Breaking changes блокируются CI (oasdiff).
   contact:
     name: DROP IT
@@ -769,6 +769,181 @@ paths:
           description: Закрыт
         "404":
           $ref: "#/components/responses/Error"
+
+  # ==========================================================
+  # Панельные роуты (F7-бэкенд)
+  # ==========================================================
+  /v1/club/dashboard:
+    get:
+      summary: Дашборд клуба
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Активная сессия, запросы за день, доход
+  /v1/club/profile:
+    get:
+      summary: Профиль клуба
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Профиль }
+    patch:
+      summary: Обновить профиль
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Обновлённый профиль }
+  /v1/club/pricing:
+    get:
+      summary: История тарифов (Q6)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Политики цен (valid_to у старых)
+    post:
+      summary: Новая цена (старая закрывается)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [price_minor]
+              properties:
+                price_minor: { type: integer, minimum: 1 }
+                dj_share_bp: { type: integer, minimum: 0, maximum: 10000 }
+      responses:
+        "201": { description: Политика создана }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/club/earnings:
+    get:
+      summary: Доходы клуба за период
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [today, week, month] }
+      responses:
+        "200": { description: Нетто/брутто/платежи }
+  /v1/club/djs:
+    get:
+      summary: Диджеи клуба
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Список }
+  /v1/club/payouts:
+    get:
+      summary: Выплаты клуба
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: История выплат }
+  /v1/admin/dashboard/now:
+    get:
+      summary: "Дашборд админа: сессии, req/min, оборот"
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Метрики сейчас }
+  /v1/admin/clubs:
+    get:
+      summary: Список клубов (+обороты)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Список }
+  /v1/admin/clubs/{id}:
+    patch:
+      summary: Блокировка/пауза/верификация клуба
+      description: Статусные поля, НЕ delete (финансы). Пишется в audit_log.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, suspended, blocked, pending_verification] }
+      responses:
+        "200": { description: Статус обновлён }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/admin/payments:
+    get:
+      summary: Платежи (админ)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+      responses:
+        "200": { description: Список }
+  /v1/admin/payments/{id}/splits:
+    get:
+      summary: Сплиты платежа
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Разрез платежа }
+  /v1/admin/audit-log:
+    get:
+      summary: Аудит-лог (последние 100)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: append-only журнал }
+  /v1/admin/platform-settings:
+    get:
+      summary: Настройки платформы (NULL = не задано владельцем)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Текущие значения }
+    patch:
+      summary: Изменить настройки (валидация диапазонов, аудит)
+      description: |
+        Значения задаёт владелец (Q11); код проверяет только
+        диапазоны. clear_* флаги сбрасывают поля в NULL.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                commission_mode: { type: string, enum: [percent, fixed, unset] }
+                commission_percent_bp: { type: integer, minimum: 0, maximum: 10000 }
+                commission_fixed_minor: { type: integer }
+                min_price_minor: { type: integer, minimum: 1 }
+                max_price_minor: { type: integer, minimum: 1 }
+                dj_share_of_remainder_bp: { type: integer, minimum: 0, maximum: 10000 }
+                clear_commission_percent_bp: { type: boolean }
+                clear_commission_fixed_minor: { type: boolean }
+                clear_min_price_minor: { type: boolean }
+                clear_max_price_minor: { type: boolean }
+                clear_dj_share_of_remainder_bp: { type: boolean }
+      responses:
+        "200": { description: Обновлённые настройки }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/admin/djs:
+    get:
+      summary: Диджеи (админ)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Список }
+  /v1/dj/shift:
+    get:
+      summary: Текущая смена DJ
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Сессия или null }
+  /v1/dj/stats/today:
+    get:
+      summary: Статистика вечера DJ
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: Запросы/принято/сыграно/доход }
 
 components:
   securitySchemes:

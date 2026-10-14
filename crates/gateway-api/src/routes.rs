@@ -108,6 +108,7 @@ pub fn router(env: ApiEnv) -> Router {
         .merge(crate::requests_routes::requests_router())
         .merge(crate::payments_routes::payments_router())
         .merge(crate::payouts_routes::payouts_router())
+        .merge(crate::panel_routes::panel_router())
         .with_state(env)
 }
 
