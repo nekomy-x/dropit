@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** F0A + F0B + F1 + F2 + F4 + F5 + F6 + F8 (Test Mode) завершены; F3-домен и F7-каркасы параллельно
+**Этап:** бэкенд F0–F8 (Test Mode) + UI-трек (Flutter-гость, панели) запущены
 
 ---
 
@@ -105,9 +105,22 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | `.github/workflows/ci.yml` + `deny.toml` | cargo-deny: advisories (vulnerability/yanked = deny), licenses (unlicensed = deny, GPL запрещён) |
 | `crates/gateway-api/src/e2e_f8.rs` | **e2e F8**: 21-й запрос → 429 ✅; стейл-интент → cancelling ✅; сессия авто-закрыта, pending погашены ✅; GDPR: анонимизация (финансы на месте, гранты ревок), retention-sweep, DSR-экспорт ✅; TOTP v2 roundtrip + легаси ✅ |
 
-### F7 — каркасы панелей (параллельный трек, субагент)
+### F7 — панели клуба и админа (завершены + подключены к контрактам)
 
-`apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind, 45 файлов): типизированные API-клиенты контракта Части IV (CSRF, httpOnly-cookie, Idempotency-Key), страницы панелей, валидация PlatformSettings (бипсисы 0–10000, мин<макс). npm не запускался (нет сети), сборка — при первом запуске разработчиком.
+`apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind).
+
+**Каркас** (субагент, 45 файлов): типизированные API-клиенты, страницы, Layout, валидация PlatformSettings.
+
+**Подключение к живым контрактам** (субагент, openapi.yaml 0.5.0):
+- логин-флоу: `TokenPair | TotpChallenge` → 2FA-шаг → refresh-ротация; Bearer в памяти (НЕ localStorage); 401 → /login
+- web-club живое: createSession (timezone + dj_id), qr/generate (qr_token строка), close session
+- web-admin живое: **PayoutsPage** (список + Run cycle), **IncidentsPage** (список + Resolve), reconciliation/run
+- 24 нереализованных эндпоинта помечены «backend not implemented yet» с локальными 501-заглушками (dashboard, CRUD clubs, payments, audit-log, platform-settings — кандидаты в след. фазы)
+- **Сборка проверена**: `tsc --noEmit` — 0 ошибок в обоих app; `vite build` — успешно (web-club 187 КБ, web-admin 197 КБ)
+
+### UI-трек: Flutter-приложение гостя (каркас)
+
+`apps/mobile-guest/`: тема по токенам dizayn-zadanie §5 (чёрный/неон), API-клиент контрактам openapi (device-token, join, requests, ws-ticket, ErrorEnvelope i18n-коды), экраны: QR-скан (ввод токена до B5-камеры), сессия (динамическая цена §0.1), поиск (демо до B5), **обязательный экран условий оплаты §0.2** (3 пункта + чекбокс-гейт), My requests. Widget-тесты: пустой ввод, динамическая цена (не хардкод €5), гейт условий. `flutter test` требует установки Flutter SDK (на хосте нет).
 
 ## 3. Проверено (реальные результаты, F1-прогон)
 
@@ -173,10 +186,12 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 ## 9. Следующий маленький этап
 
 **Дальше (выбор владельца):**
-1. **Flutter-приложение гостя** — скан QR (F2), поиск, запрос (F4), оплата (F5) — контракты готовы в openapi.yaml;
-2. **React-панели** — подключение к живым контрактам (каркасы готовы);
+1. **Дожать нереализованные эндпоинты панелей** (24 шт. с 501-заглушками: dashboard, CRUD, payments, audit-log, platform-settings) — чисто бэкенд-работа, могу автономно;
+2. **Приложение DJ (Flutter)** — dizayn-zadanie §1: логин 2FA, очередь, «сейчас играет», статистика;
 3. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии);
-4. **F9** — k6-нагрузка (50 RPS API / 10k WS / payment-шторм), 24 ч soak, пилот, сторы.
+4. **F9** — k6-нагрузка, soak, пилот, сторы.
+
+Flutter SDK на хосте не установлен: `flutter test` для mobile-guest не прогнан (виджет-тесты написаны; прогон — при установке SDK). Панели собраны и проверены.
 
 Джобы (авто-закрытие, TTL-интенты, retention) — методы JobsRepo; прод-cron-триггеры — воркер-бинарник `workers` при переходе к деплою. WS-соединения (gateway-ws) и NATS-релье outbox — с инфраструктурой F9/деплоя.
 
@@ -212,3 +227,7 @@ HTML-прототипы в фирменном стиле (чёрный/неон,
 | 2026-10-13 | F8: миграция 0007 применена | ✅ 25 таблиц |
 | 2026-10-13 | F8: `cargo test --workspace` | ✅ **75 passed / 0 failed** (e2e F8: антифрод+джобы+GDPR+crypto) |
 | 2026-10-13 | F8: `git commit` | ✅ `cca8357` |
+| 2026-10-13 | UI: Flutter guest app | ✅ коммит `d55ccc1` (структура+экраны+тесты) |
+| 2026-10-13 | UI: панели — `npm install` + `tsc --noEmit` | ✅ 0 ошибок в обоих app |
+| 2026-10-13 | UI: панели — `vite build` | ✅ обе собираются (187/197 КБ) |
+| 2026-10-13 | UI: панели подключены к контрактам | ✅ коммит `1d22ddb` |
