@@ -90,6 +90,9 @@ class GuestFlow extends StatefulWidget {
 
 class _GuestFlowState extends State<GuestFlow> {
   ApiClient? _api;
+
+  /// Доступ к API для потомков (WS-подключения экранов).
+  ApiClient? get api => _api;
   JoinResponse? _session;
 
   @override
@@ -143,7 +146,9 @@ class _GuestFlowState extends State<GuestFlow> {
 
   void _pushRequests() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => RequestsScreen(session: _session!)),
+      MaterialPageRoute(
+        builder: (_) => RequestsScreen(session: _session!, api: _api),
+      ),
     );
   }
 

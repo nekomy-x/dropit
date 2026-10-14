@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../api/ws_client.dart';
 import '../main.dart';
 
 /// My requests: история + статусы гостя (обновление вручную;
 /// WS-обновления — gateway-ws, F9-инфраструктура).
 class RequestsScreen extends StatefulWidget {
-  const RequestsScreen({super.key, required this.session});
+  const RequestsScreen({super.key, required this.session, this.api});
 
   final JoinResponse session;
+
+  /// API для WS-live-подключения (опционально: без него —
+  /// ручной refresh).
+  final ApiClient? api;
 
   @override
   State<RequestsScreen> createState() => _RequestsScreenState();
@@ -18,10 +23,30 @@ class _RequestsScreenState extends State<RequestsScreen> {
   bool _busy = false;
   List<GuestRequestItem>? _items;
   String? _error;
+  // WS-live: accepted/rejected (с причиной) прилетают без refresh.
+  Stream<WsEvent>? _live;
 
   // Демо-состояния (ЗАГЛУШКА, правило 5): до подключения живого API —
   // после integration-тестов данные придут из /v1/my/requests.
   // TODO(B5/F9): api.myRequests() при живом каталоге.
+
+  @override
+  void initState() {
+    super.initState();
+    _connectLive();
+  }
+
+  /// Live-статусы: guest-канал (транспорт — web_socket_channel в
+  /// прод-сборке; в каркасе мок-события в тестах).
+  Future<void> _connectLive() async {
+    final api = widget.api;
+    if (api == null) return;
+    final ws = WsClient(api);
+    final device = api.deviceToken;
+    if (device == null) return;
+    final ok = await ws.connectGuestLive(device);
+    if (ok && mounted) setState(() => _live = ws.events);
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../api/api_client.dart';
+import '../api/queue_state.dart';
+import '../api/ws_client.dart';
 import '../main.dart';
 
 /// Очередь запросов — ГЛАВНЫЙ экран (§1.4).
@@ -23,6 +25,11 @@ class _QueueScreenState extends State<QueueScreen> {
   List<QueueItem>? _items;
   String? _error;
   bool _busy = false;
+  bool _paused = false; // live-баннер паузы (session.paused/resumed)
+
+  // WS-live (gateway-ws): события применяются инкрементально.
+  WsClient? _ws;
+  Stream<WsEvent>? _wsEvents;
 
   Future<void> _load() async {
     setState(() {
@@ -43,13 +50,30 @@ class _QueueScreenState extends State<QueueScreen> {
   void initState() {
     super.initState();
     _load();
+    _connectWs();
+  }
+
+  /// WS-live: подписка на queue-канал текущей смены.
+  Future<void> _connectWs() async {
+    try {
+      final shift = await widget.api.shift();
+      if (shift == null) return; // нет смены — нет подписки
+      final ws = WsClient(widget.api);
+      final ok = await ws.connectQueueLive(shift.id);
+      if (ok) {
+        setState(() => _wsEvents = ws.events);
+      }
+    } catch (_) {
+      // WS недоступен (dev без сокет-транспорта) — очередь работает
+      // через pull-to-refresh.
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Requests'),
+        title: Text(_paused ? 'Requests — PAUSED' : 'Requests'),
         actions: [
           // Переключатель сортировки: новые / популярные (§1.4).
           SegmentedButton<String>(
