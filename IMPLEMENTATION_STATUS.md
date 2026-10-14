@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** полный стек F0–F8: бэкенд + WS + UI (гость, DJ, панели) — Test Mode
+**Этап:** полный стек F0–F8 + РАБОЧИЙ ТЕСТ-РАН (сервер + seed + smoke) — Test Mode
 
 ---
 
@@ -134,6 +134,40 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | `e2e_ws.rs` | DJ и гость получают created/accepted/paused; билет одноразовый (второй → None); утечки между гостями нет |
 | Прод-TODO | multi-node: Redis Pub/Sub-релей между узлами (задокументировано; MVP single-node) |
 
+### Тестовый запуск: «потыкать» (коммит `078a10b`)
+
+**Сервер работает с живой БД**: main.rs подключает пул по
+`DATABASE_URL` (без — data-роуты честно 503). Проверено живым
+smoke-прогоном: логины → сессия → QR (64 hex) → join гостя →
+открытие смены → запрос трека → очередь DJ → accept → дашборд клуба
+→ админ-2FA challenge.
+
+**Seed** (`cargo run --bin seed_demo`): клуб/DJ/админ+TOTP/5 треков,
+перезапускаемый (ON CONFLICT). Пароли — в выводе seed.
+
+**КРИТИЧЕСКОЕ, найденное реальным запуском**: e2e-тесты **молча
+пропускались** — порт 5432 был занят локальным homebrew-postgres
+(вместо docker-контейнера). Починено (остановлен сервис, порт за
+контейнером); прогоны выявили и починили реальные баги:
+- `ip = $1` без cast inet (выдача device-token падала);
+- нумерация sqlx-placeholder'ов в platform-settings PATCH;
+- `sum()` → NUMERIC ≠ i64: касты во всех дашборд-суммах;
+- `payee_id NULL` (платформенные сплиты) ломал net/invariant-запросы;
+- сверка сравнивала Σ всех ledger-проводок (=0, двойная запись) —
+  теперь Σ по `revenue:platform`;
+- **QR-генерация 128 бит ≠ валидация 64 hex** — join падал на
+  живом флоу! (e2e обходил, подставляя длинные строки);
+- тестовая арифметика порога выплат/ретраев.
+Прогон: `cargo test --workspace -- --test-threads=1` (e2e с TRUNCATE-
+фикстурой — сериализованы осознанно).
+
+**README (корень)**: «потрогать за 5 минут» — compose → миграции →
+seed → cargo run → curl-флоу.
+
+**Скелетоны загрузки (§5)**: Flutter — пульсирующие SkeletonBox/
+RequestCard/StatTile (гость: requests; DJ: queue/stats — вместо
+спиннеров); React-панели — SkeletonRows/SkeletonTiles (сборка зелёная).
+
 ### UI-трек: WS-live в приложениях (коммит `b429073`)
 
 - **DJ** (`mobile-dj`): `WsClient` (билет → подписка queue) +
@@ -180,7 +214,7 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 |---|---|
 | `cargo fmt --all -- --check` (хост) | ✅ чисто |
 | `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace` (хост, БД из compose) | ✅ **80 passed / 0 failed** (13 + 42 + 23 gateway + 2, включая e2e WS) |
+| `cargo test --workspace -- --test-threads=1` | ✅ **80 passed / 0 failed** — e2e РЕАЛЬНО выполняются (smoke: сервер+curl-флоу) |
 | OpenAPI 3.1 (Redocly lint) | ✅ valid (0.7.0, WS-контракт) |
 | Git-история | ✅ 12 коммитов: F0A → … → F6 → docs → F8 |
 
@@ -290,3 +324,7 @@ Flutter SDK на хосте не установлен: `flutter test` для mob
 | 2026-10-13 | gateway-ws MVP: e2e | ✅ DJ+гость, билеты, изоляция |
 | 2026-10-13 | gateway-ws MVP: коммит | ✅ `115b5b9` |
 | 2026-10-13 | WS-live в приложениях | ✅ коммит `b429073` |
+| 2026-10-14 | Тест-ран: сервер+seed+smoke | ✅ полный живой флоу |
+| 2026-10-14 | Тест-ран: e2e молча пропускались → починено | ✅ все 80 реально проходят |
+| 2026-10-14 | Тест-ран: скелетоны загрузки | ✅ Flutter + панели |
+| 2026-10-14 | Тест-ран: коммит | ✅ `078a10b` |
