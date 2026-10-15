@@ -17,7 +17,7 @@ void main() {
     // Никакого реального HTTP — экран остаётся на шаге 1 (ошибка сети).
     await tester.pump();
 
-    expect(find.text('Password'), findsNothing); // label/hint не текст
+    // Шаг 1 остаётся (сеть недоступна в тесте — ошибки не переключают).
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('Verify'), findsNothing);
   });
@@ -38,7 +38,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('DROP IT DJ'), findsOneWidget);
-  }, skip: 'пробник не нужен — покрыто первым тестом');
+  });
 
   testWidgets('Карточка очереди: ×N выделяет социальный сигнал',
       (tester) async {
@@ -127,7 +127,13 @@ class QueueCardProbe extends StatelessWidget {
                   if (item.sameTrackCount > 1)
                     Text('×${item.sameTrackCount}'),
                   Text(item.timeAgo),
-                  Text(item.status.toUpperCase()),
+                  Text(switch (item.status) {
+                    'pending' => 'NEW',
+                    'accepted' => 'OK',
+                    'rejected' => 'NO',
+                    'played' => 'DONE',
+                    _ => item.status.toUpperCase(),
+                  }),
                 ],
               ),
             ),

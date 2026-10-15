@@ -16,7 +16,8 @@ class ApiClient {
   static const _deviceTokenKey = 'dropit_device_token';
 
   /// Base URL: прод — CDN; dev — локальный API.
-  String baseUrl = 'http://127.0.0.1:8080';
+  /// 10.0.2.2 = хост-localhost из Android-эмулятора.
+  String baseUrl = 'http://10.0.2.2:8081';
 
   String? get deviceToken => _prefs.getString(_deviceTokenKey);
 
@@ -147,7 +148,14 @@ class ErrorEnvelope {
 class ApiException implements Exception {
   ApiException(this.envelope);
 
+  /// Convenience: из кода+сообщения (WS-клиент и пр.).
+  ApiException.of(String code, String message)
+      : envelope = ErrorEnvelope(code: code, message: message, details: null);
+
   final ErrorEnvelope envelope;
+
+  String get code => envelope.code;
+  String get message => envelope.message;
 
   @override
   String toString() => '[${envelope.code}] ${envelope.message}';

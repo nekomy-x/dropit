@@ -39,24 +39,12 @@ class WsClient {
     }
   }
 
-  /// Подключение, безопасное для каркаса: возвращает false, если
-  /// транспорт недоступен (web_socket_channel не подключён), — экран
-  /// деградирует на pull-to-refresh.
-  Future<bool> connectQueueLive(String sessionId) async {
-    try {
-      await connectQueue(sessionId);
-      return true;
-    } on UnimplementedError {
-      return false; // каркас: транспорт в прод-сборке
-    }
-  }
-
   Future<void> _connect(Map<String, dynamic> subscribeFrame) async {
     // Гость: device-token (не JWT). Билет на device-гранте —
     // gateway-ws разрешает guest-канал только с id == субъекту.
     final token = api.deviceToken;
     if (token == null) {
-      throw ApiException('unauthorized', 'device token required');
+      throw ApiException.of('unauthorized', 'device token required');
     }
     // Одноразовый билет.
     final resp = await http.post(
@@ -65,15 +53,16 @@ class WsClient {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
       },
+      body: '{}',
     );
     if (resp.statusCode != 200) {
-      throw ApiException('http_${resp.statusCode}', 'ticket failed');
+      throw ApiException.of('http_${resp.statusCode}', 'ticket failed');
     }
     final ticket =
         (jsonDecode(resp.body) as Map<String, dynamic>)['ticket'] as String;
     // ws:// (dev; прод — wss за TLS-терминацией).
-    final uri = Uri.parse(api.baseUrl.replaceFirst('http', 'ws'))
-        .replace(path: '/v1/ws', queryParameters: {'ticket': ticket});
+    final wsBase = api.baseUrl.replaceFirst('http', 'ws');
+    final uri = Uri.parse('$wsBase/v1/ws?ticket=$ticket');
     await connectSocket(uri, subscribeFrame);
   }
 

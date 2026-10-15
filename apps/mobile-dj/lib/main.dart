@@ -34,14 +34,17 @@ class DjTheme {
         error: red,
         surface: surface,
       ),
-      textTheme: base.textTheme.apply(
-        bodyColor: white,
-        displayColor: white,
-        // Крупная типографика для чтения в темноте (§1).
-        bodyLarge: const TextStyle(fontSize: 20),
-        titleLarge: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-        titleMedium: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-      ),
+      // Крупная типографика для чтения в темноте (§1).
+      textTheme: base.textTheme
+          .apply(
+            bodyColor: white,
+            displayColor: white,
+          )
+          .copyWith(
+            bodyLarge: const TextStyle(fontSize: 20),
+            titleLarge: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
+            titleMedium: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+          ),
       appBarTheme: const AppBarTheme(
         backgroundColor: black,
         foregroundColor: white,

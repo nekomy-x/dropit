@@ -8,7 +8,8 @@ import 'package:http/http.dart' as http;
 /// задан — ответ шага 1 TotpChallenge {mfa_required}). Токены в памяти
 /// (прод: secure storage; refresh-ротация — см. F1).
 class ApiClient {
-  String baseUrl = 'http://127.0.0.1:8080';
+  /// 10.0.2.2 = хост-localhost из Android-эмулятора.
+  String baseUrl = 'http://10.0.2.2:8081';
 
   String? _accessToken;
   String? _refreshToken;

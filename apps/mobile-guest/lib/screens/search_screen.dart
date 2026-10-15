@@ -27,20 +27,12 @@ class _SearchScreenState extends State<SearchScreen> {
   List<CatalogTrack> _results = [];
 
   // Демо-данные (ЗАГЛУШКА, правило 5): имитация кэш-хита.
-  static const _demoTracks = [
-    (
-      title: 'Vivir Mi Vida',
-      artist: 'Marc Anthony',
-      isrc: 'USSM19902117'
-    ),
-    (
-      title: 'Bailando',
-      artist: 'Enrique Iglesias',
-      isrc: 'USSM11400556'
-    ),
-    ('Despacito', 'Luis Fonsi', 'USSM11700114'),
-    ('Taki Taki', 'DJ Snake', 'USSM11804228'),
-    ('Gasolina', 'Daddy Yankee', 'USSM10402974'),
+  static const _demoTracks = <({String title, String artist, String isrc})>[
+    (title: 'Vivir Mi Vida', artist: 'Marc Anthony', isrc: 'USSM19902117'),
+    (title: 'Bailando', artist: 'Enrique Iglesias', isrc: 'USSM11400556'),
+    (title: 'Despacito', artist: 'Luis Fonsi', isrc: 'USSM11700114'),
+    (title: 'Taki Taki', artist: 'DJ Snake', isrc: 'USSM11804228'),
+    (title: 'Gasolina', artist: 'Daddy Yankee', isrc: 'USSM10402974'),
   ];
 
   void _search(String query) {
