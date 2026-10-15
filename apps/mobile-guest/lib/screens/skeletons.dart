@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../main.dart';
+import '../theme/tokens.dart';
 
 /// Скелетон загрузки (dizayn-zadanie §5: «состояния каждого экрана —
 /// загрузка (скелетоны)»).
@@ -48,7 +48,7 @@ class _SkeletonBoxState extends State<SkeletonBox>
         width: widget.width,
         height: widget.height,
         decoration: BoxDecoration(
-          color: DropItTheme.grey,
+          color: DropTokens.surface2,
           borderRadius: BorderRadius.circular(widget.borderRadius),
         ),
       ),

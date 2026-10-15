@@ -1,0 +1,560 @@
+
+==========================================================================================
+FRAME Guest · 01 · Home — Home  root=390x844 id=H9DId
+==========================================================================================
+- type=frame name=Guest · 01 · Home — Home width=390 height=844 x=-575 y=16082 fill=#121212ff layout=none clip=True
+  - type=rectangle name=Header background width=366 height=184 x=12 y=78 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1573339886518-264aa6f194b2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDd8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=20
+  - type=rectangle name=Hero contrast overlay width=366 height=184 x=12 y=78 fill={"type": "gradient", "gradientType": "linear", "enabled": true, "rotation": 90, "size": {"height": 1}, "colors": [{"color": "#090909D9", "position": 0}, {"color": "#09090905", "position": 1}]} cornerRadius=20
+  - type=frame name=QR quick action width=183 height=136 x=195 y=278 fill=#00FF87 cornerRadius=[0, 22, 22, 0] layout=none
+    - type=text name=QR action title x=18 y=75 fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Scan to enter'
+    - type=text name=QR action hint x=18 y=109 fill=#17452F fontFamily=Inter fontSize=10 fontWeight=normal content='Club QR · instant access'
+    - type=frame name=QR icon badge width=48 height=48 x=119 y=16 fill=#101813 cornerRadius=16 layout=none
+      - type=icon name=QR icon width=28 height=28 x=10 y=10 fill=#00FF87
+  - type=frame name=Nearby map action width=183 height=136 x=12 y=278 fill={"type": "image", "enabled": true, "url": "images/generated-1789308629185.png", "mode": "cover"} cornerRadius=[22, 0, 0, 22] layout=none clip=True
+    - type=rectangle name=Map label contrast width=183 height=70 x=0 y=66 fill={"type": "gradient", "gradientType": "linear", "enabled": true, "rotation": 180, "size": {"height": 1}, "colors": [{"color": "#10101600", "position": 0}, {"color": "#101016E6", "position": 1}]}
+    - type=text name=Map action hint x=18 y=109 fill=#FFFFFF fontFamily=Inter fontSize=10 fontWeight=normal content='12 live  ·  0.2 km'
+    - type=text name=Map action title x=18 y=75 fill=#FFFFFF fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Nearby rooms'
+  - type=text name=Recommendations label x=20 y=438 fill=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=600 letterSpacing=1 content='YOUR NIGHT STARTS HERE'
+  - type=frame name=Nearby venue confirmation width=350 height=72 x=20 y=464 fill=#121212 stroke=#FFFFFF14 strokeWidth={'bottom': 1} gap=12 padding=[12, 0] clip=True
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Nearby venue details width=fill_container layout=vertical gap=5
+      - type=text name=Nearby venue name fill=#E5E7E6 fontFamily=Inter fontSize=14 fontWeight=500 lineHeight=1 content='Kater Blau'
+      - type=text name=Nearby venue distance fill=#9A9F9C fontFamily=Inter fontSize=12 fontWeight=normal lineHeight=1 content='House · 200 m away'
+    - type=text name=Map action title fill=#00FF87 fontFamily=Inter fontSize=14 fontWeight=600 lineHeight=1 content='Join'
+    - type=icon name=Join nearby room width=18 height=18 fill=#9A9F9C
+  - type=frame name=Tab Bar width=366 height=64 x=12 y=760 fill=#121212 stroke=#FFFFFF14 strokeWidth={'top': 1} cornerRadius=22 padding=[8, 0, 4, 0]
+    - type=frame name=Tab Listen width=fill_container height=fill_container fill=#00000000 layout=vertical gap=5
+      - type=icon name=Listen Icon width=21 height=21 fill=#00FF87
+      - type=text name=Listen Label fill=#F0F4F1 fontFamily=Inter fontSize=11 fontWeight=600 content='Listen'
+    - type=frame name=Tab Explore width=fill_container height=fill_container fill=#00000000 layout=vertical gap=5
+      - type=icon name=Explore Icon width=21 height=21 fill=#929A95
+      - type=text name=Explore Label fill=#929A95 fontFamily=Inter fontSize=11 fontWeight=500 content='Explore'
+    - type=frame name=Tab Library width=fill_container height=fill_container fill=#00000000 layout=vertical gap=5
+      - type=icon name=Library Icon width=21 height=21 fill=#919994ff
+      - type=text name=Library Label fill=#919994ff fontFamily=Inter fontSize=11 fontWeight=500 content='Requests'
+    - type=frame name=Tab Profile width=fill_container height=fill_container fill=#00000000 layout=vertical gap=5
+      - type=icon name=Profile Icon width=21 height=21 fill=#929A95
+      - type=text name=Profile Label fill=#929A95 fontFamily=Inter fontSize=11 fontWeight=500 content='Profile'
+  - type=frame name=Brand and location width=350 height=36 x=20 y=24 gap=10
+    - type=frame name=Brand lockup gap=7
+      - type=text name=Nightlist wordmark fill={"type": "shader", "enabled": true, "url": "shaders/brand-wave-mint.glsl"} fontFamily=Inter fontSize=18 fontWeight=700 content='DROP IT'
+      - type=icon name=Nightlist headphones mark width=15 height=15 fill=#F2F5F3
+    - type=frame name=Current city gap=6 padding=[10, 0]
+      - type=icon name=Location icon width=15 height=15 fill=#00FF87
+      - type=text name=City fill=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Berlin'
+      - type=icon name=Change city width=14 height=14 fill=#969F99
+  - type=frame name=Tonight introduction width=310 x=28 y=123 layout=vertical gap=10
+    - type=text name=Page heading width=fill_container fill=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Your track.\nTheir next move.'
+    - type=text name=Page description fill=#DEE5E1 fontFamily=Inter fontSize=11 fontWeight=normal content='Join a club. Request a track. Own the night.'
+  - type=frame name=Tonight live badge x=28 y=94 gap=6
+    - type=text name=Live rooms count fill=#ffffffff fontFamily=Inter fontSize=9 fontWeight=700 letterSpacing=1 content='12 ROOMS LIVE TONIGHT'
+  - type=frame name=Track recommendations width=350 x=20 y=566 layout=vertical gap=12
+    - type=frame name=Recommendations heading width=fill_container
+      - type=text name=Recommended tracks title fill=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='Set the mood'
+      - type=frame name=Browse all music action gap=4
+        - type=text name=Browse all label fill=#00FF87 fontFamily=Inter fontSize=11 fontWeight=600 content='Browse all'
+        - type=icon name=Browse arrow width=14 height=14 fill=#00FF87
+    - type=frame name=Move recommendation width=fill_container gap=12
+      - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+      - type=frame name=Move track information width=fill_container layout=vertical gap=5
+        - type=text name=Move title fill=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+        - type=text name=Move artist and genre fill=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Afro house'
+      - type=frame name=Request Move width=34 height=34 fill=#00FF87 stroke=#00FF87 cornerRadius=17
+        - type=icon name=Add Move width=18 height=18 fill=#101813
+    - type=frame name=One More Time recommendation width=fill_container gap=12
+      - type=frame name=One More Time mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1678172291832-b39bed83a6ad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDZ8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+      - type=frame name=One More Time track information width=fill_container layout=vertical gap=5
+        - type=text name=One More Time title fill=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='One More Time'
+        - type=text name=One More Time artist and genre fill=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Daft Punk · Dance classics'
+      - type=frame name=Request One More Time width=34 height=34 fill=#00FF87 stroke=#00FF87 cornerRadius=17
+        - type=icon name=Add One More Time width=18 height=18 fill=#101813
+    - type=frame name=Join to request hint gap=6
+      - type=icon name=Request hint icon width=12 height=12 fill=#A5AEA9
+      - type=text name=Request hint fill=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Join a room to send your pick to the DJ.'
+
+==========================================================================================
+FRAME Guest · 02 · Scan QR — Scan QR  root=390x844 id=itL9f
+==========================================================================================
+- type=frame name=Guest · 02 · Scan QR — Scan QR width=390 height=844 x=-125 y=16082 fill=$drop-bg=#0A0C0B layout=none clip=True
+  - type=frame name=Full screen camera width=390 height=844 x=0 y=0 fill={"type": "image", "enabled": true, "url": "images/generated-1789332288285.png", "mode": "cover"} layout=none clip=True
+    - type=rectangle name=Camera view — DROP IT QR at reception width=390 height=844 x=0 y=0 fill={"type": "image", "enabled": true, "url": "images/generated-1789332288285.png", "mode": "cover"}
+    - type=rectangle name=Camera dimming width=390 height=844 x=0 y=0 fill={"type": "gradient", "gradientType": "linear", "enabled": true, "rotation": 180, "size": {"height": 1}, "colors": [{"color": "#090D0CEF", "position": 0}, {"color": "#090D0C99", "position": 0.22}, {"color": "#090D0C00", "position": 0.4}, {"color": "#090D0C22", "position": 0.6}, {"color": "#090D0CEE", "position": 0.78}, {"color": "#090D0C", "position": 1}]}
+    - type=path name=Rounded scan guide width=310 height=300 x=40 y=244 fill=#00000000 stroke=$drop-accent=#00FF87 strokeWidth=3
+  - type=frame name=Scanner navigation width=350 height=44 x=20 y=24
+    - type=frame name=DROP IT brand gap=7
+      - type=text name=Nightlist wordmark fill={"type": "shader", "enabled": true, "url": "shaders/brand-wave-mint.glsl"} fontFamily=Inter fontSize=18 fontWeight=700 content='DROP IT'
+      - type=icon name=Nightlist headphones mark width=15 height=15 fill=$drop-text=#F2F5F3
+    - type=frame name=Close scanner width=44 height=44 fill=#12121280 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=22
+      - type=icon name=Close icon width=20 height=20 fill=$drop-text=#F2F5F3
+  - type=frame name=Scan introduction width=350 x=20 y=106 layout=vertical gap=10
+    - type=text name=Scan heading width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Scan in. Tune in.'
+    - type=text name=Scan instructions width=fill_container fill=#D8E3DC fontFamily=Inter fontSize=13 fontWeight=normal lineHeight=1.5 content='Point your camera at the club’s QR code.'
+  - type=frame name=Viewfinder hint width=350 x=20 y=571
+    - type=text name=Viewfinder hint label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=500 content='Scanning automatically'
+  - type=frame name=Camera tools width=208 x=91 y=657 gap=48
+    - type=frame name=Flashlight button width=80 fill=#00000000 stroke=#FFFFFF24 layout=vertical gap=10
+      - type=frame name=Flashlight touch target width=52 height=52 fill=#FFFFFF12 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=26
+        - type=icon name=Flashlight icon width=22 height=22 fill=$drop-text=#F2F5F3
+      - type=text name=Flashlight label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=12 fontWeight=500 content='Flash'
+    - type=frame name=Gallery button width=80 fill=#00000000 stroke=#FFFFFF24 layout=vertical gap=10
+      - type=frame name=Photo library touch target width=52 height=52 fill=#FFFFFF12 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=26
+        - type=icon name=Gallery icon width=22 height=22 fill=$drop-text=#F2F5F3
+      - type=text name=Gallery label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=12 fontWeight=500 content='From photos'
+  - type=frame name=Bottom breathing space width=350 height=0 x=20 y=608
+  - type=frame name=Manual entry width=350 x=20 y=761 stroke=#FFFFFF24 layout=vertical
+    - type=text name=Manual entry hint fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Can’t scan the code?'
+    - type=frame name=Type room code manually height=48 fill=#00000000 gap=8 padding=[0, 12]
+      - type=icon name=Keyboard icon width=18 height=18 fill=#BAC5BF
+      - type=text name=Enter room code label fill=#D8E3DC fontFamily=Inter fontSize=13 fontWeight=500 content='Type room code manually'
+  - type=frame name=Auto join note width=350 x=20 y=599 gap=6
+    - type=icon name=Room entry icon width=13 height=13 fill=$drop-muted=#A5AEA9
+    - type=text name=Auto join note label fill=#BAC5BF fontFamily=Inter fontSize=12 fontWeight=normal content='Just hold steady. No photo needed.'
+
+==========================================================================================
+FRAME Guest · 03 · Search — Search after QR  root=390x844 id=IFOnB
+==========================================================================================
+- type=frame name=Guest · 03 · Search — Search after QR width=390 height=844 x=325 y=16082 fill=$drop-bg=#0A0C0B layout=vertical gap=12 padding=[24, 20, 20, 20] clip=True
+  - type=frame name=Room navigation width=fill_container
+    - type=frame name=DROP IT brand gap=7
+      - type=text name=Nightlist wordmark fill={"type": "shader", "enabled": true, "url": "shaders/brand-wave-mint.glsl"} fontFamily=Inter fontSize=18 fontWeight=700 content='DROP IT'
+      - type=icon name=Nightlist headphones mark width=15 height=15 fill=$drop-text=#F2F5F3
+    - type=frame name=Current city gap=6 padding=[10, 0]
+      - type=icon name=Location icon width=15 height=15 fill=$drop-accent=#00FF87
+      - type=text name=City fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Berlin'
+      - type=icon name=Change city width=14 height=14 fill=#969F99
+  - type=frame name=Joined room width=fill_container stroke=#FFFFFF20 strokeWidth={'bottom': 1} gap=12 padding=[8, 0]
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Room information width=fill_container layout=vertical gap=5
+      - type=text name=Room name fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=16 fontWeight=600 content='Kater Blau'
+      - type=text name=Room session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Main floor · DJ Markus · Live now'
+    - type=icon name=Room verified width=20 height=20 fill=$drop-accent=#00FF87
+  - type=frame name=Search introduction width=fill_container layout=vertical gap=10
+    - type=text name=Search headline width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Choose your track.'
+    - type=text name=Search explanation width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Preview a track. Select your next drop.'
+  - type=frame name=Song search input width=fill_container height=54 fill=$drop-surface=#141815 stroke=$drop-border=#FFFFFF17 strokeWidth=1 cornerRadius=12 gap=12 padding=16
+    - type=icon name=Search icon width=20 height=20 fill=$drop-muted=#A5AEA9
+    - type=text name=Search query width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Move'
+    - type=icon name=Clear search width=18 height=18 fill=$drop-muted=#A5AEA9
+  - type=frame name=DJ-approved party genre filters width=fill_container layout=vertical gap=10
+    - type=frame name=Available genre filters width=fill_container gap=6
+      - type=frame name=Filter All height=36 fill=$drop-text=#F2F5F3 cornerRadius=18 padding=[0, 12]
+        - type=text name=All label fill=$drop-bg=#0A0C0B fontFamily=Inter fontSize=11 fontWeight=600 content='All'
+      - type=frame name=Filter House height=36 fill=$drop-surface=#141815 cornerRadius=18 padding=[0, 12]
+        - type=text name=House label fill=#CED4D0 fontFamily=Inter fontSize=11 fontWeight=600 content='House'
+      - type=frame name=Filter Afro house height=36 fill=$drop-surface=#141815 cornerRadius=18 padding=[0, 12]
+        - type=text name=Afro house label fill=#CED4D0 fontFamily=Inter fontSize=11 fontWeight=600 content='Afro house'
+  - type=frame name=Search results width=fill_container layout=vertical gap=8
+    - type=text name=Results label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=700 letterSpacing=1 content='3 TRACKS · SELECT ONE'
+    - type=frame name=Move — inline preview and request width=fill_container fill=#00000000 stroke=#FFFFFF20 strokeWidth={'bottom': 1} layout=vertical gap=6 padding=[0, 0, 6, 0]
+      - type=frame name=Move search result width=fill_container gap=12
+        - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+        - type=frame name=Move track information width=fill_container layout=vertical gap=5
+          - type=text name=Move title width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+          - type=text name=Move artist and genre width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Afro house'
+        - type=frame name=Selected track control width=44 height=44 fill=#00000000 stroke=$drop-text=#F2F5F3 cornerRadius=12
+          - type=frame name=Selected mint circle width=24 height=24 fill=$drop-accent=#00FF87 stroke=#00FF87 strokeWidth=1.5 cornerRadius=12
+            - type=icon name=Selected check width=15 height=15 fill=#092116
+      - type=frame name=Move active preview controls width=fill_container gap=10
+        - type=frame name=Move Your Body preview button height=32 gap=6
+          - type=icon name=Move Your Body play icon width=15 height=15 fill=$drop-accent=#00FF87
+          - type=text name=Move Your Body preview label fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=10 fontWeight=500 content='Playing preview'
+        - type=frame name=Preview spacer width=fill_container height=1
+        - type=text name=Move Your Body preview duration fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='0:09 / 0:30'
+      - type=frame name=Audio progress width=fill_container layout=vertical gap=10
+        - type=frame name=Playback rail width=fill_container height=4 fill=#343B36 cornerRadius=2
+          - type=rectangle name=Played portion width=80 height=4 fill=$drop-accent=#00FF87 cornerRadius=2
+    - type=frame name=Move Your Body preview row width=fill_container stroke=#FFFFFF14 strokeWidth={'bottom': 1} layout=vertical padding=[0, 0, 6, 0]
+      - type=frame name=Move Your Body search result width=fill_container stroke=#FFFFFF18 gap=12
+        - type=frame name=One More Time mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1678172291832-b39bed83a6ad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDZ8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+        - type=frame name=One More Time track information width=fill_container layout=vertical gap=5
+          - type=text name=One More Time title width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move Your Body'
+          - type=text name=One More Time artist and genre width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Marshall Jefferson · House'
+        - type=frame name=Choose track control width=44 height=44 fill=#00000000 stroke=#758079 cornerRadius=12
+          - type=frame name=Unselected radio circle width=24 height=24 fill=#00000000 stroke=#758079 strokeWidth=1.5 cornerRadius=12
+      - type=frame name=Move Your Body preview controls width=fill_container gap=10
+        - type=frame name=Move Your Body preview button height=32 gap=6
+          - type=icon name=Move Your Body play icon width=15 height=15 fill=#DCE3DE
+          - type=text name=Move Your Body preview label fill=#DCE3DE fontFamily=Inter fontSize=10 fontWeight=500 content='Preview'
+        - type=frame name=Preview spacer width=fill_container height=1
+    - type=frame name=Move (Extended Mix) preview row width=fill_container stroke=#FFFFFF14 strokeWidth={'bottom': 1} layout=vertical padding=[0, 0, 6, 0]
+      - type=frame name=Move extended search result width=fill_container stroke=#FFFFFF18 gap=12
+        - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+        - type=frame name=Move track information width=fill_container layout=vertical gap=5
+          - type=text name=Move title width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move (Extended Mix)'
+          - type=text name=Move artist and genre width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Afro house'
+        - type=frame name=Choose track control width=44 height=44 fill=#00000000 stroke=#FFFFFF30 cornerRadius=22
+          - type=frame name=Unselected radio circle width=24 height=24 fill=#00000000 stroke=#758079 strokeWidth=1.5 cornerRadius=12
+      - type=frame name=Move (Extended Mix) preview controls width=fill_container gap=10
+        - type=frame name=Move Your Body preview button height=32 gap=6
+          - type=icon name=Move Your Body play icon width=15 height=15 fill=#DCE3DE
+          - type=text name=Move Your Body preview label fill=#DCE3DE fontFamily=Inter fontSize=10 fontWeight=500 content='Preview'
+        - type=frame name=Preview spacer width=fill_container height=1
+  - type=frame name=Flexible space width=fill_container height=fill_container
+  - type=frame name=Request pricing note width=fill_container fill=#00000000 stroke=#FFFFFF20 strokeWidth={'top': 1} layout=vertical gap=12 padding=[16, 0, 0, 0]
+    - type=text name=Explicit selection label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=700 letterSpacing=1 content='SELECTED TRACK'
+    - type=frame name=Selected track confirmation width=fill_container gap=12
+      - type=frame name=Chosen Move artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+      - type=frame name=Chosen track information width=fill_container layout=vertical gap=5
+        - type=text name=Request price width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+        - type=text name=Pricing detail width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal lineHeight=1.2 content='Adam Port, Stryv'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='3,00 €'
+    - type=frame name=Continue to payment width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+      - type=text name=Continue label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Continue to payment'
+      - type=icon name=Continue arrow width=20 height=20 fill=#101813
+
+==========================================================================================
+FRAME Guest · 04 · Payment — Payment  root=390x844 id=i9IHXj
+==========================================================================================
+- type=frame name=Guest · 04 · Payment — Payment width=390 height=844 x=-575 y=17012 fill=$drop-bg=#0A0C0B layout=vertical gap=24 padding=[24, 20, 20, 20] clip=True
+  - type=frame name=Payment navigation width=fill_container gap=12
+    - type=icon name=Back to search width=22 height=22 fill=$drop-text=#F2F5F3
+    - type=text name=Preview title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=15 fontWeight=600 content='Payment'
+  - type=frame name=Joined room width=fill_container stroke=#FFFFFF20 strokeWidth={'bottom': 1} gap=12 padding=[16, 0]
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Room information width=fill_container layout=vertical gap=5
+      - type=text name=Room name fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=16 fontWeight=600 content='Kater Blau'
+      - type=text name=Room session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Main floor · DJ Markus · Live now'
+    - type=icon name=Room verified width=20 height=20 fill=$drop-accent=#00FF87
+  - type=text name=Payment headline fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Make it yours.'
+  - type=frame name=Order track width=fill_container gap=12
+    - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+    - type=frame name=Move track information width=fill_container layout=vertical gap=5
+      - type=text name=Move title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+      - type=text name=Move artist and genre fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Original mix'
+    - type=frame name=Request Move width=34 height=34 fill=#00FF87 cornerRadius=17
+      - type=icon name=Add Move width=18 height=18 fill=#101813
+  - type=frame name=Order summary width=fill_container stroke=#FFFFFF20 strokeWidth={'top': 1, 'bottom': 1} layout=vertical gap=18 padding=[20, 0]
+    - type=frame name=Track request row width=fill_container
+      - type=text name=Track request Track request fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Track request'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='3,00 €'
+    - type=frame name=Service fee row width=fill_container
+      - type=text name=Service fee Service fee fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Service fee'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='0,00 €'
+    - type=frame name=Total row width=fill_container
+      - type=text name=Total Total fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='Total'
+      - type=text name=Price fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='3,00 €'
+  - type=frame name=Payment method width=fill_container layout=vertical gap=12
+    - type=text name=Payment method label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=700 letterSpacing=1.4 content='PAY WITH'
+    - type=frame name=Selected card width=fill_container stroke=$drop-accent=#00FF87 strokeWidth=1 cornerRadius=16 gap=12 padding=16
+      - type=frame name=Visa logo width=40 height=28 fill=#FFFFFF cornerRadius=4
+        - type=path name=visa original vector logo width=32 height=24 fill=#1434CB
+      - type=text name=Card details width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Visa ending in 4242'
+      - type=icon name=Selected payment width=20 height=20 fill=$drop-accent=#00FF87
+    - type=text name=Change payment method fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=600 content='Change payment method'
+  - type=frame name=Flexible space width=fill_container height=fill_container
+  - type=text name=Request terms width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal lineHeight=1.5 content='Payment sends your request to the DJ.\nPlayback and timing are up to the DJ.'
+  - type=frame name=Pay and send request width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+    - type=text name=Price fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 content='3,00 €'
+    - type=icon name=Continue arrow width=20 height=20 fill=#101813
+  - type=text name=Secure payment note fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Secure payment · No hidden fees'
+
+==========================================================================================
+FRAME Guest · 04a · Terms before payment — Terms before payment  root=390x844 id=nx7Il
+==========================================================================================
+- type=frame name=Guest · 04a · Terms before payment — Terms before payment width=390 height=844 x=-125 y=17012 fill=$drop-bg=#0A0C0B layout=vertical gap=24 padding=[24, 20, 20, 20] clip=True
+  - type=frame name=Terms navigation width=fill_container gap=12
+    - type=icon name=Back to payment width=22 height=22 fill=$drop-text=#F2F5F3
+    - type=text name=Terms title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=15 fontWeight=600 content='Before you pay'
+  - type=text name=Terms headline fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Know the rules.'
+  - type=frame name=Order track width=fill_container gap=12
+    - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixlib=rb-4.1.0&q=80&w=540", "mode": "cover"} cornerRadius=8
+    - type=frame name=Move track information width=fill_container layout=vertical gap=5
+      - type=text name=Move title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+      - type=text name=Move artist and mix fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Adam Port · Original mix'
+    - type=text name=Session price value fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=700 content='3,00 EUR'
+  - type=frame name=Terms rules width=fill_container stroke=#FFFFFF20 strokeWidth={'top': 1, 'bottom': 1} layout=vertical gap=20 padding=[20, 0]
+    - type=frame name=Rule width=fill_container gap=14
+      - type=icon name=Rule icon width=18 height=18 fill=$drop-accent=#00FF87
+      - type=text name=Rule text width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=normal lineHeight=1.5 content='You pay 3,00 EUR to send this request. The DJ decides if and when it gets played.'
+    - type=frame name=Rule width=fill_container gap=14
+      - type=icon name=Rule icon width=18 height=18 fill=$drop-accent=#00FF87
+      - type=text name=Rule text width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=normal lineHeight=1.5 content='If several people request the same song, each request is paid separately.'
+    - type=frame name=Rule width=fill_container gap=14
+      - type=icon name=Rule icon width=18 height=18 fill=$drop-accent=#00FF87
+      - type=text name=Rule text width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=normal lineHeight=1.5 content='A song can only be played once per night.'
+  - type=frame name=Flexible space width=fill_container height=fill_container
+  - type=frame name=Accept and continue width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+    - type=text name=Accept label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='I understand — Continue'
+    - type=icon name=Accept arrow width=20 height=20 fill=#101813
+  - type=text name=Full terms link fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=600 content='Read the full terms'
+
+==========================================================================================
+FRAME Guest · 04b · Choose payment method — Choose payment method  root=390x844 id=c6iBJI
+==========================================================================================
+- type=frame name=Guest · 04b · Choose payment method — Choose payment method width=390 height=844 x=-575 y=17942 fill=$drop-bg=#0A0C0B layout=none clip=True
+  - type=frame name=Payment navigation width=350 height=22 x=20 y=24 gap=12
+    - type=icon name=Back to search width=22 height=22 fill=$drop-text=#F2F5F3
+    - type=text name=Preview title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=15 fontWeight=600 content='Payment'
+  - type=frame name=Joined room width=350 height=72 x=20 y=70 stroke=#FFFFFF20 strokeWidth={'bottom': 1} gap=12 padding=[16, 0]
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Room information width=fill_container layout=vertical gap=5
+      - type=text name=Room name fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=16 fontWeight=600 content='Kater Blau'
+      - type=text name=Room session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Main floor · DJ Markus · Live now'
+    - type=icon name=Room verified width=20 height=20 fill=$drop-accent=#00FF87
+  - type=text name=Payment headline x=20 y=166 fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Make it yours.'
+  - type=frame name=Order track width=350 height=50 x=20 y=241 gap=12
+    - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+    - type=frame name=Move track information width=fill_container layout=vertical gap=5
+      - type=text name=Move title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+      - type=text name=Move artist and genre fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Original mix'
+    - type=frame name=Request Move width=34 height=34 fill=#00FF87 cornerRadius=17
+      - type=icon name=Add Move width=18 height=18 fill=#101813
+  - type=frame name=Order summary width=350 height=130 x=20 y=315 stroke=#FFFFFF20 strokeWidth={'top': 1, 'bottom': 1} layout=vertical gap=18 padding=[20, 0]
+    - type=frame name=Track request row width=fill_container
+      - type=text name=Track request Track request fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Track request'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='3,00 €'
+    - type=frame name=Service fee row width=fill_container
+      - type=text name=Service fee Service fee fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Service fee'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='0,00 €'
+    - type=frame name=Total row width=fill_container
+      - type=text name=Total Total fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='Total'
+      - type=text name=Price fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='3,00 €'
+  - type=frame name=Payment method width=350 height=105 x=20 y=469 layout=vertical gap=12
+    - type=text name=Payment method label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=700 letterSpacing=1.4 content='PAY WITH'
+    - type=frame name=Selected card width=fill_container stroke=#00FF87 strokeWidth=1 cornerRadius=12 gap=12 padding=16
+      - type=frame name=Visa logo width=40 height=28 fill=#FFFFFF cornerRadius=4
+        - type=path name=visa original vector logo width=32 height=24 fill=#1434CB
+      - type=text name=Card details width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Visa ending in 4242'
+      - type=icon name=Selected payment width=20 height=20 fill=$drop-accent=#00FF87
+    - type=text name=Change payment method fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=600 content='Change payment method'
+  - type=frame name=Flexible space width=350 height=51 x=20 y=598
+  - type=text name=Request terms width=350 x=20 y=673 fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal lineHeight=1.5 content='Payment sends your request to the DJ.\nPlayback and timing are up to the DJ.'
+  - type=frame name=Pay and send request width=350 height=54 x=20 y=733 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+    - type=text name=Price fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 content='3,00 €'
+    - type=icon name=Continue arrow width=20 height=20 fill=#101813
+  - type=text name=Secure payment note x=20 y=811 fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Secure payment · No hidden fees'
+  - type=rectangle name=Modal dimming width=390 height=844 x=0 y=0 fill=#000000B3
+  - type=frame name=Payment method bottom sheet width=390 height=510 x=0 y=334 fill=#1C1E1D cornerRadius=[24, 24, 0, 0] layout=vertical gap=22 padding=[12, 20, 24, 20]
+    - type=frame name=Drag handle area width=fill_container
+      - type=rectangle name=Drag handle width=36 height=4 fill=#606762 cornerRadius=2
+    - type=frame name=Sheet heading width=fill_container
+      - type=text name=Choose payment title fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=28 fontWeight=normal content='Pay your way.'
+      - type=icon name=Close payment methods width=22 height=22 fill=$drop-muted=#A5AEA9
+    - type=frame name=Available payment methods width=fill_container layout=vertical gap=8
+      - type=frame name=Visa ending in 4242 width=fill_container fill=#00FF870D stroke=#00FF87 strokeWidth=1 cornerRadius=12 gap=12 padding=14
+        - type=frame name=visa brand badge width=40 height=28 fill=#FFFFFF cornerRadius=4
+          - type=path name=visa original vector logo width=32 height=24 fill=#1434CB
+        - type=frame name=Visa ending in 4242 details width=fill_container layout=vertical gap=5
+          - type=text name=Visa ending in 4242 title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=600 content='Visa ending in 4242'
+          - type=text name=Visa ending in 4242 subtitle fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Saved card'
+        - type=icon name=Visa ending in 4242 selection width=20 height=20 fill=$drop-accent=#00FF87
+      - type=frame name=Apple Pay width=fill_container fill=#252826 stroke=#FFFFFF14 strokeWidth=1 cornerRadius=12 gap=12 padding=14
+        - type=frame name=applepay brand badge width=40 height=28 fill=#FFFFFF cornerRadius=4
+          - type=path name=applepay original vector logo width=32 height=24 fill=#000000
+        - type=frame name=Apple Pay details width=fill_container layout=vertical gap=5
+          - type=text name=Apple Pay title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=600 content='Apple Pay'
+          - type=text name=Apple Pay subtitle fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Fast, secure checkout'
+        - type=icon name=Apple Pay selection width=20 height=20 fill=#777F79
+      - type=frame name=Google Pay width=fill_container fill=#252826 stroke=#FFFFFF14 strokeWidth=1 cornerRadius=12 gap=12 padding=14
+        - type=frame name=googlepay brand badge width=40 height=28 fill=#FFFFFF cornerRadius=4
+          - type=path name=googlepay original vector logo width=32 height=24 fill=#202124
+        - type=frame name=Google Pay details width=fill_container layout=vertical gap=5
+          - type=text name=Google Pay title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=600 content='Google Pay'
+          - type=text name=Google Pay subtitle fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Pay with your Google account'
+        - type=icon name=Google Pay selection width=20 height=20 fill=#777F79
+    - type=frame name=Add new card action width=fill_container gap=12 padding=[2, 14]
+      - type=icon name=Add card icon width=22 height=22 fill=$drop-accent=#00FF87
+      - type=text name=Add card label width=fill_container fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=13 fontWeight=600 content='Add a new card'
+      - type=icon name=Open card form width=18 height=18 fill=$drop-muted=#A5AEA9
+    - type=frame name=Confirm payment method width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+      - type=text name=Continue label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Use this method'
+      - type=icon name=Continue arrow width=20 height=20 fill=#101813
+
+==========================================================================================
+FRAME Guest · 04c · Manual entry — Manual entry open  root=390x844 id=p2QbRH
+==========================================================================================
+- type=frame name=Guest · 04c · Manual entry — Manual entry open width=390 height=844 x=-125 y=17942 fill=$drop-bg=#0A0C0B layout=none clip=True
+  - type=frame name=Full screen camera width=390 height=844 x=0 y=0 fill=#191D1B layout=none clip=True
+    - type=rectangle name=Camera view — DROP IT QR at reception width=390 height=844 x=0 y=0 fill={"type": "image", "enabled": true, "url": "images/generated-1789332288285.png", "mode": "cover"}
+    - type=rectangle name=Camera dimming width=390 height=844 x=0 y=0 fill={"type": "gradient", "gradientType": "linear", "enabled": true, "rotation": 180, "size": {"height": 1}, "colors": [{"color": "#070C0BEF", "position": 0}, {"color": "#07110C22", "position": 0.32}, {"color": "#07110C12", "position": 0.58}, {"color": "#070C0BEE", "position": 1}]}
+    - type=path name=Rounded scan guide width=310 height=300 x=40 y=244 fill=#00000000 stroke=#00FF87 strokeWidth=4
+    - type=frame name=Viewfinder hint width=350 x=20 y=605
+      - type=text name=Viewfinder hint label fill=#E4EBE7 fontFamily=Inter fontSize=12 fontWeight=normal content='Align the QR code inside the frame'
+  - type=frame name=Scanner navigation width=350 x=20 y=24
+    - type=frame name=Close scanner width=44 height=44 fill=#12121280 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=22
+      - type=icon name=Close icon width=20 height=20 fill=$drop-text=#F2F5F3
+    - type=frame name=DROP IT brand gap=7
+      - type=text name=Nightlist wordmark fill={"type": "shader", "enabled": true, "url": "shaders/brand-wave-mint.glsl"} fontFamily=Inter fontSize=18 fontWeight=700 content='DROP IT'
+      - type=icon name=Nightlist headphones mark width=15 height=15 fill=$drop-text=#F2F5F3
+    - type=frame name=Header balance width=44 height=44
+  - type=frame name=Scan introduction width=334 x=28 y=116 layout=vertical gap=12
+    - type=text name=Scan heading width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 textAlign=center content='Scan in. Tune in.'
+    - type=text name=Scan instructions width=fill_container fill=#D8E3DC fontFamily=Inter fontSize=13 fontWeight=normal lineHeight=1.5 textAlign=center content='Scan the club’s QR code to join the room.'
+  - type=frame name=Camera tools width=302 x=44 y=658 gap=12
+    - type=frame name=Flashlight button width=fill_container height=52 fill=#161C19CC stroke=#FFFFFF30 strokeWidth=1 cornerRadius=26 gap=9
+      - type=icon name=Flashlight icon width=18 height=18 fill=$drop-text=#F2F5F3
+      - type=text name=Flashlight label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=12 fontWeight=500 content='Flash off'
+    - type=frame name=Gallery button width=fill_container height=52 fill=#161C19CC stroke=#FFFFFF30 strokeWidth=1 cornerRadius=26 gap=9
+      - type=icon name=Gallery icon width=18 height=18 fill=$drop-text=#F2F5F3
+      - type=text name=Gallery label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=12 fontWeight=500 content='Upload QR'
+  - type=frame name=Manual entry width=302 x=44 y=730 layout=vertical
+    - type=text name=Manual entry hint fill=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Can’t scan the code?'
+    - type=frame name=Enter room code button width=fill_container height=52 fill=#1B3025 stroke=#00FF87 strokeWidth=1 cornerRadius=26 gap=10
+      - type=icon name=Keyboard icon width=18 height=18 fill=$drop-accent=#00FF87
+      - type=text name=Enter room code label fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=13 fontWeight=600 content='Enter room code'
+  - type=frame name=Bottom breathing space width=350 height=8 x=20 y=779
+  - type=frame name=Auto join note width=350 x=20 y=807 gap=6
+    - type=icon name=Room entry icon width=13 height=13 fill=#BECAC3
+    - type=text name=Auto join note label fill=#BECAC3 fontFamily=Inter fontSize=10 fontWeight=normal content='Scan. Join. Make your request.'
+  - type=rectangle name=Manual entry modal dimming width=390 height=844 x=0 y=0 fill=#000000B3
+  - type=frame name=Room code bottom sheet width=390 height=340 x=0 y=504 fill=#1C1E1D stroke=#00000000 cornerRadius=[24, 24, 0, 0] layout=vertical gap=20 padding=[12, 20, 24, 20]
+    - type=frame name=Room code sheet drag handle width=fill_container
+      - type=rectangle name=Drag handle width=36 height=4 fill=#606762 cornerRadius=2
+    - type=frame name=Dropdown header width=fill_container
+      - type=text name=Manual entry title fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=28 fontWeight=normal content='Enter room code'
+      - type=frame name=Close dropdown width=22 height=22
+        - type=icon name=Close dropdown icon width=22 height=22 fill=$drop-muted=#A5AEA9
+    - type=text name=Room code guidance width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal lineHeight=1.5 content='Enter the code displayed next to the club’s QR.'
+    - type=frame name=Room code field width=fill_container layout=vertical gap=8
+      - type=text name=Room code label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=500 content='Room code'
+      - type=frame name=Room code input width=fill_container height=48 fill=#252826 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=10 gap=10 padding=[0, 14]
+        - type=icon name=Room code hash icon width=18 height=18 fill=$drop-muted=#A5AEA9
+        - type=text name=Room code placeholder fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Enter code'
+    - type=frame name=Join room button width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+      - type=text name=Join room label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Join room'
+      - type=icon name=Join room arrow width=20 height=20 fill=#101813
+
+==========================================================================================
+FRAME Guest · 04d · Add payment card — Add payment card  root=390x844 id=NktCr
+==========================================================================================
+- type=frame name=Guest · 04d · Add payment card — Add payment card width=390 height=844 x=325 y=17942 fill=$drop-bg=#0A0C0B layout=none clip=True
+  - type=frame name=Payment navigation width=350 height=22 x=20 y=24 gap=12
+    - type=icon name=Back to search width=22 height=22 fill=$drop-text=#F2F5F3
+    - type=text name=Preview title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=15 fontWeight=600 content='Payment'
+  - type=frame name=Joined room width=350 height=72 x=20 y=70 stroke=#FFFFFF20 strokeWidth={'bottom': 1} gap=12 padding=[16, 0]
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Room information width=fill_container layout=vertical gap=5
+      - type=text name=Room name fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=16 fontWeight=600 content='Kater Blau'
+      - type=text name=Room session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Main floor · DJ Markus · Live now'
+    - type=icon name=Room verified width=20 height=20 fill=$drop-accent=#00FF87
+  - type=text name=Payment headline x=20 y=166 fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Make it yours.'
+  - type=frame name=Order track width=350 height=50 x=20 y=241 gap=12
+    - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+    - type=frame name=Move track information width=fill_container layout=vertical gap=5
+      - type=text name=Move title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+      - type=text name=Move artist and genre fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv · Original mix'
+    - type=frame name=Request Move width=34 height=34 fill=#00FF87 cornerRadius=17
+      - type=icon name=Add Move width=18 height=18 fill=#101813
+  - type=frame name=Order summary width=350 height=130 x=20 y=315 stroke=#FFFFFF20 strokeWidth={'top': 1, 'bottom': 1} layout=vertical gap=18 padding=[20, 0]
+    - type=frame name=Track request row width=fill_container
+      - type=text name=Track request Track request fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Track request'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='3,00 €'
+    - type=frame name=Service fee row width=fill_container
+      - type=text name=Service fee Service fee fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Service fee'
+      - type=text name=Price from session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='0,00 €'
+    - type=frame name=Total row width=fill_container
+      - type=text name=Total Total fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='Total'
+      - type=text name=Price fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=18 fontWeight=700 content='3,00 €'
+  - type=frame name=Payment method width=350 height=105 x=20 y=469 layout=vertical gap=12
+    - type=text name=Payment method label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=700 letterSpacing=1.4 content='PAY WITH'
+    - type=frame name=Selected card width=fill_container stroke=#00FF87 strokeWidth=1 cornerRadius=12 gap=12 padding=16
+      - type=frame name=Visa logo width=40 height=28 fill=#FFFFFF cornerRadius=4
+        - type=path name=visa original vector logo width=32 height=24 fill=#1434CB
+      - type=text name=Card details width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Visa ending in 4242'
+      - type=icon name=Selected payment width=20 height=20 fill=$drop-accent=#00FF87
+    - type=text name=Change payment method fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=600 content='Change payment method'
+  - type=frame name=Flexible space width=350 height=51 x=20 y=598
+  - type=text name=Request terms width=350 x=20 y=673 fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal lineHeight=1.5 content='Payment sends your request to the DJ.\nPlayback and timing are up to the DJ.'
+  - type=frame name=Pay and send request width=350 height=54 x=20 y=733 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+    - type=text name=Price fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 content='3,00 €'
+    - type=icon name=Continue arrow width=20 height=20 fill=#101813
+  - type=text name=Secure payment note x=20 y=811 fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Secure payment · No hidden fees'
+  - type=rectangle name=Modal dimming width=390 height=844 x=0 y=0 fill=#000000B3
+  - type=frame name=Add card bottom sheet width=390 height=544 x=0 y=300 fill=#1C1E1D cornerRadius=[24, 24, 0, 0] layout=vertical gap=20 padding=[12, 20, 24, 20]
+    - type=frame name=Card sheet drag handle width=fill_container
+      - type=rectangle name=Drag handle width=36 height=4 fill=#606762 cornerRadius=2
+    - type=frame name=Add card heading width=fill_container gap=12
+      - type=icon name=Back to methods width=22 height=22 fill=$drop-text=#F2F5F3
+      - type=text name=Add card title width=fill_container fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=28 fontWeight=normal content='Add a card.'
+      - type=icon name=Close add card width=22 height=22 fill=$drop-muted=#A5AEA9
+    - type=frame name=Card details form width=fill_container layout=vertical gap=16
+      - type=frame name=Card number field width=fill_container layout=vertical gap=8
+        - type=text name=Card number label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=500 content='Card number'
+        - type=frame name=Card number input width=fill_container height=48 fill=#252826 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=10 gap=10 padding=[0, 14]
+          - type=text name=Card number placeholder width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='1234  5678  9012  3456'
+          - type=icon name=Card number icon width=20 height=20 fill=$drop-muted=#A5AEA9
+      - type=frame name=Expiry and security code width=fill_container gap=12
+        - type=frame name=Expiry date field width=fill_container layout=vertical gap=8
+          - type=text name=Expiry date label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=500 content='Expiry date'
+          - type=frame name=Expiry date input width=fill_container height=48 fill=#252826 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=10 gap=10 padding=[0, 14]
+            - type=text name=Expiry date placeholder width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='MM / YY'
+        - type=frame name=Security code field width=fill_container layout=vertical gap=8
+          - type=text name=Security code label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=500 content='Security code'
+          - type=frame name=Security code input width=fill_container height=48 fill=#252826 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=10 gap=10 padding=[0, 14]
+            - type=text name=Security code placeholder width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='CVC'
+            - type=icon name=Security code icon width=20 height=20 fill=$drop-muted=#A5AEA9
+      - type=frame name=Name on card field width=fill_container layout=vertical gap=8
+        - type=text name=Name on card label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=500 content='Name on card'
+        - type=frame name=Name on card input width=fill_container height=48 fill=#252826 stroke=#FFFFFF26 strokeWidth=1 cornerRadius=10 gap=10 padding=[0, 14]
+          - type=text name=Name on card placeholder width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='Full name'
+    - type=frame name=Save card preference width=fill_container gap=10
+      - type=icon name=Save card checked width=20 height=20 fill=$drop-accent=#00FF87
+      - type=text name=Save card label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=12 fontWeight=normal content='Save card for next time'
+    - type=frame name=Save and use card width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+      - type=text name=Continue label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='Save & use card'
+      - type=icon name=Continue arrow width=20 height=20 fill=#101813
+    - type=frame name=Encrypted card note width=fill_container gap=6
+      - type=icon name=Security shield width=14 height=14 fill=$drop-muted=#A5AEA9
+      - type=text name=Security message fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Your card details are encrypted and secure'
+
+==========================================================================================
+FRAME Guest · 05 · Request sent — Request sent  root=390x844 id=G0Gua
+==========================================================================================
+- type=frame name=Guest · 05 · Request sent — Request sent width=390 height=844 x=325 y=17012 fill=$drop-bg=#0A0C0B layout=vertical gap=24 padding=[24, 20, 20, 20] clip=True
+  - type=frame name=Room navigation width=fill_container
+    - type=frame name=DROP IT brand gap=7
+      - type=text name=Nightlist wordmark fill={"type": "shader", "enabled": true, "url": "shaders/brand-wave-mint.glsl"} fontFamily=Inter fontSize=18 fontWeight=700 content='DROP IT'
+      - type=icon name=Nightlist headphones mark width=15 height=15 fill=$drop-text=#F2F5F3
+    - type=frame name=Current city gap=6 padding=[10, 0]
+      - type=icon name=Location icon width=15 height=15 fill=$drop-accent=#00FF87
+      - type=text name=City fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=normal content='Berlin'
+      - type=icon name=Change city width=14 height=14 fill=#969F99
+  - type=frame name=Joined room width=fill_container stroke=#FFFFFF20 strokeWidth={'bottom': 1} gap=12 padding=[16, 0]
+    - type=frame name=Kater Blau venue photo width=40 height=40 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1784151100440-08722e9c0e5c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1MDh8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=6
+    - type=frame name=Room information width=fill_container layout=vertical gap=5
+      - type=text name=Room name fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=16 fontWeight=600 content='Kater Blau'
+      - type=text name=Room session fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=11 fontWeight=normal content='Main floor · DJ Markus · Live now'
+    - type=icon name=Room verified width=20 height=20 fill=$drop-accent=#00FF87
+  - type=frame name=Request confirmation width=fill_container layout=vertical gap=20
+    - type=frame name=Payment celebration width=fill_container height=128 layout=none
+      - type=ellipse name=Soft emerald payment glow width=228 height=128 x=61 y=0 fill={"type": "gradient", "gradientType": "radial", "enabled": true, "rotation": 0, "size": {"width": 1, "height": 1}, "colors": [{"color": "#00FF8738", "position": 0}, {"color": "#00FF8700", "position": 1}]}
+      - type=ellipse name=Success ripple 124 width=124 height=124 x=113 y=2 stroke=#00FF8720 strokeWidth=1
+      - type=ellipse name=Success ripple 102 width=102 height=102 x=124 y=13 stroke=#00FF8748 strokeWidth=1
+      - type=frame name=Success badge width=80 height=80 x=135 y=24 fill=$drop-accent=#00FF87 cornerRadius=40
+        - type=icon name=Request sent check width=38 height=38 fill=#101813
+      - type=rectangle name=Celebration confetti 1 width=4 height=10 x=48 y=35 fill=$drop-accent=#00FF87 cornerRadius=1 rotation=25
+      - type=rectangle name=Celebration confetti 2 width=4 height=8 x=85 y=12 fill=#BC9AFF cornerRadius=1 rotation=-25
+      - type=rectangle name=Celebration confetti 3 width=3 height=8 x=112 y=98 fill=$drop-accent=#00FF87 cornerRadius=1 rotation=35
+      - type=rectangle name=Celebration confetti 4 width=4 height=10 x=263 y=20 fill=$drop-accent=#00FF87 cornerRadius=1 rotation=29.999999999999996
+      - type=rectangle name=Celebration confetti 5 width=4 height=9 x=298 y=69 fill=#BC9AFF cornerRadius=1 rotation=-25
+      - type=rectangle name=Celebration confetti 6 width=4 height=8 x=251 y=106 fill=$drop-accent=#00FF87 cornerRadius=1 rotation=65
+      - type=rectangle name=Celebration confetti 7 width=3 height=6 x=63 y=105 fill=#E6FFF1 cornerRadius=1 rotation=-14.999999999999998
+      - type=rectangle name=Celebration confetti 8 width=3 height=5 x=294 y=10 fill=#E6FFF1 cornerRadius=1 rotation=20
+      - type=icon name=Payment sparkle 1 width=18 height=18 x=71 y=67 fill=$drop-accent=#00FF87
+      - type=icon name=Payment sparkle 2 width=14 height=14 x=239 y=51 fill=#D8C5FF
+      - type=icon name=Payment sparkle 3 width=14 height=14 x=312 y=37 fill=$drop-accent=#00FF87
+    - type=text name=Confirmation headline fill=$drop-text=#F2F5F3 fontFamily=Anton fontSize=34 fontWeight=normal lineHeight=1.08 content='Your pick is in.'
+    - type=text name=Confirmation explanation width=fill_container fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal lineHeight=1.5 textAlign=center content='Your request is with DJ Markus.\nFollow its status in My requests.'
+  - type=frame name=Request receipt width=fill_container fill=$drop-surface=#141815 stroke=$drop-border=#FFFFFF17 strokeWidth=1 layout=vertical gap=20 padding=[16, 0]
+    - type=frame name=Requested track width=fill_container gap=12
+      - type=frame name=Move mood artwork width=50 height=50 fill={"type": "image", "enabled": true, "url": "https://images.unsplash.com/photo-1733045646387-875b510911d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3ODkzMjU1NDV8&ixlib=rb-4.1.0&q=80&w=1080", "mode": "cover"} cornerRadius=8
+      - type=frame name=Move track information width=fill_container layout=vertical gap=5
+        - type=text name=Move title fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=14 fontWeight=600 content='Move'
+        - type=text name=Move artist and genre fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=10 fontWeight=normal content='Adam Port, Stryv'
+      - type=frame name=Request Move width=34 height=34 fill=#00FF87 cornerRadius=17
+        - type=icon name=Add Move width=18 height=18 fill=#101813
+    - type=frame name=Status row width=fill_container
+      - type=text name=Status label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Status'
+      - type=text name=Status value fill=$drop-accent=#00FF87 fontFamily=Inter fontSize=12 fontWeight=600 content='Sent to DJ'
+    - type=frame name=Payment row width=fill_container
+      - type=text name=Payment label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Payment'
+      - type=text name=Price fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=13 fontWeight=normal content='3,00 €'
+    - type=frame name=Request ID row width=fill_container
+      - type=text name=Request ID label fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=normal content='Request ID'
+      - type=text name=Request ID value fill=$drop-muted=#A5AEA9 fontFamily=Inter fontSize=12 fontWeight=600 content='#DI-0284'
+  - type=frame name=Flexible space width=fill_container height=fill_container
+  - type=frame name=View request status width=fill_container height=54 fill=$drop-accent=#00FF87 cornerRadius=27 gap=12 padding=[0, 20]
+    - type=text name=Continue label fill=#101813 fontFamily=Inter fontSize=16 fontWeight=600 lineHeight=1.25 content='View my request'
+    - type=icon name=Continue arrow width=20 height=20 fill=#101813
+  - type=frame name=Request another track width=fill_container height=44
+    - type=text name=Another track label fill=$drop-text=#F2F5F3 fontFamily=Inter fontSize=13 fontWeight=600 content='Find another track'

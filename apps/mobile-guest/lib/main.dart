@@ -1,69 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'screens/scan_screen.dart';
-import 'screens/session_screen.dart';
-import 'screens/search_screen.dart';
-import 'screens/conditions_screen.dart';
-import 'screens/requests_screen.dart';
 import 'api/api_client.dart';
+import 'screens/home_screen.dart';
+import 'screens/payment_screen.dart';
+import 'screens/request_sent_screen.dart';
+import 'screens/requests_screen.dart';
+import 'screens/scan_screen.dart';
+import 'screens/search_screen.dart';
+import 'screens/terms_screen.dart';
+import 'theme/app_theme.dart';
+import 'theme/tokens.dart';
+import 'widgets/brand_wave_logo.dart';
 
 /// DROP IT — приложение гостя.
 ///
-/// Флоу (dizayn-zadanie §0, техкарта Часть IV):
-/// QR-скан → session info (клуб/DJ/цена) → поиск трека → экран
-/// условий оплаты (ОБЯЗАТЕЛЕН по ТЗ) → запрос → статус.
+/// Флоу по макету (`docs/ui/reference/dropit-design.pen`):
+///   Home (01) → Scan QR (02) → Search (03) → Terms before payment (04a)
+///   → Payment (04, шторки 04b/04d) → Request sent (05) → My requests (06).
 ///
-/// Стиль: чёрный фон, белый текст, неоново-зелёный акцент (§5).
+/// Оформление — токены дизайн-системы: чёрная «ночь», неон `#00FF87`,
+/// Anton / Inter / Geist Mono.
 
 void main() {
   runApp(const DropItApp());
-}
-
-/// Тема приложения: токены дизайн-системы (dizayn-zadanie §5).
-class DropItTheme {
-  static const black = Color(0xFF0A0A0A);
-  static const surface = Color(0xFF141414);
-  static const neon = Color(0xFF39FF88); // неоново-зелёный акцент
-  static const white = Color(0xFFF5F5F5);
-  static const grey = Color(0xFF8A8A8A);
-  static const red = Color(0xFFFF4D4D); // ошибки/отклонения
-
-  static ThemeData theme() {
-    final base = ThemeData.dark(useMaterial3: true);
-    return base.copyWith(
-      scaffoldBackgroundColor: black,
-      colorScheme: base.colorScheme.copyWith(
-        primary: neon,
-        secondary: neon,
-        error: red,
-        surface: surface,
-      ),
-      textTheme: base.textTheme.apply(
-        bodyColor: white,
-        displayColor: white,
-      ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: black,
-        foregroundColor: white,
-        elevation: 0,
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: neon,
-          foregroundColor: black,
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          minimumSize: const Size.fromHeight(52),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
-      ),
-      cardTheme: CardThemeData(
-        color: surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.symmetric(vertical: 6),
-      ),
-    );
-  }
 }
 
 class DropItApp extends StatelessWidget {
@@ -74,13 +34,14 @@ class DropItApp extends StatelessWidget {
     return MaterialApp(
       title: 'DROP IT',
       debugShowCheckedModeBanner: false,
-      theme: DropItTheme.theme(),
+      theme: DropTheme.theme(),
       home: const GuestFlow(),
     );
   }
 }
 
-/// Корневой флоу: хранит session-контекст (грант после скана QR).
+/// Корневой флоу: хранит session-контекст (грант после скана QR)
+/// и выбранный трек.
 class GuestFlow extends StatefulWidget {
   const GuestFlow({super.key});
 
@@ -90,9 +51,6 @@ class GuestFlow extends StatefulWidget {
 
 class _GuestFlowState extends State<GuestFlow> {
   ApiClient? _api;
-
-  /// Доступ к API для потомков (WS-подключения экранов).
-  ApiClient? get api => _api;
   JoinResponse? _session;
 
   @override
@@ -104,61 +62,84 @@ class _GuestFlowState extends State<GuestFlow> {
   Future<void> _initApi() async {
     final prefs = await SharedPreferences.getInstance();
     final api = ApiClient(prefs);
-    await api.ensureDeviceToken();
-    setState(() => _api = api);
+    try {
+      await api.ensureDeviceToken();
+    } catch (_) {
+      // Сервер недоступен (офлайн/демо): экраны без сетевых вызовов
+      // (Home, скан, условия) работают, сетевые покажут состояние ошибки.
+    }
+    if (mounted) setState(() => _api = api);
   }
 
-  void _onJoined(JoinResponse session) {
-    setState(() => _session = session);
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SessionScreen(
-          session: session,
-          onSearch: () => _pushSearch(),
-          onMyRequests: () => _pushRequests(),
-        ),
-      ),
-    );
+  void _push(Widget screen) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+  }
+
+  void _pushScan() {
+    final api = _api;
+    if (api == null) return;
+    _push(ScanScreen(
+      api: api,
+      onClose: () => Navigator.of(context).maybePop(),
+      onJoined: (session) {
+        setState(() => _session = session);
+        _pushSearch();
+      },
+    ));
   }
 
   void _pushSearch() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SearchScreen(
-          session: _session!,
-          onRequestTrack: (track) => _pushConditions(track),
-        ),
-      ),
-    );
-  }
-
-  void _pushConditions(CatalogTrack track) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ConditionsScreen(
-          session: _session!,
+    final session = _session;
+    if (session == null) return;
+    _push(SearchScreen(
+      session: session,
+      onOpenRequests: _pushRequests,
+      onRequestTrack: (track) => _push(TermsScreen(
+        session: session,
+        track: track,
+        onConfirmed: () => _push(PaymentScreen(
+          api: _api!,
+          session: session,
           track: track,
-          onConfirmed: () => _pushRequests(),
-        ),
-      ),
-    );
+          onSent: (created) => _push(RequestSentScreen(
+            session: session,
+            track: track,
+            created: created,
+            onViewRequest: _pushRequests,
+            onFindAnother: () => Navigator.of(context).maybePop(),
+          )),
+        )),
+      )),
+    ));
   }
 
   void _pushRequests() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => RequestsScreen(session: _session!, api: _api),
-      ),
-    );
+    final session = _session;
+    if (session == null) return;
+    _push(RequestsScreen(session: session, api: _api));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_api == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    return ScanScreen(api: _api!, onJoined: _onJoined);
+    final api = _api;
+    if (api == null) return const _Splash();
+    return HomeScreen(
+      onScan: _pushScan,
+      onNearby: _pushScan,
+      onRequests: _pushRequests,
+    );
+  }
+}
+
+/// Стартовый экран, пока грузится device-token: фон «ночь» и фирменный знак.
+class _Splash extends StatelessWidget {
+  const _Splash();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: DropTokens.bg,
+      body: Center(child: BrandWaveLogo(fontSize: 22, markSize: 18)),
+    );
   }
 }

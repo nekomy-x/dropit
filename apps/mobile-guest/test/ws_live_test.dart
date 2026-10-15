@@ -1,12 +1,10 @@
-import 'package:flutter_test/flutter_test.dart';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:dropit_guest/api/api_client.dart';
 import 'package:dropit_guest/api/ws_client.dart';
-import 'package:dropit_guest/main.dart';
+import 'package:dropit_guest/theme/app_theme.dart';
 
 void main() {
   test('гость: rejected с причиной летит в событии', () async {
@@ -43,7 +41,7 @@ void main() {
     var ev = WsEvent(kind: 'request.created', status: 'pending');
     await tester.pumpWidget(
       MaterialApp(
-        theme: DropItTheme.theme(),
+        theme: DropTheme.theme(),
         home: Scaffold(
           body: Builder(
             builder: (_) {
@@ -64,7 +62,7 @@ void main() {
     ev = WsEvent(kind: 'request.rejected', status: 'rejected');
     await tester.pumpWidget(
       MaterialApp(
-        theme: DropItTheme.theme(),
+        theme: DropTheme.theme(),
         home: Scaffold(body: Text(switch (ev.status) {
           'rejected' => 'Rejected',
           _ => ev.status ?? '',
