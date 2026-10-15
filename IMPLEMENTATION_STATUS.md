@@ -1,7 +1,7 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-13
-**Этап:** полный стек F0–F8 + РАБОЧИЙ ТЕСТ-РАН (сервер + seed + smoke) — Test Mode
+**Этап:** полный стек на ЭМУЛЯТОРЕ: сервер + seed + панели + ОБА ПРИЛОЖЕНИЯ Android — Test Mode
 
 ---
 
@@ -133,6 +133,36 @@ Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgr
 | Интеграция | push-точки в POST /v1/requests, dj accept/reject/played (no-op-дубли НЕ пушат), pause/resume |
 | `e2e_ws.rs` | DJ и гость получают created/accepted/paused; билет одноразовый (второй → None); утечки между гостями нет |
 | Прод-TODO | multi-node: Redis Pub/Sub-релей между узлами (задокументировано; MVP single-node) |
+
+### Эмуляция: приложения на Android (коммит `d8b235b`)
+
+**Всё установлено на Хранилище** (`/Volumes/Хранилище/Dev/mobile-sdk`,
+~8 ГБ, диск Mac не тронут):
+- Flutter SDK 3.47.7 (arm64) — `/Volumes/Хранилище/Dev/mobile-sdk/flutter`;
+- Android SDK: cmdline-tools + platform-tools + platforms 34/36 +
+  build-tools + **эмулятор с system-image android-34 arm64**;
+- AVD `dropit_phone` (Pixel 7);
+- обход mojibake: ASCII-симлинки (`sdk_ascii`, `dropit_ascii`,
+  `build_ascii`) — Gradle не переваривает кириллицу в путях;
+  local.properties с java-escaped путями.
+
+**Прогнано впервые** (SDK установлен — тесты «ожили» и сразу поймали
+real-ошибки компиляции, починены: record-типы, http.post body,
+ApiException.of, theme copyWith, изоляция тестов от сети):
+- гость: **6/6 тестов** · DJ: **11/11 тестов** — все зелёные.
+
+**APK собраны и установлены на эмулятор** (android-34 arm64):
+- гость: экран QR-скана живой (тёмная тема, неон, join);
+- DJ: экран логина живой (email+пароль, 2FA-готов);
+- API-адрес приложений: `10.0.2.2:8081` (хост из эмулятора) —
+  сервер и БД работают.
+
+Запуск эмулятора:
+```sh
+export ANDROID_HOME=/Volumes/Хранилище/Dev/mobile-sdk/android-sdk
+$ANDROID_HOME/emulator/emulator -avd dropit_phone
+adb install build/app/outputs/flutter-apk/app-debug.apk
+```
 
 ### Тестовый запуск: «потыкать» (коммит `078a10b`)
 
@@ -328,3 +358,7 @@ Flutter SDK на хосте не установлен: `flutter test` для mob
 | 2026-10-14 | Тест-ран: e2e молча пропускались → починено | ✅ все 80 реально проходят |
 | 2026-10-14 | Тест-ран: скелетоны загрузки | ✅ Flutter + панели |
 | 2026-10-14 | Тест-ран: коммит | ✅ `078a10b` |
+| 2026-10-15 | SDK на Хранилище (8 ГБ) | ✅ flutter+android+эмулятор |
+| 2026-10-15 | Flutter-тесты впервые | ✅ гость 6/6, DJ 11/11 |
+| 2026-10-15 | APK на эмуляторе | ✅ оба приложения живые |
+| 2026-10-15 | Эмуляция: коммит | ✅ `d8b235b` |
