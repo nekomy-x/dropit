@@ -12,3 +12,6 @@ deploy/.env
 # Local
 /del/
 .DS_Store
+node_modules/
+dist/
+*.apk
