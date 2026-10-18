@@ -5,20 +5,27 @@
 //! settings (NULL-семантика: значения задаёт владелец), блокировки,
 //! платежи со сплитами, audit-log, DJ-смена и статистика.
 
+use crate::auth;
 use crate::rbac::{auth_error_response, AuthContext};
 use crate::routes::{api_error, ApiEnv};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, patch},
+    routing::{get, patch, post},
     Json, Router,
 };
-use dropit_common::{ApiError, Role};
+use chrono::{DateTime, Duration, Utc};
+use dropit_common::{ApiError, ErrorEnvelope, Role};
+use dropit_infra_stripe::{ConnectAccountReq, StripeError};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::PgPool;
+use std::collections::BTreeMap;
 use uuid::Uuid;
+
+/// TTL одноразового invite-токена DJ (7 дней).
+const DJ_INVITE_TTL_DAYS: i64 = 7;
 
 pub fn panel_router() -> Router<ApiEnv> {
     Router::new()
@@ -34,11 +41,21 @@ pub fn panel_router() -> Router<ApiEnv> {
         )
         .route("/v1/club/earnings", get(club_earnings))
         .route("/v1/club/djs", get(club_djs))
+        .route("/v1/club/djs/invite", post(club_djs_invite))
         .route("/v1/club/payouts", get(club_payouts))
+        .route(
+            "/v1/club/stripe/onboarding-status",
+            get(club_stripe_onboarding_status),
+        )
+        .route(
+            "/v1/club/stripe/onboarding-link",
+            post(club_stripe_onboarding_link),
+        )
         // Админ.
         .route("/v1/admin/dashboard/now", get(admin_dashboard))
-        .route("/v1/admin/clubs", get(admin_clubs))
+        .route("/v1/admin/clubs", get(admin_clubs).post(admin_clubs_create))
         .route("/v1/admin/clubs/:id", patch(admin_club_patch))
+        .route("/v1/admin/guests", get(admin_guests))
         .route("/v1/admin/payments", get(admin_payments))
         .route("/v1/admin/payments/:id/splits", get(admin_payment_splits))
         .route("/v1/admin/audit-log", get(admin_audit_log))
@@ -47,9 +64,70 @@ pub fn panel_router() -> Router<ApiEnv> {
             get(admin_platform_settings).patch(admin_platform_settings_patch),
         )
         .route("/v1/admin/djs", get(admin_djs))
+        .route("/v1/admin/reconciliation-runs", get(admin_reconciliation_runs))
         // DJ.
         .route("/v1/dj/shift", get(dj_shift))
         .route("/v1/dj/stats/today", get(dj_stats_today))
+}
+
+/// Конверт ошибки с произвольным кодом/статусом (для бизнес-кодов, которых
+/// нет в [`ApiError`]: `dj_already_invited`, `club_not_found`,
+/// `invalid_timezone`, `stripe_unavailable`). Использует существующий
+/// тип [`ErrorEnvelope`], новый тип не вводится.
+#[allow(clippy::result_large_err)]
+fn api_error_custom(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    details: Value,
+) -> Response {
+    (
+        status,
+        Json(ErrorEnvelope {
+            code: code.to_string(),
+            message: message.to_string(),
+            details: Some(details),
+        }),
+    )
+        .into_response()
+}
+
+/// Детали ошибки Stripe для конверта (`{code, message, status?}`).
+fn stripe_error_details(err: &StripeError) -> Value {
+    match err {
+        StripeError::Api {
+            status,
+            code,
+            message,
+        } => json!({
+            "code": code,
+            "message": message,
+            "status": status,
+        }),
+        other => json!({
+            "code": "stripe_error",
+            "message": other.to_string(),
+        }),
+    }
+}
+
+/// Нормализация slug: lowercase, не-alnum → '-', без двойных и краёв.
+fn slugify(input: &str) -> String {
+    let s: String = input
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    s.trim_matches('-')
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 #[allow(clippy::result_large_err)]
@@ -389,6 +467,363 @@ async fn club_payouts(ctx: AuthContext, State(state): State<ApiEnv>) -> Response
         })),
     )
         .into_response()
+}
+
+// ------------------------------------------------------------
+// Клуб: инвайт DJ + Stripe-онбординг (W2-C)
+// ------------------------------------------------------------
+
+/// Тело `POST /v1/club/djs/invite`. `club_id` в теле намеренно отсутствует:
+/// клуб всегда берётся из токена (изоляция клубов), переданный в теле
+/// `club_id` игнорируется (serde по умолчанию пропускает лишние поля).
+#[derive(Deserialize)]
+pub struct DjInviteRequest {
+    pub email: String,
+    pub display_name: String,
+}
+
+/// Приглашение DJ в клуб.
+///
+/// DJ создаётся в статусе `invited` (без пароля — логин невозможен до
+/// завершения инвайт-флоу). Одноразовый `invite_token` (128 бит, hex)
+/// хранится только sha256-хешем — переиспользуется подход хеширования
+/// токенов из `auth/identity` ([`auth::hash_refresh_token`]), отдельный
+/// столбец, не пароль. TTL — 7 дней. Повторный инвайт того же e-mail в
+/// этот клуб → 409 `dj_already_invited`.
+async fn club_djs_invite(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Json(req): Json<DjInviteRequest>,
+) -> Response {
+    if ctx.role() != Role::Club {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+
+    let email = req.email.trim();
+    let display = req.display_name.trim();
+    if !(3..=320).contains(&email.len()) {
+        return api_error(ApiError::ValidationError, "email length 3..320");
+    }
+    if !email.contains('@') || !email.contains('.') {
+        return api_error(ApiError::ValidationError, "invalid email");
+    }
+    if display.is_empty() || display.len() > 120 {
+        return api_error(ApiError::ValidationError, "display_name 1..120");
+    }
+
+    let club_id = ctx.subject_id();
+
+    // Тот же e-mail уже приглашён/создан в ЭТОТ клуб → 409.
+    let existing: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM dj WHERE email = $1 AND club_id = $2")
+            .bind(email)
+            .bind(club_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or(None);
+    if existing.is_some() {
+        return api_error_custom(
+            StatusCode::CONFLICT,
+            "dj_already_invited",
+            "DJ with this email already invited to this club",
+            json!({}),
+        );
+    }
+
+    let dj_id = Uuid::now_v7();
+    let token = auth::generate_refresh_token();
+    let token_hash = auth::hash_refresh_token(&token);
+    let expires_at = Utc::now() + Duration::days(DJ_INVITE_TTL_DAYS);
+
+    // password_hash = '!' — заведомо не Argon2: invited-DJ не может
+    // войти по паролю, пока инвайт не завершён (verify_password вернёт
+    // Err → «invalid credentials»). Секрет входа — одноразовый
+    // invite_token, не пароль.
+    let inserted = sqlx::query(
+        "INSERT INTO dj \
+         (id, club_id, email, password_hash, display_name, status, \
+          invite_token_hash, invite_expires_at) \
+         VALUES ($1, $2, $3, '!', $4, 'invited', $5, $6)",
+    )
+    .bind(dj_id)
+    .bind(club_id)
+    .bind(email)
+    .bind(display)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .execute(&pool)
+    .await;
+
+    if let Err(e) = inserted {
+        // UNIQUE(email) глобально: e-mail уже числится DJ в любом клубе.
+        if e.as_database_error()
+            .and_then(|db| db.code())
+            .is_some_and(|c| c == "23505")
+        {
+            return api_error_custom(
+                StatusCode::CONFLICT,
+                "dj_already_invited",
+                "DJ with this email already exists",
+                json!({}),
+            );
+        }
+        return api_error(ApiError::Internal, "db error");
+    }
+
+    // Аудит: инвайт — кадровое действие клуба.
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (actor_type, actor_id, action, entity, diff) \
+         VALUES ('club', $1, 'dj.invite', $2, $3)",
+    )
+    .bind(club_id)
+    .bind(dj_id.to_string())
+    .bind(json!({ "email": email, "display_name": display }))
+    .execute(&pool)
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "dj_id": dj_id,
+            "invite_token": token,
+            "invite_expires_at": expires_at,
+        })),
+    )
+        .into_response()
+}
+
+/// Статус Stripe-онбординга клуба с живой синхронизацией у провайдера.
+///
+/// Если у клуба есть `stripe_account_id` — состояние обновляется через
+/// `StripeApi::retrieve_account()` и сохраняется в БД (`charges_enabled`
+/// не хранится построчно — источник истиныStripe;persist-только статус-
+/// метка). Ошибка провайдера → деградация: возвращается последнее
+/// сохранённое состояние, в лог `warn`, не 500.
+async fn club_stripe_onboarding_status(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+) -> Response {
+    if ctx.role() != Role::Club {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+
+    let row: Result<(Option<String>, String), sqlx::Error> = sqlx::query_as(
+        "SELECT stripe_account_id, stripe_onboarding_status FROM club WHERE id = $1",
+    )
+    .bind(ctx.subject_id())
+    .fetch_one(&pool)
+    .await;
+    let Ok((acct_opt, saved_status)) = row else {
+        return api_error(ApiError::Internal, "db error");
+    };
+
+    let Some(acct_id) = acct_opt else {
+        // Аккаунта нет — онбординг не стартовал.
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "stripe_account_id": Value::Null,
+                "status": "none",
+                "charges_enabled": false,
+                "payouts_enabled": false,
+                "details_submitted": false,
+            })),
+        )
+            .into_response();
+    };
+
+    // Живая синхронизация с провайдером, если он сконфигурирован.
+    if let Some(stripe) = state.stripe.clone() {
+        match stripe.retrieve_account(&acct_id).await {
+            Ok(acc) => {
+                let status = stripe_status_from_account(&acc);
+                // Сохраняем метку в существующем словаре колонки
+                // (verified/pending/restricted), чтобы не плодить
+                // новые значения и не ломать фронтенд.
+                let persist = match status {
+                    "enabled" => "verified",
+                    "restricted" => "restricted",
+                    _ => "pending",
+                };
+                let _ = sqlx::query(
+                    "UPDATE club SET stripe_onboarding_status = $2 WHERE id = $1",
+                )
+                .bind(ctx.subject_id())
+                .bind(persist)
+                .execute(&pool)
+                .await;
+                return (
+                    StatusCode::OK,
+                    Json(json!({
+                        "stripe_account_id": acct_id,
+                        "status": status,
+                        "charges_enabled": acc.charges_enabled,
+                        "payouts_enabled": acc.payouts_enabled,
+                        "details_submitted": acc.details_submitted,
+                    })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    account = %acct_id,
+                    "stripe retrieve_account failed; возвращаем последнее сохранённое состояние"
+                );
+            }
+        }
+    }
+
+    // Деградация: провайдер недоступен/не сконфигурирован — отдаём
+    // последнее сохранённое состояние.
+    let status = stripe_status_from_saved(&saved_status);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "stripe_account_id": acct_id,
+            "status": status,
+            "charges_enabled": false,
+            "payouts_enabled": false,
+            "details_submitted": false,
+        })),
+    )
+        .into_response()
+}
+
+/// Тело `POST /v1/club/stripe/onboarding-link`.
+#[derive(Deserialize)]
+pub struct OnboardingLinkRequest {
+    pub refresh_url: String,
+    pub return_url: String,
+}
+
+/// Создание/обновление Stripe Connect onboarding-link для клуба.
+///
+/// Если у клуба ещё нет `stripe_account_id` — создаётся Connect-аккаунт
+/// (`create_connected_account`), id сохраняется. Затем запрашивается
+/// `account_link` — URL Stripe-hosted формы. Повторный вызов НЕ создаёт
+/// второй аккаунт (идемпотентность по сохранённому id). Ошибка провайдера
+/// → 502 `stripe_unavailable` с code/message провайдера в `details`.
+async fn club_stripe_onboarding_link(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Json(req): Json<OnboardingLinkRequest>,
+) -> Response {
+    if ctx.role() != Role::Club {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+    let Some(stripe) = state.stripe.clone() else {
+        return api_error_custom(
+            StatusCode::BAD_GATEWAY,
+            "stripe_unavailable",
+            "stripe provider not configured",
+            json!({ "code": "not_configured" }),
+        );
+    };
+
+    if !is_http_url(&req.refresh_url) || !is_http_url(&req.return_url) {
+        return api_error(ApiError::ValidationError, "refresh_url/return_url must be http(s)");
+    }
+
+    let club_id = ctx.subject_id();
+    let row: Result<(Option<String>, String, Option<String>), sqlx::Error> = sqlx::query_as(
+        "SELECT stripe_account_id, email, country FROM club WHERE id = $1",
+    )
+    .bind(club_id)
+    .fetch_one(&pool)
+    .await;
+    let Ok((acct_opt, email, country)) = row else {
+        return api_error(ApiError::Internal, "db error");
+    };
+
+    let acct_id = match acct_opt {
+        Some(id) => id,
+        None => {
+            // Создание Connect-аккаунта у провайдера.
+            let mut metadata = BTreeMap::new();
+            metadata.insert("club_id".to_string(), club_id.to_string());
+            let req = ConnectAccountReq {
+                email,
+                country: country.unwrap_or_else(|| "ES".to_string()),
+                business_type: "individual".to_string(),
+                metadata,
+            };
+            match stripe.create_connected_account(req).await {
+                Ok(acc) => {
+                    let _ = sqlx::query(
+                        "UPDATE club SET stripe_account_id = $2, stripe_onboarding_status = 'pending' \
+                         WHERE id = $1",
+                    )
+                    .bind(club_id)
+                    .bind(&acc.id)
+                    .execute(&pool)
+                    .await;
+                    acc.id
+                }
+                Err(e) => {
+                    return api_error_custom(
+                        StatusCode::BAD_GATEWAY,
+                        "stripe_unavailable",
+                        "stripe create_connected_account failed",
+                        stripe_error_details(&e),
+                    );
+                }
+            }
+        }
+    };
+
+    match stripe
+        .account_link(&acct_id, &req.refresh_url, &req.return_url)
+        .await
+    {
+        Ok(url) => (
+            StatusCode::CREATED,
+            Json(json!({ "url": url, "expires_at": Value::Null })),
+        )
+            .into_response(),
+        Err(e) => api_error_custom(
+            StatusCode::BAD_GATEWAY,
+            "stripe_unavailable",
+            "stripe account_link failed",
+            stripe_error_details(&e),
+        ),
+    }
+}
+
+/// `enabled` если charges+payouts разрешены; `pending` пока KYC не сдан;
+/// иначе `restricted`.
+fn stripe_status_from_account(acc: &dropit_infra_stripe::ConnectedAccount) -> &'static str {
+    if acc.charges_enabled && acc.payouts_enabled {
+        "enabled"
+    } else if !acc.details_submitted {
+        "pending"
+    } else {
+        "restricted"
+    }
+}
+
+/// Маппинг сохранённой метки колонки (verified/pending/restricted/…)
+/// в контрактный статус none|pending|restricted|enabled.
+fn stripe_status_from_saved(saved: &str) -> &'static str {
+    match saved {
+        "verified" | "enabled" => "enabled",
+        "restricted" => "restricted",
+        _ => "pending",
+    }
+}
+
+/// Простейшая проверка http(s) URL (схема + хост).
+fn is_http_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://")
 }
 
 // ============================================================
@@ -816,6 +1251,346 @@ async fn admin_djs(ctx: AuthContext, State(state): State<ApiEnv>) -> Response {
         })),
     )
         .into_response()
+}
+
+// ------------------------------------------------------------
+// Админ: создание клуба, гости, сверка (W2-C)
+// ------------------------------------------------------------
+
+/// Тело `POST /v1/admin/clubs`.
+#[derive(Deserialize)]
+pub struct ClubCreateRequest {
+    pub name: String,
+    pub city: String,
+    pub timezone: String,
+    pub address: Option<String>,
+}
+
+/// Создание клуба администратором платформы.
+///
+/// Клуб создаётся в статусе `pending_verification` (верификация — отдельный
+/// шаг админа). `qr_master_token` — постоянный токен входа клуба (128 бит,
+/// hex), в БД хранится только sha256-хеш ([`auth::hash_refresh_token`]);
+/// сам токен отдаётся один раз. e-mail/slug генерируются системно
+/// (уникальность UNIQUE-ограничений); пароля нет — вход клуба идёт по
+/// master-токену. Невалидный IANA-timezone → 400 `invalid_timezone`.
+async fn admin_clubs_create(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Json(req): Json<ClubCreateRequest>,
+) -> Response {
+    if ctx.role() != Role::Admin {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+
+    let name = req.name.trim();
+    let city = req.city.trim();
+    if !(2..=80).contains(&name.len()) {
+        return api_error(ApiError::ValidationError, "name length 2..80");
+    }
+    if !(2..=60).contains(&city.len()) {
+        return api_error(ApiError::ValidationError, "city length 2..60");
+    }
+    // IANA-timezone валидируется через chrono-tz::Tz::from_str.
+    if req.timezone.parse::<chrono_tz::Tz>().is_err() {
+        return api_error_custom(
+            StatusCode::BAD_REQUEST,
+            "invalid_timezone",
+            "timezone must be a valid IANA zone",
+            json!({ "timezone": req.timezone }),
+        );
+    }
+
+    let club_id = Uuid::now_v7();
+    // slug = slugify(name) + суффикс из club_id — глобальная уникальность.
+    let slug = format!("{}-{:x}", slugify(name), club_id.as_simple());
+    // Системный e-mail: клуб аутентифицируется master-токеном, не паролем;
+    // placeholder удовлетворяет NOT NULL + UNIQUE.
+    let email = format!("{club_id}@dropit.local");
+    let master_token = auth::generate_refresh_token();
+    let master_hash = auth::hash_refresh_token(&master_token);
+
+    let inserted = sqlx::query(
+        "INSERT INTO club \
+         (id, name, slug, email, password_hash, address, city, timezone, \
+          qr_master_token_hash, status) \
+         VALUES ($1, $2, $3, $4, '!', $5, $6, $7, $8, 'pending_verification')",
+    )
+    .bind(club_id)
+    .bind(name)
+    .bind(&slug)
+    .bind(&email)
+    .bind(req.address.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(city)
+    .bind(&req.timezone)
+    .bind(&master_hash)
+    .execute(&pool)
+    .await;
+    if inserted.is_err() {
+        return api_error(ApiError::Internal, "db error");
+    }
+
+    let _ = sqlx::query(
+        "INSERT INTO audit_log (actor_type, actor_id, action, entity, diff) \
+         VALUES ('admin', $1, 'club.create', $2, $3)",
+    )
+    .bind(ctx.subject_id())
+    .bind(club_id.to_string())
+    .bind(json!({ "name": name, "city": city, "timezone": req.timezone }))
+    .execute(&pool)
+    .await;
+
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "club_id": club_id,
+            "name": name,
+            "qr_master_token": master_token,
+        })),
+    )
+        .into_response()
+}
+
+/// Query `GET /v1/admin/guests`. `club_id` обязателен.
+#[derive(Deserialize)]
+pub struct GuestsParams {
+    pub club_id: Uuid,
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// Список гостей клуба для админ-панели (read + block).
+///
+/// Возвращаются только устройства, взаимодействовавшие с клубом (есть
+/// грант `session_guest` или запрос в сессии этого клуба). Курсорная
+/// пагинация keyset по `(first_seen DESC, id DESC)` — без OFFSET.
+/// Неизвестный клуб → 404 `club_not_found` (не 403 — не раскрываем).
+#[allow(clippy::type_complexity)]
+async fn admin_guests(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Query(params): Query<GuestsParams>,
+) -> Response {
+    if ctx.role() != Role::Admin {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+
+    // club_id обязательный; неизвестный → 404.
+    let club_exists: Option<(Uuid,)> =
+        sqlx::query_as("SELECT id FROM club WHERE id = $1")
+            .bind(params.club_id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or(None);
+    if club_exists.is_none() {
+        return api_error_custom(
+            StatusCode::NOT_FOUND,
+            "club_not_found",
+            "club not found",
+            json!({ "club_id": params.club_id }),
+        );
+    }
+
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
+    // Курсор: "<first_seen RFC3339>\x1f<id>". RFC3339 — детерминированный
+    // roundtrip (Display DateTime<Utc> не гарантированно парсится FromStr).
+    let (cur_seen, cur_id) = parse_cursor(params.cursor.as_deref());
+
+    let rows: Result<
+        Vec<(
+            Uuid,
+            Option<String>,
+            Option<String>,
+            DateTime<Utc>,
+            i64,
+            DateTime<Utc>,
+            bool,
+        )>,
+        sqlx::Error,
+    > = sqlx::query_as(
+        "SELECT g.id, g.display_name, g.email, g.first_seen, \
+         (SELECT count(*) FROM request r JOIN session s ON s.id = r.session_id \
+          WHERE r.guest_device_id = g.id AND s.club_id = $1) AS requests_count, \
+         g.last_seen, g.banned \
+         FROM guest_device g \
+         WHERE (EXISTS (SELECT 1 FROM session_guest sg JOIN session s ON s.id = sg.session_id \
+                 WHERE sg.guest_device_id = g.id AND s.club_id = $1) \
+               OR EXISTS (SELECT 1 FROM request r JOIN session s ON s.id = r.session_id \
+                 WHERE r.guest_device_id = g.id AND s.club_id = $1)) \
+         AND ($3::timestamptz IS NULL OR \
+              (g.first_seen, g.id) < ($3::timestamptz, $4::uuid)) \
+         ORDER BY g.first_seen DESC, g.id DESC \
+         LIMIT $2",
+    )
+    .bind(params.club_id)
+    .bind(limit + 1)
+    .bind(cur_seen)
+    .bind(cur_id)
+    .fetch_all(&pool)
+    .await;
+
+    let Ok(rows) = rows else {
+        return api_error(ApiError::Internal, "db error");
+    };
+
+    // keyset: курсор берётся из последнего ВОЗВРАЩАЕМОГО элемента
+    // (limit-го), не из «лишнего» (limit+1)-го — он нужен только как
+    // признак наличия следующей страницы.
+    let next_cursor = make_cursor(&rows, limit, |r| (r.3, r.0));
+    let items: Vec<_> = rows.into_iter().take(limit as usize).collect();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "items": items.into_iter().map(|(id, name, email, created, reqs, last_seen, banned)| json!({
+                "id": id,
+                "display_name": name,
+                "email": email,
+                "created_at": created,
+                "requests_count": reqs,
+                "last_seen_at": last_seen,
+                "banned": banned,
+            })).collect::<Vec<_>>(),
+            "next_cursor": next_cursor,
+        })),
+    )
+        .into_response()
+}
+
+/// Query `GET /v1/admin/reconciliation-runs`.
+#[derive(Deserialize)]
+pub struct ReconRunsParams {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+}
+
+/// История прогонов сверки (ledger vs события).
+///
+/// Таблица `reconciliation_run` заведена миграцией 0006 — миграции 0008 не
+/// требуется. Пустая история — валидный ответ (`items: []`). Статус БД
+/// (`ok`/`discrepancies`/`failed`/`running`) маппится в контракт
+/// `ok`|`mismatch`|`failed`; `discrepancy_minor = actual_minor −
+/// expected_minor` (null → 0). Курсорная пагинация keyset по
+/// `(created_at DESC, id DESC)`.
+#[allow(clippy::type_complexity)]
+async fn admin_reconciliation_runs(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Query(params): Query<ReconRunsParams>,
+) -> Response {
+    if ctx.role() != Role::Admin {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let Ok(pool) = pool_of(&state) else {
+        return pool_of(&state).unwrap_err();
+    };
+
+    let limit = params.limit.unwrap_or(50).clamp(1, 50);
+    let (cur_created, cur_id) = parse_cursor(params.cursor.as_deref());
+
+    let rows: Result<
+        Vec<(
+            Uuid,
+            DateTime<Utc>,
+            DateTime<Utc>,
+            String,
+            Option<i64>,
+            Option<i64>,
+            DateTime<Utc>,
+        )>,
+        sqlx::Error,
+    > = sqlx::query_as(
+        "SELECT id, period_start, period_end, status, expected_minor, actual_minor, created_at \
+         FROM reconciliation_run \
+         WHERE ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid)) \
+         ORDER BY created_at DESC, id DESC \
+         LIMIT $1",
+    )
+    .bind(limit + 1)
+    .bind(cur_created)
+    .bind(cur_id)
+    .fetch_all(&pool)
+    .await;
+
+    let Ok(rows) = rows else {
+        return api_error(ApiError::Internal, "db error");
+    };
+
+    let next_cursor = make_cursor(&rows, limit, |r| (r.6, r.0));
+    let items: Vec<_> = rows.into_iter().take(limit as usize).collect();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "items": items.into_iter().map(|(id, p_start, p_end, status, expected, actual, created)| {
+                let expected_minor = expected.unwrap_or(0);
+                let actual_minor = actual.unwrap_or(0);
+                json!({
+                    "id": id,
+                    "period_start": p_start,
+                    "period_end": p_end,
+                    "status": map_recon_status(&status),
+                    "expected_minor": expected_minor,
+                    "actual_minor": actual_minor,
+                    "discrepancy_minor": actual_minor - expected_minor,
+                    "created_at": created,
+                })
+            }).collect::<Vec<_>>(),
+            "next_cursor": next_cursor,
+        })),
+    )
+        .into_response()
+}
+
+/// Маппинг статуса БД → контракт `ok`|`mismatch`|`failed`.
+fn map_recon_status(db_status: &str) -> &'static str {
+    match db_status {
+        "ok" => "ok",
+        "discrepancies" => "mismatch",
+        "failed" => "failed",
+        _ => "mismatch",
+    }
+}
+
+/// Разбор курсора `"<RFC3339>\x1f<uuid>"` в пару `(timestamp, id)`.
+/// Невалидный курсор → `(None, None)` (страница без фильтра).
+fn parse_cursor(c: Option<&str>) -> (Option<DateTime<Utc>>, Option<Uuid>) {
+    let Some(c) = c else {
+        return (None, None);
+    };
+    let Some((ts, id)) = c.rsplit_once('\x1f') else {
+        return (None, None);
+    };
+    let ts = DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc));
+    let id = id.parse::<Uuid>().ok();
+    match (ts, id) {
+        (Some(t), Some(i)) => (Some(t), Some(i)),
+        _ => (None, None),
+    }
+}
+
+/// Строит next_cursor из последнего возвращённого элемента (limit-го),
+/// если всего выбрано больше limit (есть следующая страница). Курсор
+/// кодируется как `"<RFC3339>\x1f<uuid>"`.
+fn make_cursor<T, F>(rows: &[T], limit: i64, pick: F) -> Option<String>
+where
+    F: Fn(&T) -> (DateTime<Utc>, Uuid),
+{
+    if rows.len() as i64 > limit {
+        let last = &rows[(limit - 1) as usize];
+        let (ts, id) = pick(last);
+        Some(format!("{}\x1f{}", ts.to_rfc3339(), id))
+    } else {
+        None
+    }
 }
 
 // ============================================================

@@ -41,13 +41,22 @@ pub struct SessionRow {
 impl SessionRow {
     /// Статус через типизированную стейт-машину.
     pub fn session_status(&self) -> Option<SessionStatus> {
-        match self.status.as_str() {
-            "created" => Some(SessionStatus::Created),
-            "active" => Some(SessionStatus::Active),
-            "paused_acceptance" => Some(SessionStatus::PausedAcceptance),
-            "closed" => Some(SessionStatus::Closed),
-            _ => None,
-        }
+        parse_session_status(&self.status)
+    }
+}
+
+/// Разбирает строковый статус сессии (из БД) в типизированную
+/// стейт-машину `SessionStatus`. Единственное место маппинга
+/// строка→enum — используется и `SessionRow::session_status`, и
+/// хендлерами, которым нужна доменная логика (например,
+/// `accepts_requests` для `requests_open`).
+pub fn parse_session_status(s: &str) -> Option<SessionStatus> {
+    match s {
+        "created" => Some(SessionStatus::Created),
+        "active" => Some(SessionStatus::Active),
+        "paused_acceptance" => Some(SessionStatus::PausedAcceptance),
+        "closed" => Some(SessionStatus::Closed),
+        _ => None,
     }
 }
 
@@ -60,6 +69,31 @@ pub struct SessionInfo {
     pub status: String,
     pub timezone: String,
     pub price_minor: Option<i64>,
+}
+
+/// Текущая открытая сессия гостя для `GET /v1/sessions/current`.
+///
+/// Выбирается последняя открытая (`active`/`paused_acceptance`)
+/// сессия клуба, где у гостя есть действующий join-грант
+/// (`session_guest.revoked_at IS NULL`). `opened_at` гарантированно
+/// не NULL — фильтр отсекает `created`/`closed`. `grant_expires_at` —
+/// `expires_at` активного QR-токена сессии (плановое авто-закрытие);
+/// NULL, если все QR деактивированы (тогда хендер считает следующий
+/// 07:00 в зоне клуба). `club_city` берётся из `club.address`
+/// (отдельной колонки city в схеме нет — миграции чужого пакета).
+#[derive(Debug, sqlx::FromRow)]
+pub struct CurrentGuestSession {
+    pub id: Uuid,
+    pub club_id: Uuid,
+    pub club_name: String,
+    pub club_city: String,
+    pub status: String,
+    pub opened_at: DateTime<Utc>,
+    pub closed_at: Option<DateTime<Utc>>,
+    pub timezone: String,
+    pub dj_id: Option<Uuid>,
+    pub dj_display_name: Option<String>,
+    pub grant_expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -290,6 +324,43 @@ impl SessionRepo {
              JOIN session_guest g ON g.session_id = s.id \
              WHERE g.guest_device_id = $1 AND g.revoked_at IS NULL AND s.status <> 'closed' \
              ORDER BY g.joined_at DESC LIMIT 1",
+        )
+        .bind(guest_device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Текущая открытая сессия гостя для `GET /v1/sessions/current`.
+    ///
+    /// Возвращает последнюю открытую (`active`/`paused_acceptance`)
+    /// сессию клуба, где у гостя действующий (не отозванный) грант.
+    /// `created`/`closed` отсекаются: «текущий вечер» — это уже
+    /// открытая DJ-смен и ещё не закрытая. При нескольких — самая
+    /// свежая по `opened_at` (таубрейкер — `created_at`).
+    ///
+    /// Сигнатура: `&PgPool` (через `&self`) + `guest_device_id`.
+    pub async fn current_session_for_guest(
+        &self,
+        guest_device_id: Uuid,
+    ) -> Result<Option<CurrentGuestSession>, SessionError> {
+        let row = sqlx::query_as::<_, CurrentGuestSession>(
+            "SELECT s.id, s.club_id, c.name AS club_name, \
+             COALESCE(c.address, '') AS club_city, \
+             s.status, s.opened_at, s.closed_at, s.timezone, s.dj_id, \
+             d.display_name AS dj_display_name, \
+             (SELECT qt.expires_at FROM qr_token qt \
+              WHERE qt.session_id = s.id AND qt.active \
+              ORDER BY qt.generated_at DESC LIMIT 1) AS grant_expires_at \
+             FROM session s \
+             JOIN session_guest g ON g.session_id = s.id \
+             JOIN club c ON c.id = s.club_id \
+             LEFT JOIN dj d ON d.id = s.dj_id \
+             WHERE g.guest_device_id = $1 AND g.revoked_at IS NULL \
+             AND s.status IN ('active', 'paused_acceptance') \
+             AND s.opened_at IS NOT NULL \
+             ORDER BY s.opened_at DESC, s.created_at DESC \
+             LIMIT 1",
         )
         .bind(guest_device_id)
         .fetch_optional(&self.pool)

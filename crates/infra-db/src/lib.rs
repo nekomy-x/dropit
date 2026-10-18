@@ -4,6 +4,7 @@
 //! F2: сессии, QR, join-гранты (sessions).
 
 pub mod billing;
+pub mod catalog;
 pub mod identity;
 pub mod jobs;
 pub mod migrations;

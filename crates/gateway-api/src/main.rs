@@ -3,6 +3,7 @@
 //! F0A: каркас + health. F1: device-token, логины, refresh, RBAC.
 
 mod auth;
+mod catalog_routes;
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
@@ -15,6 +16,8 @@ mod e2e_payments;
 mod e2e_payouts;
 #[cfg(test)]
 mod e2e_requests;
+#[cfg(test)]
+mod e2e_catalog;
 #[cfg(test)]
 mod e2e_sessions;
 #[cfg(test)]

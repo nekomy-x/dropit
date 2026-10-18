@@ -26,7 +26,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use dropit_common::{ApiError, Role};
+use chrono::{DateTime, Utc};
+use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_domain::RequestAction;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -105,6 +106,57 @@ pub struct WsTicketResponse {
 }
 
 // ============================================================
+// DTO: экран «моя заявка» (GET /v1/my/requests/:id)
+// ============================================================
+
+#[derive(Serialize)]
+pub struct MyRequestDetailResponse {
+    pub request: RequestDetailDto,
+}
+
+#[derive(Serialize)]
+pub struct RequestDetailDto {
+    pub id: Uuid,
+    #[serde(rename = "session_id")]
+    pub session_id: Uuid,
+    pub status: String,
+    pub track: TrackDto,
+    /// Место в очереди (1 = первая). Только для pending; иначе null.
+    pub position: Option<i64>,
+    /// Всего активных заявок в сессии (pending + accepted).
+    pub queue_size: i64,
+    /// Сколько раз этот трек (canonical-ключ) заказан в сессии (включая эту).
+    pub same_song_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub played_at: Option<DateTime<Utc>>,
+    pub decline_reason: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TrackDto {
+    pub title: String,
+    pub artist: String,
+    pub artwork_url: Option<String>,
+}
+
+// ============================================================
+// DTO: апгрейд гостя (POST /v1/guest/upgrade)
+// ============================================================
+
+#[derive(Deserialize)]
+pub struct UpgradeRequest {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+pub struct UpgradeResponse {
+    pub email: String,
+    pub verified: bool,
+    pub already_upgraded: bool,
+}
+
+// ============================================================
 // Router
 // ============================================================
 
@@ -112,6 +164,8 @@ pub fn requests_router() -> Router<ApiEnv> {
     Router::new()
         .route("/v1/requests", post(create_request))
         .route("/v1/my/requests", get(my_requests))
+        .route("/v1/my/requests/:id", get(my_request_detail))
+        .route("/v1/guest/upgrade", post(guest_upgrade))
         .route("/v1/dj/queue", get(dj_queue))
         .route("/v1/dj/requests/:id/accept", post(dj_accept))
         .route("/v1/dj/requests/:id/reject", post(dj_reject))
@@ -329,6 +383,255 @@ async fn my_requests(State(state): State<ApiEnv>, headers: HeaderMap) -> Respons
             }),
         )
             .into_response(),
+        Err(_) => api_error(ApiError::Internal, "db error"),
+    }
+}
+
+// ============================================================
+// Гость: экран «моя заявка» (GET /v1/my/requests/:id)
+// ============================================================
+
+/// Извлекает guest_device_id из Bearer. Поддерживает два формата:
+/// (1) device-token — UUIDv7 (как в /sessions/join, /requests);
+/// (2) гостевой JWT (Role::Guest, sub = guest_device_id).
+/// Чужая роль JWT → 403; мусор/отсутствие → 401.
+///
+/// `Result<_, Response>` повторяет паттерн экстрактора `AuthContext`
+/// (Rejection = Response); `result_large_err` подавляем осознанно —
+/// ответ уже готов к возврату из хендлера без аллокации-обёртки.
+#[allow(clippy::result_large_err)]
+fn resolve_guest_device_id(
+    headers: &HeaderMap,
+    keys: &crate::auth::JwtKeys,
+) -> Result<Uuid, Response> {
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+    let Some(token) = bearer else {
+        return Err(auth_error_response(ApiError::Unauthorized));
+    };
+    // (1) device-token — UUIDv7 (guest_device.id).
+    if let Ok(id) = Uuid::parse_str(&token) {
+        return Ok(id);
+    }
+    // (2) JWT: подпись → роль → Guest.
+    match keys.verify_access(&token) {
+        Ok(claims) if claims.role == Role::Guest => Ok(claims.sub),
+        Ok(_) => Err(auth_error_response(ApiError::Forbidden)),
+        Err(_) => Err(auth_error_response(ApiError::Unauthorized)),
+    }
+}
+
+/// Кастомный конверт ошибки с заданным code (расширение поверх ApiError,
+/// не новый тип). Используется для специфичных кодов: request_not_found,
+/// email_taken, invalid_email.
+fn envelope(status: StatusCode, code: &str, message: &str) -> Response {
+    (
+        status,
+        Json(ErrorEnvelope {
+            code: code.into(),
+            message: message.into(),
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
+/// GET /v1/my/requests/:id — карточка заявки гостя: статус, позиция в
+/// очереди, размер очереди, счётчик той же песни. Заявка ищется в
+/// активной сессии гостя: чужая заявка или заявка из другой сессии →
+/// 404 request_not_found (без раскрытия существования).
+async fn my_request_detail(
+    State(state): State<ApiEnv>,
+    headers: HeaderMap,
+    Path(request_id): Path<Uuid>,
+) -> Response {
+    let requests = match state.requests.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let sessions = match state.sessions.clone() {
+        Some(s) => s,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let guest_device_id = match resolve_guest_device_id(&headers, &state.keys) {
+        Ok(id) => id,
+        Err(r) => return r,
+    };
+    // Активная сессия гостя — та же, что в POST /requests и GET /my/requests.
+    let active_session = match sessions.find_active_session_of_guest(guest_device_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return envelope(StatusCode::NOT_FOUND, "request_not_found", "Request not found.")
+        }
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    };
+    // Поиск в активной сессии + владение гостем.
+    let detail = match requests
+        .find_guest_request_detail(active_session.id, guest_device_id, request_id)
+        .await
+    {
+        Ok(Some(d)) => d,
+        Ok(None) => {
+            return envelope(StatusCode::NOT_FOUND, "request_not_found", "Request not found.")
+        }
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    };
+    // Позиция — только для pending; иначе null.
+    let position = if detail.status == "pending" {
+        requests
+            .active_queue_position(detail.session_id, request_id)
+            .await
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    let queue_size = requests
+        .active_queue_size(detail.session_id)
+        .await
+        .unwrap_or(0);
+    let same_song_count = requests
+        .same_track_count(detail.session_id, detail.track_cache_id)
+        .await
+        .unwrap_or(0);
+    // updated_at: отдельной колонки нет (не в рамках пакета) —
+    // используем played_at при наличии, иначе created_at.
+    let updated_at = detail.played_at.unwrap_or(detail.created_at);
+    (
+        StatusCode::OK,
+        Json(MyRequestDetailResponse {
+            request: RequestDetailDto {
+                id: detail.id,
+                session_id: detail.session_id,
+                status: detail.status,
+                track: TrackDto {
+                    title: detail.title,
+                    artist: detail.artist,
+                    artwork_url: detail.cover_url,
+                },
+                position,
+                queue_size,
+                same_song_count,
+                created_at: detail.created_at,
+                updated_at,
+                played_at: detail.played_at,
+                decline_reason: detail.reject_reason,
+            },
+        }),
+    )
+        .into_response()
+}
+
+// ============================================================
+// Гость: апгрейд — привязка e-mail (POST /v1/guest/upgrade)
+// ============================================================
+
+/// Нормализует e-mail: trim + lowercase. Возвращает None, если значение
+/// пустое, длиннее 320 символов, без @, без локальной части или без
+/// домена с точкой.
+fn normalize_email(raw: &str) -> Option<String> {
+    let s = raw.trim();
+    if s.is_empty() || s.len() > 320 {
+        return None;
+    }
+    let lower = s.to_lowercase();
+    let at = lower.find('@')?;
+    let (local, rest) = lower.split_at(at);
+    let domain = &rest[1..]; // пропустить '@'
+    if local.is_empty() || domain.is_empty() {
+        return None;
+    }
+    if !domain.contains('.') {
+        return None;
+    }
+    if domain.starts_with('.') || domain.ends_with('.') {
+        return None;
+    }
+    Some(lower)
+}
+
+/// POST /v1/guest/upgrade — привязка e-mail к гостевому профилю.
+/// Идемпотентна: повторный вызов с тем же e-mail → 200 already_upgraded.
+/// Занятый другим гостем e-mail → 409 email_taken. Невалидный → 400.
+async fn guest_upgrade(
+    State(state): State<ApiEnv>,
+    headers: HeaderMap,
+    Json(req): Json<UpgradeRequest>,
+) -> Response {
+    let requests = match state.requests.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let repo = match state.repo.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let guest_device_id = match resolve_guest_device_id(&headers, &state.keys) {
+        Ok(id) => id,
+        Err(r) => return r,
+    };
+    // Устройство должно существовать (write-операция на guest_device).
+    match repo.find_guest_device(guest_device_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return auth_error_response(ApiError::Unauthorized),
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    }
+    let normalized = match normalize_email(&req.email) {
+        Some(n) => n,
+        None => {
+            return envelope(
+                StatusCode::BAD_REQUEST,
+                "invalid_email",
+                "Email is empty, too long, or missing @/domain.",
+            )
+        }
+    };
+    match requests
+        .upgrade_guest_email(guest_device_id, &normalized, &normalized)
+        .await
+    {
+        Ok(dropit_infra_db::requests::UpgradeOutcome::Bound {
+            email,
+            already_upgraded,
+        }) => (
+            StatusCode::OK,
+            Json(UpgradeResponse {
+                email,
+                verified: false,
+                already_upgraded,
+            }),
+        )
+            .into_response(),
+        Ok(dropit_infra_db::requests::UpgradeOutcome::EmailTaken) => envelope(
+            StatusCode::CONFLICT,
+            "email_taken",
+            "Email already bound to another guest.",
+        ),
+        Err(dropit_infra_db::RequestError::Db(sqlx::Error::RowNotFound)) => {
+            auth_error_response(ApiError::Unauthorized)
+        }
         Err(_) => api_error(ApiError::Internal, "db error"),
     }
 }

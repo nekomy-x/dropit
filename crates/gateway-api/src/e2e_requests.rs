@@ -14,6 +14,7 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 
 use crate::e2e::{app_env, call, test_repo};
+use dropit_common::Role;
 use dropit_infra_db::{RequestRepo, SessionRepo};
 
 #[tokio::test]
@@ -370,4 +371,367 @@ async fn call_with_key(
         .unwrap_or_default();
     let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     (status, value)
+}
+
+// ============================================================
+// W2-B: GET /v1/my/requests/:id — экран «моя заявка»
+// ============================================================
+
+#[tokio::test]
+async fn e2e_my_request_detail() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e W2-B (detail) пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let requests = RequestRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions.clone()), Some(requests.clone())).await;
+    let pool = repo.pool();
+
+    // Фикстуры: клуб, DJ, сессия (active), гранты, трек.
+    let club_id = uuid::Uuid::now_v7();
+    let dj_id = uuid::Uuid::now_v7();
+    sqlx::query("INSERT INTO club (id, name, slug, email, password_hash) VALUES ($1,'W2B Club','w2b-club','w2b@club.test','x')")
+        .bind(club_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO dj (id, club_id, email, password_hash, display_name) VALUES ($1,$2,'w2b@dj.test','x','DJ W2B')")
+        .bind(dj_id)
+        .bind(club_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let session = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    sessions
+        .apply_transition(session.id, dropit_domain::SessionTransition::Open)
+        .await
+        .unwrap();
+
+    // Гость 1 с грантом.
+    let guest1 = uuid::Uuid::now_v7();
+    repo.create_guest_device(guest1, "ios", None).await.unwrap();
+    sessions.grant_session_guest(session.id, guest1).await.unwrap();
+
+    let track_id = insert_track(&pool, "itunes", "w2b-1", "Vivir Mi Vida", "Marc Anthony").await;
+
+    // --- 1. Создаём заявку гостя 1 → pending ---------------------
+    let (s, body) = call_with_key(
+        &env,
+        "POST",
+        "/v1/requests",
+        Some(json!({ "track_id": track_id })),
+        Some(&guest1.to_string()),
+        "w2b-detail-1",
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create: {body}");
+    let request_id = body["request_id"].as_str().unwrap().to_string();
+
+    // --- 2. GET /v1/my/requests/:id — своя заявка, 200 ------------
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "detail: {body}");
+    let r = &body["request"];
+    assert_eq!(r["status"], "pending");
+    assert_eq!(r["track"]["title"], "Vivir Mi Vida");
+    assert_eq!(r["track"]["artist"], "Marc Anthony");
+    assert_eq!(r["position"], 1, "первая заявка → position 1");
+    assert_eq!(r["queue_size"], 1);
+    assert_eq!(r["same_song_count"], 1);
+    assert_eq!(r["session_id"].as_str().unwrap(), session.id.to_string());
+    assert!(r["played_at"].is_null());
+    assert!(r["decline_reason"].is_null());
+    assert!(r["created_at"].is_string());
+    assert!(r["updated_at"].is_string());
+
+    // --- 3. Второй гость заказывает ТОТ ЖЕ трек → same_song_count растёт
+    let guest2 = uuid::Uuid::now_v7();
+    repo.create_guest_device(guest2, "android", None).await.unwrap();
+    sessions.grant_session_guest(session.id, guest2).await.unwrap();
+    let (s, body2) = call_with_key(
+        &env,
+        "POST",
+        "/v1/requests",
+        Some(json!({ "track_id": track_id })),
+        Some(&guest2.to_string()),
+        "w2b-detail-2",
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create guest2: {body2}");
+    let request_id2 = body2["request_id"].as_str().unwrap().to_string();
+
+    // Гость 1: same_song_count вырос до 2; позиция осталась 1 (старейшая).
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "detail after guest2: {body}");
+    assert_eq!(body["request"]["same_song_count"], 2, "same_song_count grows");
+    assert_eq!(body["request"]["queue_size"], 2);
+    assert_eq!(body["request"]["position"], 1, "guest1 is first in FIFO");
+
+    // Гость 2: своя заявка → position 2 (новее), same_song_count 2.
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id2}"),
+        None,
+        Some(&guest2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "guest2 detail: {body}");
+    assert_eq!(body["request"]["position"], 2);
+    assert_eq!(body["request"]["same_song_count"], 2);
+
+    // --- 4. Чужая заявка → 404 (не различать с несуществующей) ----
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        Some(&guest2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "foreign request must 404: {body}");
+    assert_eq!(body["code"], "request_not_found");
+
+    // Несуществующий id — тот же ответ.
+    let ghost = uuid::Uuid::now_v7();
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{ghost}"),
+        None,
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "missing id must 404: {body}");
+    assert_eq!(body["code"], "request_not_found");
+
+    // --- 5. 401 без токена, 403 для роли dj -----------------------
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "no token: {body}");
+    assert_eq!(body["code"], "unauthorized");
+
+    let dj_token = env
+        .keys
+        .issue_access(dj_id, Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "dj role: {body}");
+    assert_eq!(body["code"], "forbidden");
+
+    // --- 6. Изоляция сессий: заявка из другой сессии не найдена ----
+    let session2 = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    sessions
+        .apply_transition(session2.id, dropit_domain::SessionTransition::Open)
+        .await
+        .unwrap();
+    // Гость 1 вступает в новую сессию → его активная сессия = session2.
+    sessions.grant_session_guest(session2.id, guest1).await.unwrap();
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/my/requests/{request_id}"),
+        None,
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(
+        s, StatusCode::NOT_FOUND,
+        "request from another session must 404: {body}"
+    );
+    assert_eq!(body["code"], "request_not_found");
+}
+
+// ============================================================
+// W2-B: POST /v1/guest/upgrade — привязка e-mail
+// ============================================================
+
+#[tokio::test]
+async fn e2e_guest_upgrade() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e W2-B (upgrade) пропущен");
+            return;
+        }
+    };
+    let requests = RequestRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), None, Some(requests.clone())).await;
+    let pool = repo.pool();
+
+    // test_repo() не знает про guest_account (миграция 0010) — чистим сами.
+    let _ = sqlx::query("TRUNCATE TABLE guest_account")
+        .execute(&pool)
+        .await;
+
+    // Два гостя-устройства.
+    let guest1 = uuid::Uuid::now_v7();
+    let guest2 = uuid::Uuid::now_v7();
+    repo.create_guest_device(guest1, "ios", None).await.unwrap();
+    repo.create_guest_device(guest2, "android", None).await.unwrap();
+
+    // --- 1. Успешный апгрейд: e-mail нормализуется ----------------
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "Alice@Example.COM" })),
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "upgrade: {body}");
+    assert_eq!(body["email"], "alice@example.com", "email normalized");
+    assert_eq!(body["verified"], false);
+    assert_eq!(body["already_upgraded"], false);
+
+    // В БД ровно один аккаунт и device привязан.
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM guest_account")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cnt, 1, "no duplicate accounts");
+    let (bound,): (Option<uuid::Uuid>,) =
+        sqlx::query_as("SELECT account_id FROM guest_device WHERE id = $1")
+            .bind(guest1)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(bound.is_some(), "guest_device.account_id set");
+
+    // --- 2. Повтор тем же e-mail → идемпотентен -------------------
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "alice@example.com" })),
+        Some(&guest1.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "repeat: {body}");
+    assert_eq!(body["already_upgraded"], true);
+    assert_eq!(body["email"], "alice@example.com");
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM guest_account")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cnt, 1, "repeat must not create second account");
+
+    // --- 3. Тот же e-mail от другого гостя → 409 email_taken -----
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "alice@example.com" })),
+        Some(&guest2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "taken email: {body}");
+    assert_eq!(body["code"], "email_taken");
+
+    // --- 4. Мусорный e-mail → 400 invalid_email ------------------
+    for bad in ["", "noatsign", "a@b", "x@.com", "@nodomain.com"] {
+        let (s, body) = call(
+            &env,
+            "POST",
+            "/v1/guest/upgrade",
+            Some(json!({ "email": bad })),
+            Some(&guest2.to_string()),
+        )
+        .await;
+        assert_eq!(
+            s,
+            StatusCode::BAD_REQUEST,
+            "invalid email '{bad}': {body}"
+        );
+        assert_eq!(body["code"], "invalid_email");
+    }
+
+    // Слишком длинный → 400.
+    let long_email = format!("{}@example.com", "a".repeat(330));
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": long_email })),
+        Some(&guest2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "too long email: {body}");
+    assert_eq!(body["code"], "invalid_email");
+
+    // --- 5. Гость2 с валидным свободным e-mail → успех -----------
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "bob@example.com" })),
+        Some(&guest2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "guest2 upgrade: {body}");
+    assert_eq!(body["email"], "bob@example.com");
+    assert_eq!(body["already_upgraded"], false);
+
+    // --- 6. 401 без токена, 403 для роли dj -----------------------
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "c@example.com" })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "no token: {body}");
+    assert_eq!(body["code"], "unauthorized");
+
+    let dj_token = env
+        .keys
+        .issue_access(uuid::Uuid::now_v7(), Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/guest/upgrade",
+        Some(json!({ "email": "c@example.com" })),
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "dj role: {body}");
+    assert_eq!(body["code"], "forbidden");
 }

@@ -24,7 +24,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use dropit_common::{ApiError, Role};
+use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_domain::SessionTransition;
 use dropit_infra_db::SessionError;
 use rand::RngCore;
@@ -82,6 +82,41 @@ pub struct QrGenerateResponse {
 }
 
 // ============================================================
+// DTO: GET /v1/sessions/current
+// ============================================================
+
+/// DJ карточка в ответе текущей сессии (null, если DJ не назначен).
+#[derive(Serialize)]
+pub struct CurrentSessionDj {
+    pub id: Uuid,
+    pub display_name: String,
+}
+
+/// Тело `session` в ответе `GET /v1/sessions/current`.
+#[derive(Serialize)]
+pub struct CurrentSessionResponse {
+    pub id: Uuid,
+    pub club_id: Uuid,
+    pub club_name: String,
+    pub club_city: String,
+    pub opened_at: chrono::DateTime<chrono::Utc>,
+    pub closes_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Принимает ли клуб заявки сейчас (та же логика, что в гейте
+    /// `POST /v1/requests`: `SessionStatus::accepts_requests`).
+    pub requests_open: bool,
+    pub dj: Option<CurrentSessionDj>,
+    /// Плановое окончание действия гранта гостя = плановое
+    /// авто-закрытие сессии (expires_at активного QR-токена либо
+    /// следующий 07:00 в зоне клуба).
+    pub guest_grant_expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct CurrentSessionEnvelope {
+    pub session: CurrentSessionResponse,
+}
+
+// ============================================================
 // Router
 // ============================================================
 
@@ -89,6 +124,8 @@ pub fn sessions_router() -> Router<ApiEnv> {
     Router::new()
         // Гость: join по QR (device-token в Bearer, не JWT).
         .route("/v1/sessions/join", post(join_session))
+        // Гость: текущая сессия по живому гранту (device-token ИЛИ JWT guest).
+        .route("/v1/sessions/current", get(current_session))
         // Клуб: сессия/QR/закрытие (RBAC: AuthContext внутри хендлеров).
         .route("/v1/club/sessions", post(create_session))
         .route("/v1/club/sessions/:id/qr/generate", post(qr_generate))
@@ -193,6 +230,137 @@ async fn join_session(
             timezone: info.timezone,
             price_minor: info.price_minor,
             grant_id: grant.id,
+        }),
+    )
+        .into_response()
+}
+
+// ============================================================
+// Гость: текущая сессия (по живому гранту)
+// ============================================================
+
+/// `GET /v1/sessions/current` — текущая открытая сессия гостя.
+///
+/// Возвращает последнюю открытую (`active`/`paused_acceptance`)
+/// сессию клуба, где у гостя есть действующий join-грант
+/// (не отозван, сессия не закрыта). Если такой нет — `404 session_not_found`
+/// (нормальный ответ, не серверная ошибка).
+///
+/// Авторизация гостя — двойная, как во всей F2/F4: **device-token**
+/// (UUIDv7 в Bearer, как в `/sessions/join`) **ИЛИ JWT с ролью `guest`**
+/// (контракт «Bearer JWT»). Чужая роль → `403`, без/битый токен → `401`,
+/// неизвестное устройство → `401`.
+///
+/// `requests_open` переиспользует `SessionStatus::accepts_requests` —
+/// ту же доменную функцию, что в гейте `POST /v1/requests`
+/// (через `infra_db::sessions::parse_session_status`), без дублирования
+/// условия. `guest_grant_expires_at` — `expires_at` активного QR-токена
+/// сессии (плановое авто-закрытие); если QR деактивирован — следующий
+/// 07:00 в зоне клуба (`dropit_domain::qr::next_close_at`, та же функция,
+/// что при выпуске QR).
+async fn current_session(State(state): State<ApiEnv>, headers: HeaderMap) -> Response {
+    let sessions = match state.sessions.clone() {
+        Some(s) => s,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+    let Some(token) = bearer else {
+        return auth_error_response(ApiError::Unauthorized);
+    };
+
+    // Гость: device-token (UUIDv7) — как в /sessions/join — ИЛИ JWT
+    // с ролью guest. Чужая роль JWT → 403 (не 401, чтобы не маскировать
+    // ошибку авторизации под «нет токена»).
+    let guest_device_id = match Uuid::parse_str(&token) {
+        Ok(id) => {
+            // device-token: устройство должно существовать (как в join).
+            let repo = match state.repo.clone() {
+                Some(r) => r,
+                None => {
+                    return api_error(
+                        ApiError::ExternalServiceUnavailable,
+                        "database not configured",
+                    )
+                }
+            };
+            match repo.find_guest_device(id).await {
+                Ok(Some(_)) => id,
+                _ => return auth_error_response(ApiError::Unauthorized),
+            }
+        }
+        Err(_) => match state.keys.verify_access(&token) {
+            Ok(claims) if claims.role == Role::Guest => claims.sub,
+            Ok(_) => return auth_error_response(ApiError::Forbidden),
+            Err(_) => return auth_error_response(ApiError::Unauthorized),
+        },
+    };
+
+    let row = match sessions.current_session_for_guest(guest_device_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return session_not_found(),
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    };
+
+    // requests_open: единственный источник истины — доменная стейт-машина.
+    let requests_open = dropit_infra_db::sessions::parse_session_status(&row.status)
+        .map(|st| st.accepts_requests())
+        .unwrap_or(false);
+
+    // guest_grant_expires_at: плановое авто-закрытие. Предпочитаем
+    // expires_at активного QR-токена (реальное запланированное закрытие);
+    // если QR деактивирован — считаем следующий 07:00 в зоне клуба.
+    let grant_expires_at = match row.grant_expires_at {
+        Some(t) => t,
+        None => match row.timezone.parse::<chrono_tz::Tz>() {
+            Ok(tz) => dropit_domain::qr::next_close_at(&tz, chrono::Utc::now()),
+            Err(_) => return api_error(ApiError::Internal, "bad timezone stored"),
+        },
+    };
+
+    let dj = row.dj_id.map(|id| CurrentSessionDj {
+        id,
+        display_name: row.dj_display_name.clone().unwrap_or_default(),
+    });
+
+    (
+        StatusCode::OK,
+        Json(CurrentSessionEnvelope {
+            session: CurrentSessionResponse {
+                id: row.id,
+                club_id: row.club_id,
+                club_name: row.club_name,
+                club_city: row.club_city,
+                opened_at: row.opened_at,
+                closes_at: row.closed_at,
+                requests_open,
+                dj,
+                guest_grant_expires_at: grant_expires_at,
+            },
+        }),
+    )
+        .into_response()
+}
+
+/// `404 session_not_found` — нормальный ответ «нет действующего доступа»
+/// для `GET /v1/sessions/current`. Код специфичен (не общий `not_found`),
+/// чтобы клиент гостя мог различать «нет текущей сессии» от прочих 404.
+fn session_not_found() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorEnvelope {
+            code: "session_not_found".to_string(),
+            message: "No active session for this guest.".to_string(),
+            details: None,
         }),
     )
         .into_response()

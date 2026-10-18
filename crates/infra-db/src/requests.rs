@@ -30,6 +30,19 @@ pub enum RequestError {
     IdempotencyConflict,
 }
 
+/// Исход апгрейда гостя (POST /v1/guest/upgrade).
+#[derive(Debug)]
+pub enum UpgradeOutcome {
+    /// E-mail привязан к гостю. `already_upgraded=true` — повторный вызов
+    /// с тем же нормализованным e-mail (идемпотентность).
+    Bound {
+        email: String,
+        already_upgraded: bool,
+    },
+    /// E-mail уже привязан к другому гостю → 409 EMAIL_TAKEN.
+    EmailTaken,
+}
+
 #[derive(Debug, sqlx::FromRow)]
 pub struct RequestRow {
     pub id: Uuid,
@@ -81,6 +94,24 @@ pub struct QueueItem {
 struct ReplayRow {
     request_id: Uuid,
     response: serde_json::Value,
+}
+
+/// Карточка одной заявки гостя для экрана «моя заявка»
+/// (GET /v1/my/requests/:id). Содержит данные трека и временные метки;
+/// позиция в очереди и счётчики считаются отдельными методами.
+#[derive(Debug, sqlx::FromRow)]
+pub struct RequestDetail {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub guest_device_id: Uuid,
+    pub track_cache_id: Uuid,
+    pub status: String,
+    pub reject_reason: Option<String>,
+    pub played_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub title: String,
+    pub artist: String,
+    pub cover_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -320,6 +351,171 @@ impl RequestRepo {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    // ---------------------------------------------------------
+    // Экран «моя заявка»: GET /v1/my/requests/:id
+    // ---------------------------------------------------------
+
+    /// Находит заявку гостя в конкретной сессии. Тройной фильтр
+    /// (request_id + session_id + guest_device_id) гарантирует:
+    /// чужая заявка, заявка из другой сессии или несуществующий id —
+    /// всё равно вернёт `None` → 404 (без раскрытия существования).
+    pub async fn find_guest_request_detail(
+        &self,
+        session_id: Uuid,
+        guest_device_id: Uuid,
+        request_id: Uuid,
+    ) -> Result<Option<RequestDetail>, RequestError> {
+        let row = sqlx::query_as::<_, RequestDetail>(
+            "SELECT r.id, r.session_id, r.guest_device_id, r.track_cache_id, r.status, \
+             r.reject_reason, r.played_at, r.created_at, t.title, t.artist, t.cover_url \
+             FROM request r JOIN track_cache t ON t.id = r.track_cache_id \
+             WHERE r.id = $1 AND r.session_id = $2 AND r.guest_device_id = $3",
+        )
+        .bind(request_id)
+        .bind(session_id)
+        .bind(guest_device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Позиция заявки в активной очереди сессии (1 = первая). Та же
+    /// сортировка поля `created_at`, что и в `dj_queue(sort="new")`,
+    /// но FIFO-порядок (старейшая = 1) — «место в очереди» = порядок
+    /// обработки. Вернёт `None`, если заявка не в активной очереди
+    /// (pending/accepted).
+    pub async fn active_queue_position(
+        &self,
+        session_id: Uuid,
+        request_id: Uuid,
+    ) -> Result<Option<i64>, RequestError> {
+        let pos: Option<i64> = sqlx::query_scalar(
+            "SELECT pos FROM ( \
+               SELECT r.id, ROW_NUMBER() OVER (ORDER BY r.created_at ASC) AS pos \
+               FROM request r \
+               WHERE r.session_id = $1 AND r.status IN ('pending', 'accepted') \
+             ) q WHERE q.id = $2",
+        )
+        .bind(session_id)
+        .bind(request_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(pos)
+    }
+
+    /// Всего активных заявок в сессии (pending + accepted) — тот же
+    /// фильтр статусов, что и в очереди DJ.
+    pub async fn active_queue_size(&self, session_id: Uuid) -> Result<i64, RequestError> {
+        let (c,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM request \
+             WHERE session_id = $1 AND status IN ('pending', 'accepted')",
+        )
+        .bind(session_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(c)
+    }
+
+    // ---------------------------------------------------------
+    // Апгрейд гостя: POST /v1/guest/upgrade { email }
+    // ---------------------------------------------------------
+
+    /// Привязывает e-mail к гостевому профилю. Идемпотентность:
+    /// повторный вызов с тем же нормализованным e-mail →
+    /// `Bound { already_upgraded: true }` без дублей. E-mail, занятый
+    /// другим гостем → `EmailTaken` (409). Смена e-mail на свободный
+    /// разрешена и атомарна (UPDATE с_guard `NOT EXISTS`).
+    ///
+    /// `email_normalized` и `email_display` — результат нормализации
+    /// (trim + lowercase), которую вызывающий выполняет ДО вызова.
+    pub async fn upgrade_guest_email(
+        &self,
+        guest_device_id: Uuid,
+        email_normalized: &str,
+        email_display: &str,
+    ) -> Result<UpgradeOutcome, RequestError> {
+        let mut tx = self.pool.begin().await?;
+
+        // Текущий account гостя (FOR UPDATE — фиксируем строку устройства).
+        let current: Option<(Option<Uuid>,)> =
+            sqlx::query_as("SELECT account_id FROM guest_device WHERE id = $1 FOR UPDATE")
+                .bind(guest_device_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        let Some((current_account,)) = current else {
+            // Устройства нет — вызывающий должен был отвергнуть (401).
+            return Err(RequestError::Db(sqlx::Error::RowNotFound));
+        };
+
+        if let Some(acc) = current_account {
+            // Уже привязан аккаунт — сравниваем по нормализованному e-mail.
+            let (existing,): (String,) =
+                sqlx::query_as("SELECT email_normalized FROM guest_account WHERE id = $1")
+                    .bind(acc)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if existing == email_normalized {
+                tx.rollback().await?;
+                return Ok(UpgradeOutcome::Bound {
+                    email: email_normalized.to_string(),
+                    already_upgraded: true,
+                });
+            }
+            // Смена e-mail: атомарный UPDATE с_guard против занятия чужого.
+            let updated = sqlx::query(
+                "UPDATE guest_account \
+                 SET email_normalized = $1, email_display = $2, verified = FALSE \
+                 WHERE id = $3 \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM guest_account \
+                   WHERE email_normalized = $1 AND id <> $3 \
+                 )",
+            )
+            .bind(email_normalized)
+            .bind(email_display)
+            .bind(acc)
+            .execute(&mut *tx)
+            .await?;
+            if updated.rows_affected() == 0 {
+                // Новый e-mail занят другим аккаунтом.
+                tx.rollback().await?;
+                return Ok(UpgradeOutcome::EmailTaken);
+            }
+            tx.commit().await?;
+            return Ok(UpgradeOutcome::Bound {
+                email: email_normalized.to_string(),
+                already_upgraded: false,
+            });
+        }
+
+        // Нет аккаунта — создаём. ON CONFLICT ловит гонку и уже занятый e-mail.
+        let new_id = Uuid::now_v7();
+        let inserted = sqlx::query(
+            "INSERT INTO guest_account (id, email_normalized, email_display, verified) \
+             VALUES ($1, $2, $3, FALSE) \
+             ON CONFLICT (email_normalized) DO NOTHING",
+        )
+        .bind(new_id)
+        .bind(email_normalized)
+        .bind(email_display)
+        .execute(&mut *tx)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Ok(UpgradeOutcome::EmailTaken);
+        }
+        sqlx::query("UPDATE guest_device SET account_id = $1 WHERE id = $2")
+            .bind(new_id)
+            .bind(guest_device_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(UpgradeOutcome::Bound {
+            email: email_normalized.to_string(),
+            already_upgraded: false,
+        })
     }
 
     // ---------------------------------------------------------

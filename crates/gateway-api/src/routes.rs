@@ -88,6 +88,7 @@ pub fn router(env: ApiEnv) -> Router {
 
     let dj = role_route(&[Role::Dj], env.keys.clone(), |r| {
         r.route("/v1/dj/echo", get(rbac::role_echo))
+            .merge(crate::catalog_routes::dj_routes())
     });
     let club = role_route(&[Role::Club], env.keys.clone(), |r| {
         r.route("/v1/club/echo", get(rbac::role_echo))
@@ -97,6 +98,7 @@ pub fn router(env: ApiEnv) -> Router {
     });
     let guest = role_route(&[Role::Guest], env.keys.clone(), |r| {
         r.route("/v1/guest/echo", get(rbac::role_echo))
+            .merge(crate::catalog_routes::guest_routes())
     });
 
     public
