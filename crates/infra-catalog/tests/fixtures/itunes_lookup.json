@@ -1,0 +1,21 @@
+{
+  "resultCount": 1,
+  "results": [
+    {
+      "wrapperType": "track",
+      "kind": "song",
+      "trackId": 711404302,
+      "artistName": "Daft Punk",
+      "collectionName": "Random Access Memories",
+      "trackName": "Get Lucky (feat. Pharrell Williams)",
+      "trackViewUrl": "https://music.apple.com/us/album/get-lucky/711404302?i=711404302",
+      "previewUrl": "https://audio-ssl.itunes.apple.com/itunes-assets/audio118/v4/gp/getlucky.m4a",
+      "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/gp/100x100bb.jpg",
+      "trackTimeMillis": 369000,
+      "isrc": "USUM71302117",
+      "trackExplicitness": "notExplicit",
+      "collectionExplicitness": "notExplicit",
+      "primaryGenreName": "Electronic"
+    }
+  ]
+}

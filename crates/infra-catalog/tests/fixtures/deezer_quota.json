@@ -1,0 +1,7 @@
+{
+  "error": {
+    "type": "QuotaException",
+    "message": "Too many requests",
+    "code": 4
+  }
+}

@@ -3,6 +3,9 @@
 **/target/
 Cargo.lock.bak
 
+# Локальный CARGO_HOME (сборки в песочнице) — не коммитим
+/.cargo-home/
+
 # Env/secrets — никогда не коммитим
 .env
 deploy/.env
