@@ -25,6 +25,10 @@ anyhow.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 dropit-infra-db = { path = "../infra-db" }
+dropit-infra-redis = { path = "../infra-redis" }
+dropit-infra-stripe = { path = "../infra-stripe" }
+dropit-infra-catalog = { path = "../infra-catalog" }
+dropit-infra-push = { path = "../infra-push" }
 sqlx.workspace = true
 argon2.workspace = true
 jsonwebtoken.workspace = true

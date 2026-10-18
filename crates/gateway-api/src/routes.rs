@@ -461,6 +461,16 @@ pub struct ApiEnv {
     pub jobs: Option<std::sync::Arc<dropit_infra_db::JobsRepo>>,
     /// WebSocket-хаб live-обновлений (gateway-ws MVP).
     pub ws: Option<std::sync::Arc<crate::ws::WsHub>>,
+    /// Хранилище одноразовых WS-тикетов: Redis в проде, in-memory без Redis.
+    pub tickets: Option<std::sync::Arc<dyn dropit_infra_redis::TicketStore>>,
+    /// Межузловая шина live-событий (Redis Pub/Sub).
+    pub bus: Option<std::sync::Arc<dyn dropit_infra_redis::EventBus>>,
+    /// Платёжный провайдер: MockStripe по умолчанию, LiveStripe по env.
+    pub stripe: Option<std::sync::Arc<dyn dropit_infra_stripe::StripeApi>>,
+    /// Внешний каталог треков (iTunes Search / Deezer).
+    pub catalog: Option<std::sync::Arc<dyn dropit_infra_catalog::CatalogSearch>>,
+    /// Push-транспорт (FCM / APNs).
+    pub push: Option<std::sync::Arc<dyn dropit_infra_push::PushSender>>,
 }
 
 pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {

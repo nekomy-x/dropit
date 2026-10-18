@@ -19,6 +19,7 @@ mod e2e_requests;
 mod e2e_sessions;
 #[cfg(test)]
 mod e2e_ws;
+mod infra;
 mod panel_routes;
 mod payments;
 mod payments_routes;
@@ -96,6 +97,11 @@ async fn main() -> anyhow::Result<()> {
         payouts,
         jobs,
         ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
+        tickets: Some(infra::ticket_store().await),
+        bus: Some(infra::event_bus().await),
+        stripe: Some(infra::stripe()),
+        catalog: Some(infra::catalog()),
+        push: Some(infra::push()),
     };
     let app = routes::router(env);
 

@@ -98,6 +98,13 @@ pub(crate) async fn app_env(
         payouts,
         jobs,
         ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
+        tickets: Some(std::sync::Arc::new(
+            dropit_infra_redis::InMemoryTicketStore::new(),
+        )),
+        bus: Some(std::sync::Arc::new(dropit_infra_redis::InMemoryEventBus::new())),
+        stripe: Some(std::sync::Arc::new(dropit_infra_stripe::MockStripe)),
+        catalog: Some(std::sync::Arc::new(dropit_infra_catalog::MockCatalog::empty())),
+        push: Some(std::sync::Arc::new(dropit_infra_push::NoopPush)),
     }
 }
 
