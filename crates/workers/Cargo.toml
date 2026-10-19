@@ -22,3 +22,4 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
+sqlx.workspace = true

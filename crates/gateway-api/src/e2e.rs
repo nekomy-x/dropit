@@ -104,7 +104,6 @@ pub(crate) async fn app_env(
         bus: Some(std::sync::Arc::new(dropit_infra_redis::InMemoryEventBus::new())),
         stripe: Some(std::sync::Arc::new(dropit_infra_stripe::MockStripe)),
         catalog: Some(std::sync::Arc::new(dropit_infra_catalog::MockCatalog::empty())),
-        push: Some(std::sync::Arc::new(dropit_infra_push::NoopPush)),
     }
 }
 
@@ -122,6 +121,44 @@ pub(crate) async fn call(
     }
     // Idempotency-Key обязателен на POST /v1/requests (правило
     // денег): подставляем уникальный, если тест не задал свой.
+    if method == "POST" && uri == "/v1/requests" {
+        req = req.header("idempotency-key", uuid::Uuid::now_v7().to_string());
+    }
+    let req = match body {
+        Some(b) => req
+            .header("content-type", "application/json")
+            .body(Body::from(b.to_string()))
+            .unwrap(),
+        None => req.body(Body::empty()).unwrap(),
+    };
+    let resp = router.oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap_or_default();
+    let value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, value)
+}
+
+/// `call` с произвольными доп. заголовками (для тестов антифрода по
+/// `X-Forwarded-For` и лимита master-входа по IP). Сигнатура — как у
+/// [`call`], плюс `&[(header, value)]`.
+pub(crate) async fn call_with_headers(
+    env: &ApiEnv,
+    method: &str,
+    uri: &str,
+    body: Option<Value>,
+    token: Option<&str>,
+    headers: &[(&str, &str)],
+) -> (StatusCode, Value) {
+    let router = router(env.clone());
+    let mut req = Request::builder().method(method).uri(uri);
+    if let Some(t) = token {
+        req = req.header("authorization", format!("Bearer {t}"));
+    }
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
     if method == "POST" && uri == "/v1/requests" {
         req = req.header("idempotency-key", uuid::Uuid::now_v7().to_string());
     }
@@ -281,4 +318,235 @@ async fn e2e_login_requires_database() {
     )
     .await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE, "no db: {body}");
+}
+
+// ============================================================
+// W5-C: антифрод device-token — лимит именно по IP (не глобальный)
+// ============================================================
+
+/// RAII-гард для env-переменной: сохраняет прежнее значение, выставляет
+/// новое и восстанавливает при `drop`. Тесты лимита по IP манипулируют
+/// `TRUST_PROXY`; чтобы не влиять на другие тесты при параллельном беге,
+/// восстановление гарантировано. БД-тесты всё равно идут через
+/// `db-test.sh -- --test-threads=1` (серийно).
+pub(crate) struct EnvGuard {
+    key: &'static str,
+    prev: Option<std::string::String>,
+}
+
+impl EnvGuard {
+    pub(crate) fn set(key: &'static str, value: &str) -> Self {
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, value);
+        EnvGuard { key, prev }
+    }
+    /// Удаляет переменную (имитирует «не задано») и восстанавливает при drop.
+    pub(crate) fn unset(key: &'static str) -> Self {
+        let prev = std::env::var(key).ok();
+        std::env::remove_var(key);
+        EnvGuard { key, prev }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.prev {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
+/// `POST /v1/guest/device` — два сценария доверия прокси-заголовкам:
+///
+/// 1. `TRUST_PROXY=1`: 6 разных `X-Forwarded-For` → разные бакеты → все
+///    200 (по 1 выдаче на IP); 6 запросов с одним XFF → 1..5 ок, 6-й 429.
+///    Доказывает, что при доверии лимит считается per-IP из заголовка.
+/// 2. `TRUST_PROXY` не задан (безопасный дефолт — доверие ВЫКЛ): 6 разных
+///    XFF → все сворачиваются в один бакет (заголовок игнорируется,
+///    ConnectInfo в oneshot недоступен → `0.0.0.0`), 6-й → 429.
+///    Доказывает, что при прямом подключении подмена XFF НЕ обходят лимит.
+///
+/// Без части (2) тест зелёный БЫЛ бы на уязвимом коде (доверие по
+/// умолчанию) — поэтому регрессия ловится именно этим сценарием.
+#[tokio::test]
+async fn e2e_device_token_ip_limit() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e device-ip пропущен");
+            return;
+        }
+    };
+    let env = app_env(Some(repo.clone()), None, None).await;
+
+    // --- (1) TRUST_PROXY=1: per-IP изоляция по XFF ---
+    let _g = EnvGuard::set("TRUST_PROXY", "1");
+    // 6 разных IP: все 200 (по 1 выдаче на IP, лимит 5 не достигнут).
+    for i in 1..=6u8 {
+        let xff = format!("203.0.113.{i}");
+        let (s, body) = call_with_headers(
+            &env,
+            "POST",
+            "/v1/guest/device",
+            Some(json!({ "platform": "ios", "app_version": "1.0.0" })),
+            None,
+            &[("x-forwarded-for", xff.as_str())],
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "trust on, different ip #{i} must pass: {body}");
+    }
+    // 6 запросов с одним IP: 1..5 → 200, 6-й → 429.
+    let same = "203.0.113.50";
+    for i in 1..=6u8 {
+        let (s, body) = call_with_headers(
+            &env,
+            "POST",
+            "/v1/guest/device",
+            Some(json!({ "platform": "ios", "app_version": "1.0.0" })),
+            None,
+            &[("x-forwarded-for", same)],
+        )
+        .await;
+        if i <= 5 {
+            assert_eq!(s, StatusCode::OK, "trust on, same ip #{i} must pass: {body}");
+        } else {
+            assert_eq!(
+                s,
+                StatusCode::TOO_MANY_REQUESTS,
+                "trust on, same ip #{i} must be 429: {body}"
+            );
+            assert_eq!(body["code"], "rate_limited");
+        }
+    }
+    drop(_g); // восстановить TRUST_PROXY до части (2)
+
+    // --- (2) TRUST_PROXY не задан: заголовки игнорируются, один бакет ---
+    let _g2 = EnvGuard::unset("TRUST_PROXY");
+    // 6 разных XFF: заголовок игнорируется → все в бакет 0.0.0.0;
+    // 1..5 → 200, 6-й → 429 (доказывает, что XFF не создаёт новых бакетов).
+    for i in 1..=6u8 {
+        let xff = format!("198.51.100.{i}");
+        let (s, body) = call_with_headers(
+            &env,
+            "POST",
+            "/v1/guest/device",
+            Some(json!({ "platform": "ios", "app_version": "1.0.0" })),
+            None,
+            &[("x-forwarded-for", xff.as_str())],
+        )
+        .await;
+        if i <= 5 {
+            assert_eq!(
+                s,
+                StatusCode::OK,
+                "trust off, different xff #{i} must pass (shared bucket): {body}"
+            );
+        } else {
+            assert_eq!(
+                s,
+                StatusCode::TOO_MANY_REQUESTS,
+                "trust off, different xff #{i} must be 429 (XFF ignored): {body}"
+            );
+            assert_eq!(body["code"], "rate_limited");
+        }
+    }
+}
+
+// ============================================================
+// W5-C: лимит попыток 2FA (5 неудач / 15 мин) + сброс окна
+// ============================================================
+
+/// `POST /v1/auth/admin/2fa`: 5 неверных кодов → 401, шестой → 429;
+/// после «сброса окна» (бэкдейт неудач за 15 мин) верный код → 200 и
+/// рабочий JWT. Доказывает, что 2FA получила rate-limit (иначе 6-значный
+/// TOTP брутфорсится), а успех выдаёт валидную пару токенов.
+#[tokio::test]
+async fn e2e_2fa_rate_limit_and_success() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e 2fa пропущен");
+            return;
+        }
+    };
+    let env = app_env(Some(repo.clone()), None, None).await;
+    let pool = repo.pool();
+
+    // Админ с легаси-plain TOTP-секретом (читается без DROPIT_TOTP_KEY).
+    let admin_id = uuid::Uuid::now_v7();
+    let email = format!("2fa-{admin_id}@dropit.test");
+    let secret_b32 = "JBSWY3DPEHPK3PXP";
+    sqlx::query(
+        "INSERT INTO admin_user (id, email, password_hash, totp_secret_enc, totp_confirmed_at, status) \
+         VALUES ($1, $2, 'x', $3, now(), 'active')",
+    )
+    .bind(admin_id)
+    .bind(&email)
+    .bind(secret_b32.as_bytes())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- 5 неверных кодов → 401 (каждый пишет неудачу) ---
+    for i in 1..=5u8 {
+        let code = format!("{i:06}");
+        let (s, body) = call(
+            &env,
+            "POST",
+            "/v1/auth/admin/2fa",
+            Some(json!({ "email": email, "totp_code": code })),
+            None,
+        )
+        .await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "2fa wrong #{i}: {body}");
+    }
+
+    // --- 6-й неверный → 429 (лимит 5/15 мин) ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/auth/admin/2fa",
+        Some(json!({ "email": email, "totp_code": "999999" })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS, "2fa 6th must 429: {body}");
+    assert_eq!(body["code"], "rate_limited");
+
+    // --- сброс окна: бэкдейтим неудачи за пределы 15 мин ---
+    sqlx::query(
+        "UPDATE login_attempt SET at = now() - interval '16 minutes' \
+         WHERE subject_type = 'admin' AND email = $1",
+    )
+    .bind(&email)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- верный код → 200 + рабочий JWT ---
+    use totp_rs::{Algorithm, Secret, TOTP};
+    let bytes = Secret::Encoded(secret_b32.to_string()).to_bytes().unwrap();
+    let totp = TOTP::new_unchecked(Algorithm::SHA1, 6, 1, 30, bytes);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let good_code = totp.generate(now);
+
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/auth/admin/2fa",
+        Some(json!({ "email": email, "totp_code": good_code })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "2fa success after reset: {body}");
+    let access = body["access_token"].as_str().unwrap().to_string();
+    assert!(!access.is_empty());
+
+    // JWT рабочего: admin может на свой echo → 200.
+    let (s, _) = call(&env, "GET", "/v1/admin/echo", None, Some(&access)).await;
+    assert_eq!(s, StatusCode::OK, "2fa-issued jwt works on admin echo");
 }

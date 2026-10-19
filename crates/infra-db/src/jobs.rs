@@ -302,6 +302,60 @@ impl JobsRepo {
             "payments": payments,
         }))
     }
+
+    // ---------------------------------------------------------
+    // Push-токены гостей (для диспетчера уведомлений воркера)
+    // ---------------------------------------------------------
+
+    /// Активные (не отозванные) push-токены гостя.
+    ///
+    /// Возвращает токены с платформой (`'android'` / `'ios'`) из таблицы
+    /// `guest_push_token` (миграция 0009). Отозванные (`revoked_at IS NOT
+    /// NULL`) исключаются — по ним повторная отправка не выполняется.
+    pub async fn active_push_tokens(
+        &self,
+        guest_id: Uuid,
+    ) -> Result<Vec<PushTokenRow>, JobsError> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT token, platform FROM guest_push_token \
+             WHERE guest_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(guest_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(token, platform)| PushTokenRow { token, platform })
+            .collect())
+    }
+
+    /// Отозвать невалидный push-токен: `revoked_at = now()`.
+    ///
+    /// Идемпотентно: повторный вызов по уже отозванному токену — no-op
+    /// (возвращает `false`). Вызывается диспетчером push, когда транспорт
+    /// признал токен невалидным (`UNREGISTERED`/`BadDeviceToken`).
+    pub async fn revoke_push_token(&self, token: &str) -> Result<bool, JobsError> {
+        let res = sqlx::query(
+            "UPDATE guest_push_token SET revoked_at = now() \
+             WHERE token = $1 AND revoked_at IS NULL",
+        )
+        .bind(token)
+        .execute(&self.pool)
+        .await?;
+        Ok(res.rows_affected() > 0)
+    }
+}
+
+/// Активный push-токен гостя (для диспетчера уведомлений).
+///
+/// `platform` — строка из БД (`'android'` / `'ios'`); вызывающий слой
+/// (воркер) сопоставляет её с [`dropit_infra_push::Platform`].
+#[derive(Debug, Clone)]
+pub struct PushTokenRow {
+    /// Регистрационный токен устройства.
+    pub token: String,
+    /// Платформа: `'android'` или `'ios'`.
+    pub platform: String,
 }
 
 // Стейт-переход используется вызывающими воркерами.

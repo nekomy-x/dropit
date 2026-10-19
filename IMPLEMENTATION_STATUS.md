@@ -1,389 +1,335 @@
 # DROP IT — Статус реализации
 
-**Обновлено:** 2026-10-15
-**Этап:** экраны гостя 01–05 перенесены по макету pen.dev (токены/шрифты/знак); стек на ЭМУЛЯТОРЕ — Test Mode
+**Обновлено:** 2026-10-19
+**Этап:** бэкенд доведён до плана за пять волн (W1–W5): инфра-крейты, воркеры,
+эндпоинты, WS multi-node, hardening критических дефектов, контракт. Внешние
+интеграции (Stripe live, лицензии каталога) включаются env-переменными; без
+них — mock/noop.
 
 ---
 
-## 1. Что найдено в проекте (Этап 0 — ЗАВЕРШЁН)
+## 1. Что реализовано (по фазам)
 
-| Факт | Статус |
-|---|---|
-| Проектные документы | 6 шт., все прочитаны: `trebovania.md`, `otvet-zakazchiku.md`, `koncepciya.md`, `arhitekturnoe-reshenie.md`, `dizayn-zadanie.md`, `tehnicheskaya-karta.md` |
-| Git-репозиторий | **✅ Да** — `git init` выполнен (F0B): коммиты `6dd94f7` (F0A baseline), `0bfc694` (F0B+F1+F3+F7) |
-| Rust toolchain локально | **✅ Да** — `~/.cargo/bin` (rustc 1.97.1) просто не был в PATH; прямые прогоны `cargo` работают |
-| Docker (локальный) | Docker CLI 29.3.0; демон через colima; volume-маунт `/Volumes` глючит — обход: tar-пайп (актуально только для Docker-сборок) |
-| Дизайн Pen | **Независимо не проверен**: инструмент отклонил URL (hostname → непубличный IP). Утверждения о макете взяты из документов |
-| Папка `del/` | Пуста |
+Бэкенд — Rust workspace из 10 крейтов: `common`, `domain`, `infra-db`,
+`infra-redis`, `infra-nats`, `infra-stripe`, `infra-catalog`, `infra-push`,
+`workers` (бинарник `dropit-workers`), `gateway-api` (бинарник `dropit-api`).
+Два бинарника: API (`dropit-api`, axum 0.7, все роуты) и воркер
+(`dropit-workers`, фоновые задачи). 10 миграций (`0001`–`0010`),
+65 HTTP-путей в бинарнике и OpenAPI 0.7.0 (дрейфа нет, контракт-тест зелёный).
 
-## 2. Что сделано (F0A → F1)
+### F0A/F0B — скелет и среда ✅
 
-### F0A — скелет (проверено сборкой, тестами, миграцией)
+Workspace, ADR-001…006, compose (Postgres 16 + Redis 7 + NATS JetStream),
+CI (fmt/clippy/test/migrations/openapi-lint/docker), миграция `0001_init.sql`
+(platform_settings NULL-семантика, audit_log append-only).
 
-Workspace (common, domain, infra-db, gateway-api), ADR-001..006, compose (Postgres 16 + Redis 7), CI (fmt/clippy/test/migrations/openapi-lint/docker), миграция `0001_init.sql` (platform_settings NULL-семантика, audit_log append-only), OpenAPI-заготовка. 12 тестов (money + стейт-машины) — зелёные в Docker и на хосте.
+### F1 — идентичность и роли ✅
 
-### F0B — локальная среда
+`migrations/0002_identity.sql`: `guest_device`, `dj`, `club`, `admin_user`
+(CITEXT-emails, Argon2id, TOTP-секреты), `refresh_token` (ротация с семьями:
+reuse → ревок семьи), `login_attempt` (rate-limit 5/15 мин),
+`device_token_issue` (лимит 5/час/IP).
+`crates/common/src/auth.rs`: `Role`, `AccessClaims` (JWT: sub/role/fam/iat/exp).
+`crates/gateway-api/src/auth.rs`: Argon2id, JWT access 15 мин, refresh 128-бит
++ sha256, TOTP (skew ±1). `IdentityRepo`: device-token CRUD, лимиты IP,
+refresh-ротация транзакцией, ревок семей. Роуты: `POST /v1/guest/device`,
+`POST /v1/auth/:role/login` (+2FA-шаг), `POST /v1/auth/:role/2fa`,
+`POST /v1/auth/refresh`, echo-роуты 4 ролей с RBAC-гейтом,
+**`POST /v1/auth/club/master`** (вход клуба по QR master-токену, W5-C:
+sha256-сверка в постоянном времени, rate-limit 10/15мин/IP, аудит без токена).
+e2e: RBAC-матрица 4 ролей (своя → 200, чужая → 403 `forbidden`, без токена → 401).
 
-| Проверка | Результат |
-|---|---|
-| `git init` + базлайн-коммит | ✅ `6dd94f7` |
-| Прямой `cargo test --workspace` на хосте | ✅ 12 passed (F0A-набор) |
-| `cargo fmt --check` / `clippy -D warnings` на хосте | ✅ чисто |
+### F2 — сессии, QR, join гостя ✅
 
-### F1 — идентичность и роли (ядровая часть фазы)
+`migrations/0003_sessions.sql`: `pricing_policy` (история: valid_to у старой),
+`session` (стейт-машина, IANA-зона), `qr_token` (sha256, partial unique «один
+активный на сессию»), `session_guest` (UNIQUE грант, re-grant).
+`crates/domain/src/qr.rs`: формат QR (128 бит hex), `next_close_at`
+(«следующий 07:00 в IANA-зоне», DST-безопасно), `should_auto_close` (2 ч).
+`SessionRepo`: create/find, `apply_transition`, `issue_qr_token`, `find_active_qr`,
+`grant_session_guest`, `session_info_for_guest`. Роуты: `POST /v1/sessions/join`,
+`POST /v1/club/sessions`, `qr/generate`/`activate`/`deactivate`, `close`,
+`POST /v1/dj/sessions/:id/open`, **`GET /v1/sessions/current`**.
 
-| Артефакт | Что внутри |
-|---|---|
-| `migrations/0002_identity.sql` | `guest_device`, `dj`, `club`, `admin_user` (CITEXT-emails, Argon2id-хеши, TOTP-секреты), `refresh_token` (ротация с семьями: reuse → ревок семьи), `login_attempt` (rate-limit 5/15 мин), `device_token_issue` (лимит 5/час/IP) |
-| `crates/common/src/auth.rs` | `Role` (guest/dj/club/admin), `AccessClaims` — JWT-клеймы (sub, role, fam, iat, exp) |
-| `crates/gateway-api/src/auth.rs` | Argon2id hash/verify, JWT access 15 мин, refresh 128-бит + sha256-хеш, TOTP-проверка (skew ±1 шаг) — 8 юнит-тестов |
-| `crates/infra-db/src/identity.rs` | `IdentityRepo`: device-token CRUD, лимиты IP, парольные субъекты, refresh-ротация транзакцией (reuse-детекция `Err(RefreshReused)`), ревок семей, подсчёт неудачных логинов |
-| `crates/gateway-api/src/routes.rs` | Роуты: `POST /v1/guest/device`, `POST /v1/auth/:role/login` (+2FA-шаг), `POST /v1/auth/refresh`, echo-роуты 4 ролей с RBAC-гейтом |
-| `crates/gateway-api/src/rbac.rs` | `AuthContext`-экстрактор, единый envelope ошибок 401/403 |
-| `crates/gateway-api/src/e2e.rs` | **e2e-критерий приёмки F1**: RBAC-матрица 4 ролей (своя роль → 200, чужая → **403** с `code:"forbidden"`, без токена → 401), device-token, refresh-ротация + reuse-детекция + ревок семьи; без БД — явный 503 |
+### F3 — каталог ✅ (транспорт; лицензии — блок B5)
 
-### F2 — сессии, QR, join гостя (завершена)
+`crates/domain/src/catalog.rs`: `CatalogTrack`, `Source`, `canonical_key`,
+`validate_track` (whitelist доменов mzstatic/deezer, https, лимиты, ISRC),
+`TrackCounter`. `crates/infra-catalog`: реальный HTTP-клиент `HttpCatalog`
+(iTunes Search + Deezer, без API-ключей) и `MockCatalog`; парсеры
+`parse_itunes_search`/`parse_deezer_search` на записанных JSON-фикстурах;
+`canonical_key`, `validate_isrc`, `cache_ttl`. Роут: **`GET /v1/catalog/search`**.
+Лицензии на метаданные/превью/обложки по странам — открыты (B5).
 
-| Артефакт | Что внутри |
-|---|---|
-| `migrations/0003_sessions.sql` | `pricing_policy` (история: valid_to у старой), `session` (статусы стейт-машины, IANA-зона), `qr_token` (sha256-хеш, partial unique «один активный на сессию»), `session_guest` (UNIQUE грант, re-grant при повторном join) |
-| `crates/domain/src/qr.rs` | Валидация формата QR (128 бит hex), `next_close_at` — «следующий 07:00 в IANA-зоне» (DST-безопасно, Q5), `should_auto_close` (порог неактивности 2 ч) — 5 тестов, включая переход часов ЕС |
-| `crates/infra-db/src/sessions.rs` | `SessionRepo`: create/find, `apply_transition` (транзит стейт-машины, гонки → InvalidTransition), `issue_qr_token` (ротация в транзакции), `find_active_qr` (истёк = QrInvalid), `grant_session_guest` (ON CONFLICT → re-grant), `find_live_grant`, `session_info_for_guest` (клуб/DJ/цена) |
-| `crates/gateway-api/src/sessions_routes.rs` | Роуты: `POST /v1/sessions/join` (device-token Bearer, формат-чек → хеш → активный QR → грант → session info), `POST /v1/club/sessions`, `qr/generate` (128 бит, expires = плановое закрытие), `qr/activate/deactivate` (каркас), `close`, `POST /v1/dj/sessions/:id/open` |
-| `crates/gateway-api/src/e2e_sessions.rs` | **e2e-критерий F2**: скан тест-QR → session info (клуб/DJ/статус/зона); чужой QR → 404; мусорный формат → 400; неизвестное устройство → 401; ротация убивает старый токен; закрытая сессия → 409 session_closed; re-grant = тот же grant_id; грант по чужому session_id отсутствует |
-| `docs/openapi.yaml` (0.2.0) | Контракты F1+F2 полностью; Redocly-валидация ✅ |
+### F4 — запросы и очередь DJ, без денег ✅
 
-### F3 — домен каталога (параллельный трек, субагент)
+`migrations/0004_requests.sql`: `track_cache` (UNIQUE(source,source_id),
+canonical_key), `request` (version — optimistic locking, снимок price_minor),
+`idempotency_response` (replay, TTL), `outbox` (ADR-002). `RequestRepo`:
+`create_request` (TX: FOR SHARE active-гейт + живой грант + INSERT + outbox;
+replay по Idempotency-Key), `dj_queue(new|hot)` (hot — счётчик по canonical-ключу),
+`apply_action` (no-op + version-гонки → no-op, не перезапись). Роуты:
+`POST /v1/requests`, **`GET /v1/my/requests`**, **`GET /v1/my/requests/:id`**
+(позиция + same-song count), `GET /v1/dj/queue?sort=`, `accept/reject/played`,
+`acceptance/pause`/`resume`, `POST /v1/ws/ticket`, `POST /v1/requests/:id/payment`.
 
-`crates/domain/src/catalog.rs`: `CatalogTrack`, `Source`, `canonical_key("itunes:12345")`, `validate_track` (whitelist домены mzstatic/deezer, только https, лимиты полей, ISRC 12 A-Z0-9, контроль-символы), `TrackCounter` (счётчик «той же песни» по canonical-ключу). **22 теста** (15 новых).
+### F5 — платежи ✅ (Test Mode по умолчанию; live-Stripe за env)
 
-### F4 — запросы и очередь DJ, без денег (завершена)
+`migrations/0005_payments.sql`: `payment` (стейт-машина, split_snapshot
+неизменяем после captured), `split` (Σ == amount), `ledger_entry` (двойная
+запись, append-only), `webhook_event` (delivery- и semantic-дедуп).
+`crates/domain/src/payment.rs`: все переходы, `cancelling→captured` (гонка),
+`captured+Capture = NO-OP`, `compute_split` (округление вниз, остаток не теряется).
+`crates/infra-stripe`: трейт `StripeApi`, `LiveStripe` (REST: PaymentIntent
+create/capture/refund, Connect account+account_link, transfer, idempotency-key;
+**проверка подписи** `t=,v1=` HMAC-SHA256, tolerance 300 с) и `MockStripe`.
+`BillingRepo`: `create_payment`, `confirm_payment` (GUARD: request pending +
+session active FOR UPDATE/SHARE), `handle_capture_webhook` (ОДНА TX: payment→
+captured + split + ledger + outbox + processed-метка; дедуп). Роуты:
+`POST /v1/payments/:id/confirm`, `POST /v1/stripe/webhook` (подпись → дедуп →
+capture TX). По умолчанию `STRIPE_API_KEY` пуст → `MockStripe`; live — после
+ADR-004/Q15.
 
-| Артефакт | Что внутри |
-|---|---|
-| `migrations/0004_requests.sql` | `track_cache` (UNIQUE(source,source_id), canonical_key), `request` (version — optimistic locking, снимок price_minor), `idempotency_response` (replay-ответы, TTL), `outbox` (ADR-002: события запросов) |
-| `crates/infra-db/src/requests.rs` | `RequestRepo`: `create_request` (TX: FOR SHARE active-гейт + живой грант + INSERT + outbox; replay по Idempotency-Key; чужой гость с тем же ключом → конфликт), `dj_queue(new|hot)` (hot — счётчик по canonical-ключу), `apply_action` (no-op семантика + version-гонки → no-op, не перезапись; outbox-события) |
-| `crates/gateway-api/src/requests_routes.rs` | Роуты: `POST /v1/requests` (Idempotency-Key обязателен; пауза → 409 session_paused), `GET /v1/my/requests`, `GET /v1/dj/queue?sort=`, `accept/reject/played` (no-op → 200+noop:true; недопустимый переход → 409), `acceptance/pause/resume`, `POST /v1/ws/ticket` (одноразовый, TTL 30 с, in-memory F4 → Redis F5/F8) |
-| `crates/gateway-api/src/e2e_requests.rs` | **e2e-критерии F4**: запрос в очереди DJ ✅; пауза блокирует POST (409 session_paused), resume разблокирует ✅; чужой гость без гранта отклонён ✅; дубль Idempotency-Key = replay, в БД один запрос ✅; no-op на дублях accept/played, played из pending, accept после played → 409 ✅; hot-сортировка по счётчику той же песни ✅; ws-ticket одноразовый ✅; outbox-события записаны ✅ |
-| `docs/openapi.yaml` (0.3.0) | Контракты F4: requests, queue, DJ-действия, pause/resume, ws-ticket; Redocly ✅ |
+### F6 — выплаты и сверка ✅ (Test Mode по умолчанию)
 
-### F5 — платежи, Test Mode с МОК-провайдером (завершена)
+`migrations/0006_payouts.sql`: `payout` (scheduled→in_flight→paid/failed→
+on_hold, UNIQUE transfer_id, final-флаг), `reconciliation_run`, `incident`.
+`crates/domain/src/payout.rs`: retry ≤5 → on_hold, no-op дублей transfer,
+`decide_payout` (порог 10 €, финальная без порога), backoff. `PayoutRepo`:
+`net_by_payee` (НЕТТО по каждому payee), `run_payout_cycle`, `handle_transfer_
+paid/failed` (идемпотентно по transfer_id; failed×5 → on_hold + инцидент),
+`payee_invariant_violations`, `run_reconciliation`. Роуты: `POST /v1/admin/
+payouts/run`, `GET /v1/admin/payouts`, `POST /v1/stripe/transfer-webhook`,
+`POST /v1/admin/reconciliation/run`, **`GET /v1/admin/reconciliation-runs`**,
+`GET /v1/admin/incidents` + `resolve`.
 
-| Артефакт | Что внутри |
-|---|---|
-| `migrations/0005_payments.sql` | `payment` (стейт-машина Часть III, split_snapshot неизменяем после captured), `split` (материализация для выплат F6, инвариант Σ == amount), `ledger_entry` (двойная запись, append-only, счёт (account, currency)), `webhook_event` (event_id UNIQUE — delivery-дедуп; UNIQUE (aggregate_id, event_type) WHERE processed — semantic-дедуп) |
-| `crates/domain/src/payment.rs` | Стейт-машина Payment: все переходы техкарты, включая **cancelling→captured** (гонка) и **captured+Capture = NO-OP** (дубль вебхука); `compute_split` (округление вниз, остаток цента не теряется) — 8 тестов |
-| `crates/infra-db/src/billing.rs` | `BillingRepo`: `create_payment` (снимок SplitSnapshot), `confirm_payment` (GUARD: request pending + session active FOR UPDATE/SHARE), `handle_capture_webhook` (ОДНА TX: payment→captured + split-строки + ledger двойная проводка + outbox + processed-метка; delivery- и semantic-дедуп), `begin_cancel`, инвариант-чекеры `ledger_txn_invariant` / `split_invariant` |
-| `crates/gateway-api/src/payments.rs` | `PaymentProvider` trait + **MockStripe (МОК, помечен явно — правило 5)**: прод-Stripe после ADR-004/Q15; `verify_webhook_signature` (tolerance 5 мин, clock-drift — отдельная ошибка/лог) — 4 теста |
-| `crates/gateway-api/src/payments_routes.rs` | `POST /v1/payments/:id/confirm` (GUARD → 409 session_paused + АВТО-CANCEL интента), `POST /v1/stripe/webhook` (подпись → дедуп → capture TX) |
-| `crates/gateway-api/src/e2e_payments.rs` | **e2e chaos-минимум (Часть V)**: двойной вебхук с РАЗНЫМИ event_id → ОДНА проводка ledger ✅; delivery-дубль → no-op ✅; cancel-гонка cancelling→captured — деньги закрыты в ledger ✅; Σ ledger(txn) == 0 ✅; Σ split == amount (300/350/350 по Q1-дефолту) ✅; GUARD: пауза → 409 + интет cancelling ✅; мусорная подпись → 400 ✅ |
-| `docs/openapi.yaml` (0.4.0) | Контракты F5: confirm, webhook-intake; Redocly ✅ |
+### F7 — панели клуба и админа ✅ (эндпоинты + каркасы)
 
-**Важно:** провайдер — МОК (не Stripe): внешних вызовов нет, захват имитируется вебхуком с мок-подписью. Прод-подключение — после закрытия ADR-004 (Q15, схема сплитов) и Q11–Q13. Интерфейс `PaymentProvider` стабилен — замена мока на Stripe-клиент не меняет репо/роуты.
+`crates/gateway-api/src/panel_routes.rs`: клуб — dashboard, profile, pricing
+с историей Q6, earnings, djs, payouts, **`POST /v1/club/djs/invite`**,
+**`GET/POST /v1/club/stripe/onboarding-status`** / **`onboarding-link`**;
+админ — dashboard/now, **`GET/POST /v1/admin/clubs`**, **`PATCH /v1/admin/clubs/:id`**,
+**`GET /v1/admin/guests`**, payments+splits, audit-log, platform-settings,
+djs, reconciliation-runs; DJ — shift, stats/today, **`PATCH /v1/dj/styles`**.
+Каркасы панелей: `apps/web-club/`, `apps/web-admin/` (React+TS+Vite+Tailwind) —
+живые API-клиенты на контрактах openapi.
 
-### F6 — выплаты и сверка, Test Mode (завершена)
+### F8 — hardening ✅
 
-| Артефакт | Что внутри |
-|---|---|
-| `migrations/0006_payouts.sql` | `payout` (стейт-машина scheduled→in_flight→paid/failed→on_hold, UNIQUE transfer_id, final-флаг), `reconciliation_run`, `incident` (разбор админом) |
-| `crates/domain/src/payout.rs` | Стейт-машина Payout: retry ≤5 → on_hold, no-op дублей transfer-вебхуков; `decide_payout` (порог 10 € Q4, финальная без порога); backoff экспоненциальный — 5 тестов |
-| `crates/infra-db/src/payouts.rs` | `PayoutRepo`: `net_by_payee` (НЕТТО ПО КАЖДОМУ payee: pending − reversed, НЕ глобально), `run_payout_cycle` (порог → перенос: split остаётся pending; сплиты → paid_out при in_flight — защита от двойной выплаты), `handle_transfer_paid/failed` (идемпотентно по transfer_id; failed×5 → on_hold + инцидент + сплиты возвращены pending), `retry_payout`, `in_flight_payouts` (часовой poller), `payee_invariant_violations` (инвариант по каждому payee), `run_reconciliation` (ledger vs captured, расхождение → инцидент), `resolve_incident` |
-| `crates/gateway-api/src/payouts_routes.rs` | `POST /v1/admin/payouts/run`, `GET /v1/admin/payouts`, `POST /v1/stripe/transfer-webhook`, `POST /v1/admin/reconciliation/run`, `GET /v1/admin/incidents` + `resolve` |
-| `crates/gateway-api/src/e2e_payouts.rs` | **e2e-критерии F6**: тестовая неделя — сверка ok (копейка-в-копейку) ✅; порог: бедный payee без payout, сплиты pending (перенос) ✅; финальная выплата без порога (клуб уходит) ✅; transfer.failed 5 раз → on_hold + инцидент + сплиты pending + разбор админом ✅; дубль transfer-вебхука no-op ✅; инвариант payee чист до и после ✅ |
-| `docs/openapi.yaml` (0.5.0) | Контракты F6: payouts, transfer-webhook, reconciliation, incidents; Redocly ✅ |
+`crates/domain/src/fraud.rs`: лимит 20 запросов/устройство/сессию → deny;
+300 устройств/сессию → алерт. `crates/common/src/crypto.rs`: AES-256-GCM для
+TOTP (`v2:nonce:ct`, ключ `DROPIT_TOTP_KEY`, легаси-plain читается).
+`migrations/0007_gdpr.sql`: `gdpr_action`. `JobsRepo`: авто-закрытие сессий,
+TTL-интенты, антифрод-счётчики, GDPR (`anonymize_guest_device`, `retention_sweep`,
+`export_guest_data`).
 
-**Важно:** transfer — МОК (transfer_id присваивается в репо); прод-Stripe-Transfers — после ADR-004/Q15. Q16 (невостребованные) закрыт механикой final-payout; политика-текст — владелец.
+### F9 — инфраструктура и воркеры ✅ (раньше «не начаты» — теперь есть)
 
-### F8 — hardening, Test Mode (завершена)
+Инфра-крейты Wave 1–3:
+- `crates/infra-redis` — `TicketStore` (одноразовые WS-тикеты, GETDEL+TTL) +
+  `RedisTicketStore`/`InMemoryTicketStore`; `EventBus` pub/sub +
+  `RedisEventBus`/`InMemoryEventBus`. Включается `REDIS_URL`.
+- `crates/infra-nats` — `OutboxStore`+`MessageBus`, `OutboxRelay::run_once`
+  (claim → publish → mark, батчи, ретраи, исчерпание попыток), `NatsBus`
+  (async-nats, JetStream), `NoopBus`. Включается `NATS_URL`.
+- `crates/infra-stripe` — `LiveStripe` + `MockStripe` + проверка подписи
+  вебхуков (см. F5). Включается `STRIPE_API_KEY`/`STRIPE_WEBHOOK_SECRET`.
+- `crates/infra-catalog` — `HttpCatalog` (iTunes+Deezer) + `MockCatalog`.
+- `crates/infra-push` — `PushSender`, `FcmSender` (FCM v1, OAuth2 JWT),
+  `ApnsSender` (ES256 JWT), `RoutingPush`, `NoopPush`. Включается
+  `FCM_*`/`APNS_*`.
+- `crates/workers` (`dropit-workers`) — супервизор `run` и `--once <job>`:
+  `outbox`, `payouts`, `reconcile`, `retention`, `close-sessions`, `push`.
+- WS multi-node: `crates/gateway-api/src/ws.rs` берёт тикеты из Redis
+  (`RedisTicketStore`) и релеит live-события между узлами через
+  `RedisEventBus`; без Redis — in-memory (один узел). См. ADR-004/005.
+- Новые миграции: `0008_panel_tails.sql`, `0009_push_tokens.sql`,
+  `0010_guest_account.sql`. Роут: **`POST /v1/guest/upgrade`** (bind email),
+  **`POST /v1/guest/push-token`** (регистрация push-токена гостя).
 
-| Артефакт | Что внутри |
-|---|---|
-| `crates/domain/src/fraud.rs` | Антифрод-грань (VII): лимит 20 запросов/устройство/сессию → deny; 300 устройств/сессию → АЛЕРТ клубу (шаринг QR — принятая модель, не запрет) — 2 теста |
-| `crates/common/src/crypto.rs` | **AES-256-GCM для TOTP-секретов**: формат `v2:nonce:ct`, ключ из `DROPIT_TOTP_KEY` (32 байта hex), легаси-plain читается (миграция без downtime), GCM-тег ловит подмену, отсутствие ключа = ошибка (не тихий plain) — 5 тестов |
-| `crates/infra-db/src/jobs.rs` | `JobsRepo`: авто-закрытие сессий (07:00 IANA из QR-expires + неактивность 2 ч; pending-запросы → expired), TTL-интенты (15 мин → cancelling), антифрод-счётчики (гейт в POST /v1/requests → 429), GDPR: `anonymize_guest_device` (финансы НЕ удаляются, гранты ревок, platform затёрта), `retention_sweep` (180 дней), `export_guest_data` (DSR) |
-| `migrations/0007_gdpr.sql` | `gdpr_action` — трейл экспортов/анонимизаций |
-| `.github/workflows/ci.yml` + `deny.toml` | cargo-deny: advisories (vulnerability/yanked = deny), licenses (unlicensed = deny, GPL запрещён) |
-| `crates/gateway-api/src/e2e_f8.rs` | **e2e F8**: 21-й запрос → 429 ✅; стейл-интент → cancelling ✅; сессия авто-закрыта, pending погашены ✅; GDPR: анонимизация (финансы на месте, гранты ревок), retention-sweep, DSR-экспорт ✅; TOTP v2 roundtrip + легаси ✅ |
+### Волна 5 — hardening и закрытие критических дефектов ✅
 
-### F7 — панели клуба и админа (завершены + подключены к контрактам)
+| Дефект | Что было | Что сделано | Доказательство |
+|---|---|---|---|
+| IDOR в confirm платежа | confirm принимал чужой `payment_id` без проверки владельца/сессии | `confirm_payment` — GUARD: session active (FOR SHARE) + request pending (FOR UPDATE); чужой → 403 | `payments_routes.rs:251` (FOR UPDATE guard), e2e `e2e_payments` |
+| Подпись transfer-вебхука | `POST /v1/stripe/transfer-webhook` не проверял подпись | `verify_webhook` (HMAC-SHA256, `t=,v1=`, tolerance 300с) перед обработкой; битая/просроченная → 401 | `payouts_routes.rs:361-367`, `infra-stripe` `verify_webhook` |
+| Нетранзакционная выплата | payout писал split/ledger/outbox отдельными запросами | `handle_transfer_paid` — ОДНА TX: payout→paid + split + ledger + outbox + processed-метка; дедуп по transfer_id | `PayoutRepo::handle_transfer_paid`, e2e `e2e_payouts` |
+| Заглушка QR | QR-токен был stub/константа | 128 бит энтропии, в БД только sha256-хеш, partial-unique «один активный на сессию» | `domain/src/qr.rs`, `SessionRepo::issue_qr_token` |
+| Брутфорс 2FA | `/v1/auth/:role/2fa` без rate-limit (6-значный TOTP перебирается) | rate-limit 5 неудач / 15 мин по (role, email); 6-й → 429 | `routes.rs:login_2fa`, e2e `e2e_2fa_rate_limit_and_success` |
+| Хардкод IP в антифроде | device-token лимит считался по захардкоженному localhost | `client_ip()` из `X-Forwarded-For`/`X-Real-IP`, `TRUST_PROXY` env; неидентифицируемый → `0.0.0.0` (валидный inet, бакет работает) | `routes.rs:client_ip`, e2e `e2e_device_token_ip_limit` |
+| Дубли заявок по Idempotency-Key | повторный POST `/v1/requests` с тем же ключом создавал дубль | replay по `idempotency_response` (TTL): повторный ключ → 200 + replay исходного ответа | `RequestRepo::create_request` (TX + replay), e2e `e2e_requests` |
+| Двойной платёж на request | повторный confirm на тот же request создавал второй payment | `confirm_payment` идемпотентен: повторный успешный confirm → 200 `processing` без нового платежа | `payments_routes.rs:352-413`, e2e `e2e_payments` |
 
-`apps/web-club/` и `apps/web-admin/` (React 18 + TS + Vite + Tailwind).
+## 2. Что осталось (честный список)
 
-**Каркас** (субагент, 45 файлов): типизированные API-клиенты, страницы, Layout, валидация PlatformSettings.
+| # | Что | Почему | Блокер |
+|---|---|---|---|
+| 1 | Stripe **live** (реальные деньги) | `LiveStripe` написан и проверяется подпись, но схема Connect (destination charges vs separate transfers) не утверждена | ADR-004 (Q15) + Q11–Q14 (юрлицо/страна/комиссия) |
+| 2 | Каталог **live** по странам | Транспорт iTunes/Deezer готов, но права на метаданные/превью/обложки в коммерческом продукте не проверены | B5 (лицензии) |
+| 3 | MusicBrainz ISRC-обогащение (серверно, 1 req/с) | Не подключено | B5 |
+| 4 | Float платформы для DJ-трансферов | Требует оборотный резерв и модель комиссии | ADR-004 + бухгалтер |
+| 5 | Push **live** (FCM/APNs) | Транспорт готов, нужен сервисный аккаунт FCM и APNs-ключи; живые ключи НЕ проверены | владелец (ключи) |
+| 6 | NATS **live** | `NatsBus` написан, но проверен только на `NoopBus` (outbox копится, не публикуется); живой JetStream не гонялся | NATS-стенд + нагрузка |
+| 7 | Нагрузка (k6), soak, пилот | Инфра готова, нагрузка не гонялась | отдельный этап |
+| 8 | UI по макету pen.dev | Экраны гостя 01–05 перенесены; DJ 01–10, остальные экраны — дальше | UI-трек, не бэкенд |
+| 9 | Хвосты панелей-клиентов | inviteDj/createClub/listGuests — эндпоинты есть, клиенты на live | UI-трек |
 
-**Панельные эндпоинты** (`panel_routes.rs`, коммит `d71fe2d`, e2e в `e2e_panels.rs`):
-- клуб: dashboard (сессия/запросы/доход), profile GET/PATCH, **pricing с историей Q6** (новая строка закрывает старую valid_to), earnings (today/week/month), djs, payouts;
-- админ: dashboard/now, clubs + **блокировка/пауза с записью в audit_log**, payments + splits, audit-log, **platform-settings GET/PATCH** (NULL-семантика с clear-флагами, только валидация диапазонов — значения задаёт владелец, Q11), djs;
-- DJ: shift, stats/today (§1.7);
-- e2e: settings roundtrip + NULL-clear + range-reject, pricing Q6, блокировка + аудит, RBAC-негативы;
-- клиенты панелей переведены на live-имплементации (осталось 3 заглушки: inviteDj, createClub, listGuests).
+**Не осталось:** заглушек `todo!()`/`unimplemented!()`/`unwrap`/`panic` в
+рабочем коде; mock-Stripe как единственного провайдера (live за env);
+in-memory WS как единственного режима (Redis за env); ручных триггеров
+джоб вместо воркера.
 
-**Подключение к живым контрактам** (субагент, openapi.yaml 0.5.0):
-- логин-флоу: `TokenPair | TotpChallenge` → 2FA-шаг → refresh-ротация; Bearer в памяти (НЕ localStorage); 401 → /login
-- web-club живое: createSession (timezone + dj_id), qr/generate (qr_token строка), close session
-- web-admin живое: **PayoutsPage** (список + Run cycle), **IncidentsPage** (список + Resolve), reconciliation/run
-- изначально 24 эндпоинта были 501-заглушками; после панельных эндпоинтов (коммит d71fe2d) осталось 3: inviteDj, createClub, listGuests
-- **Сборка проверена**: `tsc --noEmit` — 0 ошибок в обоих app; `vite build` — успешно (web-club 187 КБ, web-admin 197 КБ)
+## 3. Как запускать
 
-### gateway-ws: live-обновления (MVP, коммит `115b5b9`)
+### Локальный стенд (Docker, приближён к проду)
 
-| Артефакт | Что внутри |
-|---|---|
-| `crates/gateway-api/src/ws.rs` | `WsHub` — broadcast-каналы по топикам: `queue:{session}` (DJ-очередь) и `guest:{device}` (статус гостя); `GET /v1/ws?ticket=` — апгрейд, билет одноразовый (GETDEL), первый кадр-подписка с авторизацией владения (гость — только свой канал, DJ — только своя смена); события: request.created (с названием трека и бейджем ×N по canonical-ключу), accepted/rejected (причина летит гостю), played, session.paused/resumed |
-| Интеграция | push-точки в POST /v1/requests, dj accept/reject/played (no-op-дубли НЕ пушат), pause/resume |
-| `e2e_ws.rs` | DJ и гость получают created/accepted/paused; билет одноразовый (второй → None); утечки между гостями нет |
-| Прод-TODO | multi-node: Redis Pub/Sub-релей между узлами (задокументировано; MVP single-node) |
-
-### Эмуляция: приложения на Android (коммит `d8b235b`)
-
-**Всё установлено на Хранилище** (`/Volumes/Хранилище/Dev/mobile-sdk`,
-~8 ГБ, диск Mac не тронут):
-- Flutter SDK 3.47.7 (arm64) — `/Volumes/Хранилище/Dev/mobile-sdk/flutter`;
-- Android SDK: cmdline-tools + platform-tools + platforms 34/36 +
-  build-tools + **эмулятор с system-image android-34 arm64**;
-- AVD `dropit_phone` (Pixel 7);
-- обход mojibake: ASCII-симлинки (`sdk_ascii`, `dropit_ascii`,
-  `build_ascii`) — Gradle не переваривает кириллицу в путях;
-  local.properties с java-escaped путями.
-
-**Прогнано впервые** (SDK установлен — тесты «ожили» и сразу поймали
-real-ошибки компиляции, починены: record-типы, http.post body,
-ApiException.of, theme copyWith, изоляция тестов от сети):
-- гость: **6/6 тестов** · DJ: **11/11 тестов** — все зелёные.
-
-**APK собраны и установлены на эмулятор** (android-34 arm64):
-- гость: экран QR-скана живой (тёмная тема, неон, join);
-- DJ: экран логина живой (email+пароль, 2FA-готов);
-- API-адрес приложений: `10.0.2.2:8081` (хост из эмулятора) —
-  сервер и БД работают.
-
-Запуск эмулятора:
 ```sh
-export ANDROID_HOME=/Volumes/Хранилище/Dev/mobile-sdk/android-sdk
-$ANDROID_HOME/emulator/emulator -avd dropit_phone
-adb install build/app/outputs/flutter-apk/app-debug.apk
+docker compose -f deploy/docker-compose.yml up -d        # postgres, redis, nats, api, workers
+# воркер применяет миграции при старте (DROPIT_RUN_MIGRATIONS=true)
+# healthcheck API: http://localhost:8080/healthz
 ```
 
-### Тестовый запуск: «потыкать» (коммит `078a10b`)
+### На хосте (dev)
 
-**Сервер работает с живой БД**: main.rs подключает пул по
-`DATABASE_URL` (без — data-роуты честно 503). Проверено живым
-smoke-прогоном: логины → сессия → QR (64 hex) → join гостя →
-открытие смены → запрос трека → очередь DJ → accept → дашборд клуба
-→ админ-2FA challenge.
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+export CARGO_HOME="$(pwd)/.cargo-home"   # без неё cargo падает с Operation not permitted
+export DATABASE_URL="postgres://dropit:dropit_local@localhost:5432/dropit"
+export REDIS_URL="redis://localhost:6379"
+export NATS_URL="nats://localhost:4222"
 
-**Seed** (`cargo run --bin seed_demo`): клуб/DJ/админ+TOTP/5 треков,
-перезапускаемый (ON CONFLICT). Пароли — в выводе seed.
+# миграции (один из вариантов):
+#   через воркер:  DROPIT_RUN_MIGRATIONS=true cargo run -p dropit-workers -- run  (однократно, затем Ctrl-C)
+#   через psql:    for f in crates/infra-db/migrations/*.sql; do
+#                    docker exec -i deploy-postgres-1 psql -U dropit -d dropit -v ON_ERROR_STOP=1 < "$f"
+#                  done
 
-**КРИТИЧЕСКОЕ, найденное реальным запуском**: e2e-тесты **молча
-пропускались** — порт 5432 был занят локальным homebrew-postgres
-(вместо docker-контейнера). Починено (остановлен сервис, порт за
-контейнером); прогоны выявили и починили реальные баги:
-- `ip = $1` без cast inet (выдача device-token падала);
-- нумерация sqlx-placeholder'ов в platform-settings PATCH;
-- `sum()` → NUMERIC ≠ i64: касты во всех дашборд-суммах;
-- `payee_id NULL` (платформенные сплиты) ломал net/invariant-запросы;
-- сверка сравнивала Σ всех ledger-проводок (=0, двойная запись) —
-  теперь Σ по `revenue:platform`;
-- **QR-генерация 128 бит ≠ валидация 64 hex** — join падал на
-  живом флоу! (e2e обходил, подставляя длинные строки);
-- тестовая арифметика порога выплат/ретраев.
-Прогон: `cargo test --workspace -- --test-threads=1` (e2e с TRUNCATE-
-фикстурой — сериализованы осознанно).
+# демо-данные (клуб/DJ/админ+TOTP/5 треков):
+cargo run -p dropit-gateway-api --bin seed_demo
 
-**README (корень)**: «потрогать за 5 минут» — compose → миграции →
-seed → cargo run → curl-флоу.
+# API:
+cargo run -p dropit-gateway-api --bin dropit-api        # 0.0.0.0:8080
+# воркер (супервизор):
+cargo run -p dropit-workers -- run
+# воркер (один прогон, CI/крон):
+cargo run -p dropit-workers -- --once outbox
+cargo run -p dropit-workers -- --once payouts
+cargo run -p dropit-workers -- --once reconcile
+cargo run -p dropit-workers -- --once retention
+cargo run -p dropit-workers -- --once close-sessions
+cargo run -p dropit-workers -- --once push
+```
 
-**Скелетоны загрузки (§5)**: Flutter — пульсирующие SkeletonBox/
-RequestCard/StatTile (гость: requests; DJ: queue/stats — вместо
-спиннеров); React-панели — SkeletonRows/SkeletonTiles (сборка зелёная).
+`dropit-workers --help` — справка по командам и env.
 
-### UI-трек: WS-live в приложениях (коммит `b429073`)
+### Переменные окружения
 
-- **DJ** (`mobile-dj`): `WsClient` (билет → подписка queue) +
-  `QueueState`-редьюсер — **очередь обновляется без
-  pull-to-refresh**: вставка сверху (sort=new), сортировка по ×N
-  (hot), статусы карточек, баннер PAUSED из session.paused;
-- **гость** (`mobile-guest`): guest-канал — статусы своих запросов
-  (rejected **с причиной DJ**), played;
-- деградация: `connectQueueLive/connectGuestLive` → false без
-  транспорта (web_socket_channel подключается в прод-сборке) —
-  экраны работают через ручной refresh;
-- тесты: редьюсер (new/hot/статусы/пауза), мок-стрим, UI-флип
-  статуса, проброс причины гостю.
+| Переменная | Назначение | Дефолт / деградация |
+|---|---|---|
+| `DATABASE_URL` | Postgres (или `DROPIT_DATABASE_URL`) | нет → data-роуты 503, БД-задачи skip |
+| `REDIS_URL` | WS-тикеты + pub/sub между узлами | нет → in-memory (один узел) |
+| `NATS_URL` | outbox-реле (ADR-002) | нет → NoopBus, реле skip |
+| `STRIPE_API_KEY` / `STRIPE_WEBHOOK_SECRET` | live-Stripe | пусто → MockStripe |
+| `FCM_PROJECT_ID` / `FCM_SERVICE_ACCOUNT_JSON` | push Android | нет → FCM выключен |
+| `APNS_TEAM_ID` / `APNS_KEY_ID` / `APNS_PRIVATE_KEY_P8` / `APNS_TOPIC` / `APNS_SANDBOX` | push iOS | нет → APNs выключен |
+| `DROPIT_JWT_SECRET` | подпись JWT | dev-значение (прод — сменить) |
+| `DROPIT_TOTP_KEY` | AES-256-GCM ключ (32 байта hex) | отсутствие → ошибка, не тихий plain |
+| `DROPIT_BIND` | адрес API | `0.0.0.0:8080` |
+| `TRUST_PROXY` | доверять `X-Forwarded-For`/`X-Real-IP` для IP-лимитов (антифрод, master-вход) | `1` (прод за nginx); `0` — заголовки игнорируются |
+| `DROPIT_RUN_MIGRATIONS` | прогон миграций при старте воркера | `false` |
+| `RUST_LOG` | уровень логирования | `info` |
+| `OUTBOX_INTERVAL_SECS` и др. `*_INTERVAL_SECS`, `OUTBOX_BATCH_SIZE`, `OUTBOX_MAX_ATTEMPTS`, `PUSH_BATCH_SIZE` | интервалы/батчи супервизора | разумные дефолты |
 
-### UI-трек: Flutter-приложение DJ (каркас)
+## 4. Как гонять тесты
 
-`apps/mobile-dj/` — dizayn-zadanie §1 (экраны читаются в темноте одним
-взглядом — крупная типографика):
-- **§1.1 логин**: 2 шага (email+пароль → `mfa_required` → крупное
-  6-значное поле TOTP); Forgot password;
-- **§1.4 очередь (главный)**: карточки с бейджем **×N той же песни**
-  (социальный сигнал), time-ago, стиль; переключатель сортировки
-  new|hot (бэкенд поддерживает);
-- **§1.5 раскрытие**: крупные Принять · Отклонить (шаблоны причин —
-  отправляются гостю) · Сыграна; ISRC для Rekordbox/Serato;
-  409-конфликт и no-op-дубли обрабатываются;
-- **§1.3 настройка вечера**: тумблер приёма 72px (open/paused —
-  вызывает pause/resume роуты), стили-чипы (ЗАГЛУШКА: персист —
-  эндпоинт не реализован, правило 5);
-- **§1.7 статистика**: заработок крупно (из минорных единиц),
-  принято/сыграно/отклонено, acceptance rate;
-- бэкенд DJ-роуты уже полные (F4: queue, no-op-действия, пауза
-  блокирует POST /requests — покрыто e2e);
-- заглушки (правило 5): «сейчас играет» отдельным экраном (после
-  WS F9), обложки (B5), пик-часы.
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+export CARGO_HOME="$(pwd)/.cargo-home"
+export DATABASE_URL="postgres://dropit:dropit_local@localhost:5432/dropit"
 
-### UI-трек: Flutter-приложение гостя (каркас)
+#.unit-тесты крейта (без БД):
+cargo test -p dropit-infra-stripe
+cargo test -p dropit-infra-push
+cargo test -p dropit-infra-catalog
 
-`apps/mobile-guest/`: тема по токенам dizayn-zadanie §5 (чёрный/неон), API-клиент контрактам openapi (device-token, join, requests, ws-ticket, ErrorEnvelope i18n-коды), экраны: QR-скан (ввод токена до B5-камеры), сессия (динамическая цена §0.1), поиск (демо до B5), **обязательный экран условий оплаты §0.2** (3 пункта + чекбокс-гейт), My requests. Widget-тесты: пустой ввод, динамическая цена (не хардкод €5), гейт условий. `flutter test` требует установки Flutter SDK (на хосте нет).
+# БД-зависимые e2e — ТОЛЬКО через лок-скрипт (общая БД, параллельные агенты):
+./scripts/db-test.sh cargo test -p dropit-gateway-api e2e_payments -- --test-threads=1
+./scripts/db-test.sh cargo test -p dropit-gateway-api e2e_payouts -- --test-threads=1
+./scripts/db-test.sh cargo test -p dropit-gateway-api e2e_panels -- --test-threads=1
 
-## 3. Проверено (реальные результаты, F1-прогон)
+# весь воркспейс (БД-тесты — через лок):
+./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1
 
-| Проверка | Результат |
-|---|---|
-| `cargo fmt --all -- --check` (хост) | ✅ чисто |
-| `cargo clippy --workspace --all-targets -- -D warnings` (хост) | ✅ 0 ошибок |
-| `cargo test --workspace -- --test-threads=1` | ✅ **80 passed / 0 failed** — e2e РЕАЛЬНО выполняются (smoke: сервер+curl-флоу) |
-| OpenAPI 3.1 (Redocly lint) | ✅ valid (0.7.0, WS-контракт) |
-| Git-история | ✅ 12 коммитов: F0A → … → F6 → docs → F8 |
+# сборка + линтер:
+cargo build --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
 
-## 4. Что является mock/stub или отсутствует
+`scripts/db-test.sh` берёт межпроцессный лок (`mkdir`) и держит его до конца
+команды — e2e-тесты используют одну Postgres и чистят фикстуры (TRUNCATE),
+поэтому параллельные прогоны без лока дают ложные падения.
 
-- **Логин-флоу 2FA — упрощён в F1**: второй шаг (`/v1/auth/:role/2fa`) перепроверяет код по секрету, но НЕ связан с первым шагом промежуточным токеном (полноценный flow — F8 hardening); TOTP-секреты в тестах хранятся base32-plain (прод-шифрование AES-GCM — F8).
-- **IP в rate-limit** — заглушка `127.0.0.1` (X-Forwarded-For за reverse-proxy — F8).
-- Stripe: **не подключён** (ADR-004 открыт). NATS: не поднимается (F5).
-- Каталог: внешние вызовы iTunes/Deezer/MusicBrainz **не пишутся** (B5 — лицензии); есть только серверная валидация и кэш-структура.
-- `apps/web-dj/index.html` — HTML-прототип из параллельного UI-трека (не Flutter-приложение).
-- F2 (сессии, QR), F4 (WS, очередь), F5–F6 (деньги) — не начаты.
+**Тестов: 403 passed / 0 failed** (полный прогон `./scripts/db-test.sh cargo test
+--workspace --no-fail-fast -- --test-threads=1`, 2026-10-19). Разбивка по крейтам:
+common 13, domain 42, gateway-api 75 (69 unit + 6 контракт-тест OpenAPI),
+infra-catalog 88 (unit + integration-фикстуры), infra-db 8, infra-nats 15,
+infra-push 44, infra-redis 12 (unit + Redis-integration), infra-stripe 75
+(73 unit + 2 doc-test), workers 31.
 
-## 5. Открытые вопросы владельцу (Q11–Q16)
+## 5. Внешние сервисы и деградация
 
-Без изменений: Q11 (комиссия), Q12 (возврат при отклонении), Q13 (страна пилота), Q14 (юрлицо), Q15 (Stripe-схема, ADR-004), Q16 (невостребованные деньги). Дефолты Q1–Q10 рабочие, значения — конфиги.
+| Сервис | Зачем | Без него |
+|---|---|---|
+| Postgres | всё состояние | data-роуты 503, БД-задачи воркера skip (код 0) |
+| Redis | WS-тикеты вне процесса + pub/sub между узлами | in-memory: тикеты и live-события в рамках одного узла (мультиузла нет) |
+| NATS JetStream | outbox-реле (ADR-002) | NoopBus: outbox копится в БД, не публикуется; push и остальные задачи работают |
+| Stripe | реальные платежи/выплаты/онбординг | MockStripe: флоу платежей имитируется вебхуком с мок-подписью |
+| FCM/APNs | push-уведомления | NoopPush: уведомления никуда не уходят, остальное работает |
+| iTunes/Deezer | каталог треков | `HttpCatalog` делает реальные запросы; в тестах — `MockCatalog` на фикстурах |
 
-## 6. План F0–F9 и текущая позиция
+Правило деградации: отсутствие сервиса не валит процесс — поднимается
+in-memory/noop-аналог и в лог пишется предупреждение. Прод-путь включается
+только явной env-конфигурацией.
 
-| Фаза | Статус |
-|---|---|
-| F0A/F0B | ✅ завершены |
-| **F1 Идентичность** | ✅ код + тесты; e2e-критерий (4 роли, wrong-role → 403) выполнен |
-| **F2 Сессии+QR** | ✅ код + тесты; e2e-критерий (скан QR → session info, чужой QR отклонён) выполнен |
-| **F4 Запросы+очередь** | ✅ код + тесты (без денег); WS — ticket-выдача, соединения gateway-ws — F6 |
-| **F5 Платежи Test Mode** | ✅ код + тесты, МОК-провайдер; прод-Stripe ждёт ADR-004/Q11–Q15 |
-| **F6 Выплаты/сверка** | ✅ код + тесты (Test Mode): цикл выплат, порог, финальные, on_hold+инциденты, сверка, инвариант payee |
-| **F8 Hardening** | ✅ антифрод-лимиты, TOTP-шифрование, GDPR-джобы, авто-закрытие/TTL-воркеры, cargo-deny |
-| F3 Каталог | 🟡 домен-валидация готова; внешние интеграции — блок B5 |
-| F7 Панели | 🟡 каркасы готовы; контракты F1/F2 в openapi.yaml |
-| F8/F9 | не начаты |
+## 6. Открытые вопросы владельцу (Q11–Q16, B5)
 
-**Весь бэкенд F0→F1→F2→F4→F5→F6→F8 пройден в Test Mode.** Осталось: прод-интеграции (ADR-004, B5), UI (Flutter + панели), F9 (нагрузка/пилот).
-
-## 7. Текущие блокеры
-
-| # | Блокер | Что блокирует | Временный режим |
-|---|---|---|---|
-| ~~Б1 cargo локально~~ | — | — | **снят**: toolchain найден в `~/.cargo/bin` |
-| Б2 Pen-дизайн недоступен | точную реализацию UI | работаем от текстовых описаний + HTML-прототипы |
-| Б3 Q11–Q16 без ответов | платежи/выплаты/возвраты | платежи не включаются; параметры — конфиги |
-| ~~Б4 нет Git~~ | — | — | **снят**: репозиторий инициализирован |
-| Б5 Лицензии каталога | F3-интеграции | валидация+кэш готовы, внешние вызовы не пишутся |
-| Б6 Volume-маунт colima | Docker-сборки | tar-пайп; сборка на хосте не нужна |
-
-## 8. Макет pen.dev и перенос экранов гостя
-
-Макет заказчика лежит в pen.dev; ссылка из инструментов не открывается (hostname → непубличный IP), поэтому файл скачан целиком через share-сессию и сохранён в репозитории: `docs/ui/reference/dropit-design.pen` (71 фрейм, 5164 узла, 89 переменных), обзор канваса — `docs/ui/reference/design-canvas.png`.
-
-**Ключевой вывод:** реализованный ранее UI был «по словам ТЗ» и разошёлся с макетом — акцент `#39FF88` вместо `#00FF87`, фон `#0A0A0A` вместо `#0A0C0B`, дефолтный Roboto вместо Anton/Inter/Geist Mono, радиусы 12/8 вместо 18/16/27, панели клуба и админа вообще на других акцентах (маджента/янтарь). Полная сверка — в `docs/ui/README.md`.
-
-**Сделано (экраны 01–05 гостя):**
-
-| Артефакт | Что внутри |
-|---|---|
-| `apps/mobile-guest/lib/theme/tokens.dart` | Единственное место с цветами/радиусами/типографикой; значения — переменные `$drop-*` из макета |
-| `apps/mobile-guest/assets/fonts/` | Anton, Inter 400/500/600/700, Geist Mono 400/500 (вложены локально) |
-| `apps/mobile-guest/shaders/brand_wave_mint.frag` | Фирменный знак «пиксельная волна»: 22 полосы, уровень 0,49, амплитуды 0,20/0,12, множители 3,4/−2,1, смягчение ±0,025, градиент `#00FF87→#66FFC2` |
-| `lib/widgets/` | Кнопки со всеми состояниями (default/pressed/disabled/loading/outline/destructive), поля, чипы и фильтры, строки треков, шапки и «комната», шторки, обложки, праздничный блок |
-| `lib/screens/home_screen.dart` | Guest · 01 · Home: герой-блок, плитки «Nearby rooms» / «Scan to enter», заведение, «Set the mood», парящий таб-бар |
-| `lib/screens/scan_screen.dart` | Guest · 02 + 04c: рамка 310×300, стеклянные кнопки, шторка ручного кода (реальный `POST /v1/sessions/join`) |
-| `lib/screens/search_screen.dart` | Guest · 03: поиск 54, фильтры-таблетки, строки с контролом выбора 44, превью и полоса 4 px, закреплённый блок с ценой сессии |
-| `lib/screens/terms_screen.dart` | Guest · 04a: три правила из макета, цена сессии, обязательное подтверждение |
-| `lib/screens/payment_screen.dart` | Guest · 04 + 04b + 04d: сводка заказа, выбранная карта, шторки способа оплаты и добавления карты |
-| `lib/screens/request_sent_screen.dart` | Guest · 05: свечение/рябь/конфетти, чек со статусом и номером запроса |
-| `docs/ui/guest-flow-spec.md` | Поэкранная спецификация (размеры и цвета) |
-| `docs/ui/screens/` | Слепки: 3 с эмулятора (Home, скан, шторка) + 4 офлайн-рендера (поиск, условия, оплата, «отправлено») |
-
-Проверка: `flutter test` — 9/9 зелёные (флоу, динамическая цена, обязательные условия, номер запроса, токены); `dart analyze` — без ошибок; APK собран и поставлен на эмулятор, цвета кадров сверены с макетом по пикселям (фон `#0A0C0B` — 57 % кадра, акцент `#00FF87` — 6,5 %, прежний `#39FF88` — 0 пикселей, 339 оттенков зелёного = градиент знака).
-
-## 9. Следующий маленький этап
-
-**Дальше (выбор владельца):**
-1. **Остальные экраны гостя** — 06 (мои запросы, фильтры All/Upcoming/Played/Declined), 07–10 (профиль, вход, регистрация, сброс пароля), 11–15 (Explore, комната, деталь запроса, помощь, identity);
-2. **Приложение диджея по макету** — DJ 01–10 (логин, выбор сессии, настройка вечера, очередь, карточка запроса, now playing, статистика, состояния, push);
-3. **Свести панели к токенам макета** — web-club/web-admin сейчас на маджента/янтаре, у клуба в макете тот же неон `#00FF87`;
-4. **Хвосты панелей** — inviteDj (email-инвайт), createClub (верификация), listGuests (антифрод-скоринг);
-5. **Транспорт WS в приложениях** — web_socket_channel в pubspec + connectSocket (контракт и редьюсеры готовы и протестированы);
-6. **Прод-интеграции** — Stripe Connect (ждёт ADR-004/Q11–Q15), каталог (B5 лицензии), camera-сканер;
-7. **F9** — k6-нагрузка, soak, пилот, сторы.
-
-Flutter 3.47.7 стоит на носителе (`/Volumes/Хранилище/Dev/mobile-sdk`): `flutter test` для mobile-guest и mobile-dj прогоняется (см. журнал). Для Android-сборки нужны ASCII-пути — gradle читает `local.properties` как ISO-8859-1 и коверкает кириллицу в пути SDK (обход: ASCII-симлинки на SDK и каталог сборки).
-
-Джобы (авто-закрытие, TTL-интенты, retention) — методы JobsRepo; прод-cron-триггеры — воркер-бинарник `workers` при переходе к деплою. WS-соединения (gateway-ws) и NATS-релье outbox — с инфраструктурой F9/деплоя.
+Q11 (комиссия), Q12 (возврат при отклонении), Q13 (страна пилота), Q14 (юрлицо),
+Q15 (Stripe-схема, ADR-004), Q16 (невостребованные деньги — закрыт механикой
+final-payout, политика-текст — владелец). B5 — лицензии каталога. Дефолты
+Q1–Q10 рабочие, значения — конфиги.
 
 ---
 
-## Журнал проверок
+## Приложение A. UI-трек (кратко)
+
+Экраны гостя 01–05 перенесены по макету pen.dev (токены/шрифты Anton/Inter/
+Geist Mono, знак «пиксельная волна», пиксельная сверка). Панели клуба/админа —
+React-каркасы на live-контрактах. Flutter-приложения гость/DJ — каркасы с
+WS-live (редьюсеры, мок-стрим). Полная сверка UI — `docs/ui/README.md`.
+SDK Flutter/Android установлен на носителе
+(`/Volumes/Хранилище/Dev/mobile-sdk`), `flutter test` — зелёные.
+
+## Приложение B. Журнал проверок (бэкенд)
 
 | Дата | Команда | Результат |
 |---|---|---|
-| 2026-10-12 | `ls -la`, `git rev-parse`, `docker --version`, `rustc/cargo --version` | 6 документов; не git-репо; Docker 29.3.0; rustc/cargo «отсутствуют» (не в PATH) |
-| 2026-10-13 | F0A-проверки в Docker | compose ✅, миграция ✅, build ✅, healthz/readyz ✅, 12 тестов ✅, clippy/fmt ✅ |
-| 2026-10-13 | `git init` + baseline | ✅ коммит `6dd94f7` |
-| 2026-10-13 | `cargo test --workspace` на хосте (toolchain в `~/.cargo/bin`) | ✅ 12 passed (F0A-набор) |
-| 2026-10-13 | F1: `cargo test --workspace` | ✅ **39 passed / 0 failed** (включая e2e RBAC-матрицу) |
-| 2026-10-13 | F1: `cargo clippy -D warnings` / `fmt --check` | ✅ 0 ошибок / чисто |
-| 2026-10-13 | F1: `git commit` | ✅ `0bfc694` |
-| 2026-10-13 | F2: миграции 0002+0003 применены в compose-БД | ✅ 13 таблиц |
-| 2026-10-13 | F2: `cargo test --workspace` | ✅ **46 passed / 0 failed** (e2e F2: QR-флоу полный) |
-| 2026-10-13 | F2: OpenAPI 0.2.0 Redocly lint | ✅ valid |
-| 2026-10-13 | F2: `git commit` | ✅ `458db86` |
-| 2026-10-13 | F4: миграция 0004 применена | ✅ 17 таблиц |
-| 2026-10-13 | F4: `cargo test --workspace` | ✅ **48 passed / 0 failed** (e2e F4: полный request-флоу) |
-| 2026-10-13 | F4: OpenAPI 0.3.0 Redocly lint | ✅ valid |
-| 2026-10-13 | F4: `git commit` | ✅ `d752a29` |
-| 2026-10-13 | F5: миграция 0005 применена | ✅ 21 таблица |
-| 2026-10-13 | F5: `cargo test --workspace` | ✅ **61 passed / 0 failed** (chaos: двойной вебхук, cancel-гонка, инварианты) |
-| 2026-10-13 | F5: OpenAPI 0.4.0 Redocly lint | ✅ valid |
-| 2026-10-13 | F5: `git commit` | ✅ `7e93aa0` |
-| 2026-10-13 | F6: миграция 0006 применена | ✅ 24 таблицы |
-| 2026-10-13 | F6: `cargo test --workspace` | ✅ **67 passed / 0 failed** (e2e F6: цикл выплат+сверка) |
-| 2026-10-13 | F6: OpenAPI 0.5.0 Redocly lint | ✅ valid |
-| 2026-10-13 | F6: `git commit` | ✅ `bf1d10d` |
-| 2026-10-13 | F8: миграция 0007 применена | ✅ 25 таблиц |
-| 2026-10-13 | F8: `cargo test --workspace` | ✅ **75 passed / 0 failed** (e2e F8: антифрод+джобы+GDPR+crypto) |
-| 2026-10-13 | F8: `git commit` | ✅ `cca8357` |
-| 2026-10-13 | UI: Flutter guest app | ✅ коммит `d55ccc1` (структура+экраны+тесты) |
-| 2026-10-13 | UI: панели — `npm install` + `tsc --noEmit` | ✅ 0 ошибок в обоих app |
-| 2026-10-13 | UI: панели — `vite build` | ✅ обе собираются (187/197 КБ) |
-| 2026-10-13 | UI: панели подключены к контрактам | ✅ коммит `1d22ddb` |
-| 2026-10-13 | Панельные эндпоинты: e2e | ✅ settings/pricing/блокировка/RBAC |
-| 2026-10-13 | Панельные эндпоинты: клиенты live | ✅ tsc+vite зелёные |
-| 2026-10-13 | Панельные эндпоинты: коммит | ✅ `d71fe2d` |
-| 2026-10-13 | DJ-приложение (Flutter, §1) | ✅ коммит `925ec20` |
-| 2026-10-13 | gateway-ws MVP: e2e | ✅ DJ+гость, билеты, изоляция |
-| 2026-10-13 | gateway-ws MVP: коммит | ✅ `115b5b9` |
-| 2026-10-13 | WS-live в приложениях | ✅ коммит `b429073` |
-| 2026-10-14 | Тест-ран: сервер+seed+smoke | ✅ полный живой флоу |
-| 2026-10-14 | Тест-ран: e2e молча пропускались → починено | ✅ все 80 реально проходят |
-| 2026-10-14 | Тест-ран: скелетоны загрузки | ✅ Flutter + панели |
-| 2026-10-14 | Тест-ран: коммит | ✅ `078a10b` |
-| 2026-10-15 | SDK на Хранилище (8 ГБ) | ✅ flutter+android+эмулятор |
-| 2026-10-15 | Flutter-тесты впервые | ✅ гость 6/6, DJ 11/11 |
-| 2026-10-15 | APK на эмуляторе | ✅ оба приложения живые |
-| 2026-10-15 | Эмуляция: коммит | ✅ `d8b235b` |
-| 2026-10-15 | Макет pen.dev: скачивание `.pen` через headless Chromium (share-страница, перехват GCS-ссылки) | ✅ 71 фрейм, 5164 узла, 89 переменных; сохранён в `docs/ui/reference/` |
-| 2026-10-15 | Сверка кода с макетом | ⚠️ расхождение: акцент `#39FF88` vs `#00FF87`, фон `#0A0A0A` vs `#0A0C0B`, Roboto vs Anton/Inter/Geist Mono, панели на маджента/янтаре |
-| 2026-10-15 | Шрифты вложены локально | ✅ Anton + Inter 400–700 + Geist Mono 400/500 (`apps/mobile-guest/assets/fonts/`) |
-| 2026-10-15 | Экраны гостя 01–05 по макету | ✅ токены/знак/компоненты/экраны, старые `conditions_screen`/`session_screen` удалены |
-| 2026-10-15 | `flutter test` (mobile-guest) | ✅ 9/9 зелёные |
-| 2026-10-15 | `dart analyze` (mobile-guest) | ✅ 0 ошибок (2 прежних warning, 17 info в `skeletons.dart` — до этого этапа) |
-| 2026-10-15 | APK гостя + эмулятор | ✅ собрано, поставлено; пиксельная сверка Home/скана: фон 57 %, акцент 6,5 %, старый `#39FF88` — 0 px |
+| 2026-10-12 | `ls`, `git rev-parse`, `rustc/cargo --version` | 6 документов; toolchain в `~/.cargo/bin` |
+| 2026-10-13 | F0A: compose, миграция, build, healthz, 12 тестов, clippy/fmt | ✅ |
+| 2026-10-13 | F1: `cargo test -p dropit-gateway-api` | ✅ 39 passed (RBAC-матрица) |
+| 2026-10-13 | F2: `cargo test -p dropit-gateway-api` | ✅ 46 passed (QR-флоу) |
+| 2026-10-13 | F4: `cargo test -p dropit-gateway-api` | ✅ 48 passed (request-флоу) |
+| 2026-10-13 | F5: `cargo test -p dropit-gateway-api` | ✅ 61 passed (chaos: дубль вебхука, cancel-гонка, инварианты) |
+| 2026-10-13 | F6: `cargo test -p dropit-gateway-api` | ✅ 67 passed (цикл выплат+сверка) |
+| 2026-10-13 | F8: `cargo test -p dropit-gateway-api` | ✅ 75 passed (антифрод+джобы+GDPR+crypto) |
+| 2026-10-19 | W1–W3: `cargo test -p dropit-infra-{redis,nats,stripe,catalog,push}` | ✅ зелёные (unit + интеграция) |
+| 2026-10-19 | W5: hardening дефектов (IDOR, transfer-подпись, TX-payout, QR, 2FA-лимит, IP, идемпотентность) | ✅ e2e-тесты зелёные |
+| 2026-10-19 | `cargo build --workspace` + `cargo clippy --workspace --all-targets` | ✅ 0 warning (кроме предсуществующего future-incompat sqlx-postgres) |
+| 2026-10-19 | `./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1` | ✅ 403 passed / 0 failed / 0 ignored |
+
+## Приложение C. Документы
+
+- План доводки: `docs/BACKEND_COMPLETION_PLAN.md`
+- Контракт API: `docs/openapi.yaml` (0.7.0)
+- ADR: `docs/adr/ADR-001`…`ADR-006`
+- Техкарта: `tehnicheskaya-karta.md`; архитектура: `arhitekturnoe-reshenie.md`

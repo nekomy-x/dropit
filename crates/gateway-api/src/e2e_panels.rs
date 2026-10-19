@@ -20,7 +20,7 @@ use dropit_common::Role;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::e2e::{app_env, call, test_repo};
+use crate::e2e::{app_env, call, call_with_headers, test_repo};
 use dropit_infra_db::SessionRepo;
 
 /// Процент-кодирование курсора для query-string (в курсоре есть ':' и
@@ -1025,4 +1025,332 @@ async fn e2e_admin_reconciliation_runs() {
     )
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+// ============================================================
+// W5-C: вход клуба по master-токену (POST /v1/auth/club/master)
+// ============================================================
+
+/// `POST /v1/auth/club/master`: верный токен → 200 + рабочий JWT (доступ к
+/// `/v1/club/dashboard`), неверный → 401 `invalid_credentials`, пустой → 400
+/// `invalid_request`, 11 попыток с одного IP → 429 `too_many_attempts`.
+/// Клуб создаётся через `POST /v1/admin/clubs` (password_hash='!' — обычный
+/// логин ему недоступен); master-токен — единственный способ входа в панель.
+#[tokio::test]
+async fn e2e_club_master_login() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let pool = repo.pool();
+    // XFF-флуд-сценарий ниже считает лимит по IP из заголовка. После
+    // смены безопасного дефолта (TRUST_PROXY по умолчанию ВЫКЛ) заголовок
+    // игнорируется без явного включения — поэтому тест явно включает
+    // доверие, чтобы бакет флуда (198.51.100.10) изолировался от
+    // предшествующей неудачной попытки (без XFF → бакет 0.0.0.0). Гард
+    // восстанавливает env после теста.
+    let _trust = crate::e2e::EnvGuard::set("TRUST_PROXY", "1");
+    let admin_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .unwrap();
+
+    // --- Создаём клуб админом → получаем qr_master_token (один раз) ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/admin/clubs",
+        Some(json!({ "name": "Master Club", "city": "Madrid", "timezone": "Europe/Madrid" })),
+        Some(&admin_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create club: {body}");
+    let club_id: Uuid = sfield(&body, "club_id").parse().unwrap();
+    let master = sfield(&body, "qr_master_token");
+    assert!(!master.is_empty());
+
+    // --- Верный токен → 200 + пара JWT + club_id + role ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/auth/club/master",
+        Some(json!({ "qr_master_token": master })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "master login: {body}");
+    let access = body["access_token"].as_str().unwrap().to_string();
+    let refresh = body["refresh_token"].as_str().unwrap().to_string();
+    assert!(!access.is_empty(), "access token issued");
+    assert!(!refresh.is_empty(), "refresh token issued");
+    assert_eq!(body["expires_in"], 900, "15 min access ttl");
+    assert_eq!(body["club_id"], club_id.to_string());
+    assert_eq!(body["role"], "club");
+
+    // JWT рабочий: клуб попадает на свой dashboard → 200.
+    let (s, body) = call(&env, "GET", "/v1/club/dashboard", None, Some(&access)).await;
+    assert_eq!(s, StatusCode::OK, "master-issued jwt on dashboard: {body}");
+
+    // В audit_log записан club_master_login (без токена).
+    let (n,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM audit_log WHERE action = 'club_master_login' AND actor_id = $1")
+            .bind(club_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(n, 1, "club_master_login audit entry written");
+
+    // --- Неверный токен → 401 invalid_credentials ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/auth/club/master",
+        Some(json!({ "qr_master_token": "deadbeef".repeat(8) })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "wrong token: {body}");
+    assert_eq!(body["code"], "invalid_credentials");
+
+    // --- Пустой токен → 400 invalid_request ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/auth/club/master",
+        Some(json!({ "qr_master_token": "" })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "empty token: {body}");
+    assert_eq!(body["code"], "invalid_request");
+
+    // --- 11 попыток с одного IP (валидный формат, неверные токены) → 429 ---
+    // Первые 10: format ok → лимит не превышен → verify fail → 401 (record).
+    // 11-й: count=10 → 429 too_many_attempts.
+    let xff = "198.51.100.10";
+    for i in 1..=11u32 {
+        // 64 hex-символа: валидный формат, но не совпадает ни с одним клубом.
+        let wrong = format!("deadbeef{i:058x}");
+        let (s, body) = call_with_headers(
+            &env,
+            "POST",
+            "/v1/auth/club/master",
+            Some(json!({ "qr_master_token": wrong })),
+            None,
+            &[("x-forwarded-for", xff)],
+        )
+        .await;
+        if i <= 10 {
+            assert_eq!(s, StatusCode::UNAUTHORIZED, "flood #{i} must be 401: {body}");
+        } else {
+            assert_eq!(
+                s,
+                StatusCode::TOO_MANY_REQUESTS,
+                "flood #{i} must be 429: {body}"
+            );
+            assert_eq!(body["code"], "too_many_attempts");
+        }
+    }
+}
+
+// ============================================================
+// W7-C дефект 2: фильтры status/club_id в GET /v1/admin/payments
+// ============================================================
+
+/// Сижим цепочку `club → session → guest_device → track_cache → request`
+/// и возвращаем `(club_id, request_id)` для вставки платежей в тесте
+/// фильтров. Уникальные `slug`/`email` через `tag` (UNIQUE-констрейнты).
+async fn seed_club_request(pool: &sqlx::PgPool, tag: &str) -> (Uuid, Uuid) {
+    let club_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1, $2, $2, $3, 'x')",
+    )
+    .bind(club_id)
+    .bind(format!("club-{tag}"))
+    .bind(format!("club-{tag}@dropit.test"))
+    .execute(pool)
+    .await
+    .unwrap();
+    let session_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO session (id, club_id, timezone) VALUES ($1, $2, 'Europe/Madrid')")
+        .bind(session_id)
+        .bind(club_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let guest_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO guest_device (id, platform) VALUES ($1, 'ios')")
+        .bind(guest_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let track_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO track_cache (id, source, source_id, canonical_key, title, artist) \
+         VALUES ($1, 'itunes', $2, $3, 'T', 'A')",
+    )
+    .bind(track_id)
+    .bind(format!("tr-{tag}"))
+    .bind(format!("itunes:tr-{tag}"))
+    .execute(pool)
+    .await
+    .unwrap();
+    let request_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO request (id, session_id, guest_device_id, track_cache_id) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(request_id)
+    .bind(session_id)
+    .bind(guest_id)
+    .bind(track_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    (club_id, request_id)
+}
+
+/// Вставляет `payment` с заданным статусом и суммой; возвращает его id.
+/// `idempotency_key` уникален (свежий UUIDv7) — UNIQUE-констрейнт соблюдён.
+async fn insert_payment(pool: &sqlx::PgPool, request_id: Uuid, status: &str, amount: i64) -> Uuid {
+    let id = Uuid::now_v7();
+    let idem = format!("idem-{}-{status}", Uuid::now_v7());
+    sqlx::query(
+        "INSERT INTO payment (id, request_id, idempotency_key, amount_minor, status) \
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(request_id)
+    .bind(idem)
+    .bind(amount)
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+/// `GET /v1/admin/payments`: фильтры `status` и `club_id` реально работают
+/// (раньше параметры помечались `#[allow(dead_code)]` и молча игнорировались
+/// — SQL без WHERE). Проверки:
+///   * без параметров — все платежи (прежнее поведение сохранено);
+///   * `?status=captured` → только captured (3 шт: 2 из клуба A + 1 из B);
+///   * `?status=bogus` → `400 invalid_status` (валидация по списку статусов);
+///   * `?club_id=A` → изоляция клуба (3 платежа клуба A);
+///   * `?club_id=B&status=intent` → композиция (1);
+///   * `?club_id=A&status=failed` → композиция (1);
+///   * RBAC: клуб → 403.
+#[tokio::test]
+async fn e2e_admin_payments_filters() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let pool = repo.pool();
+    let admin = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .unwrap();
+
+    // RBAC: клуб не может в админ-платежи.
+    let club_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
+        .unwrap();
+    let (s, _) = call(&env, "GET", "/v1/admin/payments", None, Some(&club_tok)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club forbidden on admin payments");
+
+    // --- Сижим два клуба с запросами ---
+    let tag = Uuid::now_v7();
+    let (club_a, req_a) = seed_club_request(&pool, &format!("a-{tag}")).await;
+    let (club_b, req_b) = seed_club_request(&pool, &format!("b-{tag}")).await;
+
+    // club_a: 2 captured + 1 failed; club_b: 1 captured + 1 intent.
+    // Итого: 3 captured, 1 failed, 1 intent = 5 платежей.
+    insert_payment(&pool, req_a, "captured", 300).await;
+    insert_payment(&pool, req_a, "captured", 500).await;
+    insert_payment(&pool, req_a, "failed", 700).await;
+    insert_payment(&pool, req_b, "captured", 400).await;
+    insert_payment(&pool, req_b, "intent", 200).await;
+
+    // --- Без параметров: все 5 (преждеё поведение сохранено) ---
+    let (s, body) = call(&env, "GET", "/v1/admin/payments", None, Some(&admin)).await;
+    assert_eq!(s, StatusCode::OK, "no params: {body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(5),
+        "no filter → all 5 payments: {body}"
+    );
+
+    // --- status=captured: 3 (2 из A + 1 из B), все со статусом captured ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/payments?status=captured",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "status=captured: {body}");
+    let caps = body["items"].as_array().expect("items array");
+    assert_eq!(caps.len(), 3, "captured count: {body}");
+    assert!(
+        caps.iter().all(|p| p["status"] == "captured"),
+        "all items are captured: {body}"
+    );
+
+    // --- status=bogus → 400 invalid_status (валидация по списку) ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/payments?status=bogus",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "invalid status must be 400: {body}");
+    assert_eq!(body["code"], "invalid_status", "error code: {body}");
+
+    // --- club_id=club_a: 3 платежа (изоляция клуба через JOIN) ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/payments?club_id={club_a}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club filter: {body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(3),
+        "club_a isolated to its 3 payments: {body}"
+    );
+
+    // --- club_id=club_b&status=intent: 1 (композиция фильтров) ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/payments?club_id={club_b}&status=intent"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club+status: {body}");
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "club_b intent: {body}");
+    assert_eq!(items[0]["status"], "intent");
+
+    // --- club_id=club_a&status=failed: 1 ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/payments?club_id={club_a}&status=failed"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club+status failed: {body}");
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(1),
+        "club_a failed: {body}"
+    );
 }

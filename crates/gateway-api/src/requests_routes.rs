@@ -30,7 +30,6 @@ use chrono::{DateTime, Utc};
 use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_domain::RequestAction;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 // ============================================================
@@ -96,13 +95,6 @@ pub struct ActionResultResponse {
     pub request_id: Uuid,
     pub status: String,
     pub noop: bool,
-}
-
-#[derive(Serialize)]
-pub struct WsTicketResponse {
-    pub ticket: String,
-    /// TTL билета, сек (30).
-    pub expires_in: i64,
 }
 
 // ============================================================
@@ -172,7 +164,6 @@ pub fn requests_router() -> Router<ApiEnv> {
         .route("/v1/dj/requests/:id/played", post(dj_played))
         .route("/v1/dj/acceptance/pause", post(dj_pause))
         .route("/v1/dj/acceptance/resume", post(dj_resume))
-        .route("/v1/ws/ticket", post(ws_ticket))
 }
 
 // ============================================================
@@ -274,17 +265,9 @@ async fn create_request(
     {
         // Создан.
         Ok(Ok(row)) => {
-            let response_body = serde_json::json!({
-                "request_id": row.id,
-                "status": row.status,
-                "session_id": row.session_id,
-                "queue_position": None::<i64>,
-            });
-            // Сохраняем replay-ответ (после успешного TX).
-            let _ = requests
-                .save_idempotency_response(&idem_key, guest_device_id, row.id, &response_body)
-                .await;
-            // WS-push: новая карточка в очередь DJ + статус гостю.
+            // Идемпотентный ответ и outbox уже зафиксированы ВНУТРИ
+            // транзакции create_request — здесь только best-effort
+            // WS-уведомление (источник истины — REST/БД, ADR-005).
             if let Some(hub) = state.ws.clone() {
                 // Название трека для карточки (кэш).
                 let title = requests
@@ -868,65 +851,6 @@ async fn dj_acceptance(
                 .into_response()
         }
         Err(_) => api_error(ApiError::Conflict, "invalid session transition"),
-    }
-}
-
-// ============================================================
-// WS-ticket: одноразовый, TTL 30 с (ADR-005, VII)
-// ============================================================
-
-/// Хранилище билетов. In-memory для F4-скелета: Redis — с F5/F8
-/// (multi-node). Одноразовость: GETDEL-семантика при использовании.
-static WS_TICKETS: std::sync::OnceLock<
-    std::sync::Mutex<HashMap<String, (Uuid, std::time::Instant)>>,
-> = std::sync::OnceLock::new();
-
-#[cfg(test)]
-pub(crate) fn consume_ws_ticket_for_test(ticket: &str) -> Option<Uuid> {
-    consume_ws_ticket(ticket)
-}
-
-fn ws_tickets() -> &'static std::sync::Mutex<HashMap<String, (Uuid, std::time::Instant)>> {
-    WS_TICKETS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
-}
-
-/// TTL билета (сек).
-pub const WS_TICKET_TTL_SECS: u64 = 30;
-
-/// Выдаёт билет любому аутентифицированному субъекту (JWT).
-async fn ws_ticket(ctx: AuthContext) -> Response {
-    // Билет: 128 бит hex, привязан к subject+role.
-    let mut bytes = [0u8; 16];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    let ticket = hex::encode(bytes);
-    ws_tickets().lock().expect("ws tickets lock").insert(
-        ticket.clone(),
-        (ctx.subject_id(), std::time::Instant::now()),
-    );
-    (
-        StatusCode::OK,
-        Json(WsTicketResponse {
-            ticket,
-            expires_in: WS_TICKET_TTL_SECS as i64,
-        }),
-    )
-        .into_response()
-}
-
-/// Проверяет и ПОГЛОЩАЕТ билет (одноразовый). Возвращает subject.
-/// Потребитель — gateway-ws бинарник (ADR-005) и e2e-тест ниже.
-#[allow(dead_code)]
-pub(crate) fn consume_ws_ticket(ticket: &str) -> Option<Uuid> {
-    let mut store = ws_tickets().lock().expect("ws tickets lock");
-    match store.remove(ticket) {
-        Some((sub, at)) => {
-            if at.elapsed().as_secs() <= WS_TICKET_TTL_SECS {
-                Some(sub)
-            } else {
-                None // истёк
-            }
-        }
-        None => None, // неизвестный или уже использованный
     }
 }
 

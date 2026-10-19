@@ -33,7 +33,19 @@ pub enum BillingError {
     AlreadyProcessed,
     #[error("amount mismatch")]
     AmountMismatch,
+    /// `Idempotency-Key` уже привязан к ДРУГОМУ `request_id` — выдача
+    /// чужого `payment_id`/суммы недопустима (→ 409 `idempotency_conflict`).
+    #[error("idempotency key belongs to another request")]
+    IdempotencyConflict,
 }
+
+/// Список колонок `payment` для `SELECT … FROM payment` — единый
+/// источник правды, чтобы `query_as::<PaymentRow>` и `RETURNING` не
+/// рассинхронизировались. Включает все поля `PaymentRow` в порядке
+/// декларации структуры.
+const PAYMENT_COLS: &str = "id, request_id, stripe_payment_intent_id, idempotency_key, \
+     amount_minor, currency, status, refunded_minor, failure_reason, \
+     stripe_error_code, split_snapshot, created_at, captured_at";
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct PaymentRow {
@@ -87,6 +99,17 @@ pub struct CommissionParams {
     pub currency: String,
 }
 
+/// Исход атомарного создания платежа для запроса
+/// ([`BillingRepo::create_payment_for_request`]).
+#[derive(Debug)]
+pub enum CreatePaymentOutcome {
+    /// Создана новая строка payment(intent).
+    Created(PaymentRow),
+    /// Найден существующий «активный» платёж — replay/гонка: новый
+    /// intent создаваться не должен, возвращается эта строка.
+    Existing(PaymentRow),
+}
+
 #[derive(Clone)]
 pub struct BillingRepo {
     pool: PgPool,
@@ -105,8 +128,48 @@ impl BillingRepo {
     // Шаг 1: создание платежа (intent) для запроса
     // ---------------------------------------------------------
 
+    /// Вычисляет снимок правил разреза для платежа. Неизменяем после
+    /// captured — аудит «почему разделили именно так». Ошибка сериализации
+    /// (практически невозможна для примитивных полей) пробрасывается как
+    /// `BillingError::Db(Decode)` — без паник в рабочем коде.
+    fn build_snapshot(
+        amount_minor: i64,
+        commission: &CommissionParams,
+    ) -> Result<SplitSnapshot, BillingError> {
+        let split = compute_split(
+            amount_minor,
+            commission.commission_bp,
+            commission.dj_share_bp,
+        )
+        .map_err(|_| BillingError::AmountMismatch)?;
+        Ok(SplitSnapshot {
+            commission_bp: commission.commission_bp,
+            dj_share_bp: commission.dj_share_bp,
+            amount_minor,
+            currency: commission.currency.clone(),
+            platform_minor: split.platform_minor,
+            club_minor: split.club_minor,
+            dj_minor: split.dj_minor,
+        })
+    }
+
     /// Создаёт payment(intent) со снимком цены и правил разреза.
     /// Снимок неизменяем после captured — аудит «почему разделили».
+    ///
+    /// Идемпотентна по `idempotency_key` (UNIQUE в схеме): сетевой ретрай
+    /// с тем же ключом НЕ создаёт второй строки и НЕ даёт 500 —
+    /// возвращается уже сохранённая запись **того же** `request_id`.
+    ///
+    /// Защита от выдачи чужого платежа (W7-A, ДЕФЕКТ 2): используется
+    /// `ON CONFLICT (idempotency_key) DO NOTHING` + проверка
+    /// `rows_affected`. При конфликте строка перечитывается по ключу и
+    /// её `request_id` ЯВНО сверяется с ожидаемым:
+    /// * совпадает → replay, возвращается та же строка;
+    /// * чужой `request_id` → `BillingError::IdempotencyConflict`
+    ///   (никакой выдачи чужого `payment_id`/`amount_minor`).
+    ///
+    /// Строки split создаются при захвате (payment без денег не плодит
+    /// будущие payable).
     pub async fn create_payment(
         &self,
         request_id: Uuid,
@@ -115,41 +178,49 @@ impl BillingRepo {
         intent_id: &str,
         commission: &CommissionParams,
     ) -> Result<PaymentRow, BillingError> {
-        let split = compute_split(
-            amount_minor,
-            commission.commission_bp,
-            commission.dj_share_bp,
-        )
-        .map_err(|_| BillingError::AmountMismatch)?;
-        let snapshot = SplitSnapshot {
-            commission_bp: commission.commission_bp,
-            dj_share_bp: commission.dj_share_bp,
-            amount_minor,
-            currency: commission.currency.clone(),
-            platform_minor: split.platform_minor,
-            club_minor: split.club_minor,
-            dj_minor: split.dj_minor,
-        };
-        // Строки split создаются при захвате (payment без денег
-        // не плодит будущие payable).
-        let row = sqlx::query_as::<_, PaymentRow>(
+        let snapshot = Self::build_snapshot(amount_minor, commission)?;
+        let snapshot_json = serde_json::to_value(&snapshot)
+            .map_err(|_| BillingError::Db(sqlx::Error::Decode("snapshot serialize".into())))?;
+        let id = Uuid::now_v7();
+        // DO NOTHING: при конфликте по ключу INSERT ничего не меняет и
+        // не возвращает чужую строку (в отличие от DO UPDATE RETURNING).
+        let res = sqlx::query(
             "INSERT INTO payment (id, request_id, stripe_payment_intent_id, idempotency_key, \
              amount_minor, currency, status, split_snapshot) \
              VALUES ($1, $2, $3, $4, $5, $6, 'intent', $7) \
-             RETURNING id, request_id, stripe_payment_intent_id, idempotency_key, \
-             amount_minor, currency, status, refunded_minor, failure_reason, \
-             stripe_error_code, split_snapshot, created_at, captured_at",
+             ON CONFLICT (idempotency_key) DO NOTHING",
         )
-        .bind(Uuid::now_v7())
+        .bind(id)
         .bind(request_id)
         .bind(intent_id)
         .bind(idempotency_key)
         .bind(amount_minor)
         .bind(&commission.currency)
-        .bind(serde_json::to_value(&snapshot).expect("snapshot serializes"))
+        .bind(snapshot_json)
+        .execute(&self.pool)
+        .await?;
+        if res.rows_affected() == 1 {
+            // Новая строка — читаем её по сгенерированному id.
+            let row = sqlx::query_as::<_, PaymentRow>(&format!(
+                "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1"
+            ))
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+            return Ok(row);
+        }
+        // Конфликт по idempotency_key: перечитываем строку-владельца ключа
+        // и ЯВНО сверяем request_id. Чужой → IdempotencyConflict.
+        let existing = sqlx::query_as::<_, PaymentRow>(&format!(
+            "SELECT {PAYMENT_COLS} FROM payment WHERE idempotency_key = $1"
+        ))
+        .bind(idempotency_key)
         .fetch_one(&self.pool)
         .await?;
-        Ok(row)
+        if existing.request_id != request_id {
+            return Err(BillingError::IdempotencyConflict);
+        }
+        Ok(existing)
     }
 
     pub async fn find_payment(&self, id: Uuid) -> Result<Option<PaymentRow>, BillingError> {
@@ -192,6 +263,134 @@ impl BillingRepo {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    /// Находит «активный» платёж запроса — то есть НЕ в терминально
+    /// провальном/отменённом состоянии (`status NOT IN
+    /// ('cancelled','refunded','failed')`). Если такой платёж есть,
+    /// повторное создание платежа для этого request обязано вернуть его
+    /// (replay), а не создавать новый intent (анти-двойное списание).
+    /// Берётся последняя по `created_at` строка — на случай, когда после
+    /// cancelled/failed создан новый.
+    pub async fn find_active_payment_by_request(
+        &self,
+        request_id: Uuid,
+    ) -> Result<Option<PaymentRow>, BillingError> {
+        let row = sqlx::query_as::<_, PaymentRow>(
+            "SELECT id, request_id, stripe_payment_intent_id, idempotency_key, amount_minor, \
+             currency, status, refunded_minor, failure_reason, stripe_error_code, \
+             split_snapshot, created_at, captured_at FROM payment \
+             WHERE request_id = $1 AND status NOT IN ('cancelled','refunded','failed') \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(request_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Атомарно создаёт платёж для запроса либо возвращает существующий
+    /// «активный» платёж. Гарантирует инвариант «один request → один
+    /// активный платёж» без миграции схемы:
+    ///
+    /// * `SELECT … FOR UPDATE` по строке `request` сериализует параллельные
+    ///   создания платежа для одного request — два одновременных запроса
+    ///   с разными `Idempotency-Key` не создадут двух строк;
+    /// * повторная проверка существующего активного платежа ВНУТРИ блокировки
+    ///   ловит гонку, когда предыдущий вызов уже успел создать платёж;
+    /// * вставка идемпотентна по `idempotency_key` (`ON CONFLICT … DO
+    ///   NOTHING` + проверка `rows_affected`) — сетевой ретрай тем же
+    ///   ключом не даёт 500 и не плодит дубль; при конфликте строка
+    ///   перечитывается и её `request_id` сверяется с ожидаемым
+    ///   (чужой → `IdempotencyConflict`, никакой выдачи чужого платежа);
+    /// * гейт: `request.status == 'pending'`, иначе `RequestNotPending`.
+    ///
+    /// Вызывающий слой ДО этого вызова обязан сделать быструю проверку
+    /// `find_active_payment_by_request` (без блокировки), чтобы не
+    /// вызывать провайдера на replay-дубле.
+    pub async fn create_payment_for_request(
+        &self,
+        request_id: Uuid,
+        amount_minor: i64,
+        idempotency_key: &str,
+        intent_id: &str,
+        commission: &CommissionParams,
+    ) -> Result<CreatePaymentOutcome, BillingError> {
+        let mut tx = self.pool.begin().await?;
+        // Блокируем строку request — сериализация параллельных созданий
+        // платежа для одного request (достаточно без частичного индекса).
+        let (req_status,): (String,) =
+            sqlx::query_as("SELECT status FROM request WHERE id = $1 FOR UPDATE")
+                .bind(request_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        if req_status != "pending" {
+            return Err(BillingError::RequestNotPending);
+        }
+        // Повторная проверка существующего активного платежа ВНУТРИ
+        // блокировки request — ловит гонку с параллельным создателем.
+        let existing = sqlx::query_as::<_, PaymentRow>(
+            "SELECT id, request_id, stripe_payment_intent_id, idempotency_key, amount_minor, \
+             currency, status, refunded_minor, failure_reason, stripe_error_code, \
+             split_snapshot, created_at, captured_at FROM payment \
+             WHERE request_id = $1 AND status NOT IN ('cancelled','refunded','failed') \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(p) = existing {
+            tx.commit().await?;
+            return Ok(CreatePaymentOutcome::Existing(p));
+        }
+        // Новая строка — идемпотентная по idempotency_key.
+        // Защита от выдачи чужого платежа (W7-A, ДЕФЕКТ 2): DO NOTHING +
+        // проверка rows_affected; при конфликте строка перечитывается и
+        // её request_id ЯВНО сверяется с ожидаемым. Чужой request_id →
+        // IdempotencyConflict (409), а не чужой payment_id.
+        let snapshot = Self::build_snapshot(amount_minor, commission)?;
+        let snapshot_json = serde_json::to_value(&snapshot)
+            .map_err(|_| BillingError::Db(sqlx::Error::Decode("snapshot serialize".into())))?;
+        let id = Uuid::now_v7();
+        let res = sqlx::query(
+            "INSERT INTO payment (id, request_id, stripe_payment_intent_id, idempotency_key, \
+             amount_minor, currency, status, split_snapshot) \
+             VALUES ($1, $2, $3, $4, $5, $6, 'intent', $7) \
+             ON CONFLICT (idempotency_key) DO NOTHING",
+        )
+        .bind(id)
+        .bind(request_id)
+        .bind(intent_id)
+        .bind(idempotency_key)
+        .bind(amount_minor)
+        .bind(&commission.currency)
+        .bind(snapshot_json)
+        .execute(&mut *tx)
+        .await?;
+        if res.rows_affected() == 1 {
+            let row = sqlx::query_as::<_, PaymentRow>(&format!(
+                "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1"
+            ))
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            return Ok(CreatePaymentOutcome::Created(row));
+        }
+        // Конфликт по ключу — перечитываем владельца и сверяем request_id.
+        let existing = sqlx::query_as::<_, PaymentRow>(&format!(
+            "SELECT {PAYMENT_COLS} FROM payment WHERE idempotency_key = $1"
+        ))
+        .bind(idempotency_key)
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        if existing.request_id != request_id {
+            // Чужой ключ: 409, никакой выдачи чужого payment_id.
+            return Err(BillingError::IdempotencyConflict);
+        }
+        // Тот же request, тот же ключ — replay существующей строки.
+        Ok(CreatePaymentOutcome::Existing(existing))
     }
 
     // ---------------------------------------------------------
@@ -430,29 +629,56 @@ impl BillingRepo {
 
     /// Начинает отмену интента (локально cancelling; отмена У
     /// ПРОВАЙДЕРА — вызывающий слой, воркер).
+    ///
+    /// Условный переход (W7-A, ДЕФЕКТ 1): `UPDATE … WHERE status IN
+    /// ('intent','processing')` — только эти два состояния стейт-машина
+    /// разрешает перевести в `cancelling` (`(Intent,BeginCancel)` и
+    /// `(Processing,BeginCancel)`). Никакого «слепого» UPDATE по id:
+    ///
+    /// * `rows_affected == 1` — переход применён, возвращается строка
+    ///   со статусом `cancelling`;
+    /// * `rows_affected == 0` — статус не подходит (captured/cancelled/
+    ///   refunded/failed) либо успел измениться в гонке: строка
+    ///   перечитывается и возвращается её **актуальное** состояние, а не
+    ///   рапортуется об отмене. Так replay-вызов `confirm` (платёж уже
+    ///   `processing` после параллельного подтверждения) НЕ отменяет
+    ///   легитимно подтверждённый платёж.
+    ///
+    /// Разрешено `processing → cancelling` осознанно: TTL-воркер может
+    /// начать отмену уже подтверждённого, но ещё не захваченного платежа
+    /// (гонка cancel↔capture закрывается вебхуком: `cancelling → captured`).
     pub async fn begin_cancel(&self, payment_id: Uuid) -> Result<PaymentRow, BillingError> {
-        let row = self
-            .find_payment(payment_id)
-            .await?
-            .ok_or(BillingError::NotFound)?;
-        let current = row
-            .payment_status()
-            .ok_or(BillingError::Db(sqlx::Error::Decode(
-                "unknown payment status".into(),
-            )))?;
-        let _ = current
-            .apply(PaymentAction::BeginCancel)
-            .map_err(|_| BillingError::InvalidTransition)?;
-        let updated = sqlx::query_as::<_, PaymentRow>(
-            "UPDATE payment SET status = 'cancelling' WHERE id = $1 \
-             RETURNING id, request_id, stripe_payment_intent_id, idempotency_key, amount_minor, \
-             currency, status, refunded_minor, failure_reason, stripe_error_code, \
-             split_snapshot, created_at, captured_at",
-        )
+        let mut tx = self.pool.begin().await?;
+        // Условный UPDATE c RETURNING: WHERE-условие — единственный
+        // авторитет перехода (стейт-машина encoded в IN
+        // ('intent','processing')); никакой слепой перезаписи
+        // подтверждённого/терминального платежа. `fetch_optional` возвращает
+        // None ровно когда rows_affected == 0 (статус не подошёл).
+        let updated = sqlx::query_as::<_, PaymentRow>(&format!(
+            "UPDATE payment SET status = 'cancelling' \
+             WHERE id = $1 AND status IN ('intent','processing') \
+             RETURNING {PAYMENT_COLS}"
+        ))
         .bind(payment_id)
-        .fetch_one(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
-        Ok(updated)
+        let row = match updated {
+            // Переход применился → статус теперь cancelling.
+            Some(r) => r,
+            // 0 строк: статус не подошёл (captured/cancelled/refunded/
+            // failed) либо успел измениться в гонке. Перечитываем
+            // АКТУАЛЬНОЕ состояние и возвращаем его — не рапортуем об
+            // отмене и не возвращаем ошибку. Это защита подтверждённого
+            // платежа от параллельного replay confirm.
+            None => sqlx::query_as::<_, PaymentRow>(&format!(
+                "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1"
+            ))
+            .bind(payment_id)
+            .fetch_one(&mut *tx)
+            .await?,
+        };
+        tx.commit().await?;
+        Ok(row)
     }
 
     /// Инвариант-чекер (для тестов и ночной джобы F6):

@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod identity;
 pub mod jobs;
 pub mod migrations;
+pub mod outbox;
 pub mod payouts;
 pub mod requests;
 pub mod sessions;

@@ -3,13 +3,13 @@
 //! Правило деградации: если сервис не настроен (нет переменной) или недоступен,
 //! поднимается локальный in-memory/noop-аналог и в лог пишется предупреждение.
 //! Прод-путь включается только явной конфигурацией — приложение остаётся
-//! работоспособным без Redis, NATS, Stripe и push-ключей.
+//! работоспособным без Redis, NATS и Stripe. Push-доставка вынесена в
+//! воркер (`dropit-workers`) и здесь не собирается.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use dropit_infra_catalog::CatalogSearch;
-use dropit_infra_push::PushSender;
 use dropit_infra_redis::{EventBus, TicketStore};
 use dropit_infra_stripe::StripeApi;
 
@@ -68,20 +68,4 @@ pub(crate) fn stripe() -> Arc<dyn StripeApi> {
 /// Каталог треков: внешний HTTP-каталог (iTunes/Deezer).
 pub(crate) fn catalog() -> Arc<dyn CatalogSearch> {
     Arc::new(dropit_infra_catalog::HttpCatalog::new(Duration::from_secs(8)))
-}
-
-/// Push-транспорт: FCM/APNs при наличии ключей, иначе `NoopPush`.
-pub(crate) fn push() -> Arc<dyn PushSender> {
-    match dropit_infra_push::from_env() {
-        Some(config) => match dropit_infra_push::RoutingPush::from_config(&config) {
-            Ok(Some(sender)) => {
-                tracing::info!("push: routing (fcm/apns)");
-                return Arc::new(sender);
-            }
-            Ok(None) => tracing::warn!("push: ни один транспорт не настроен"),
-            Err(e) => tracing::warn!(error = %e, "push: конфигурация невалидна"),
-        },
-        None => tracing::info!("push: noop (ключи не заданы)"),
-    }
-    Arc::new(dropit_infra_push::NoopPush)
 }

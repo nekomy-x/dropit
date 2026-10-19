@@ -292,11 +292,12 @@ async fn e2e_request_flow() {
     assert_eq!(body["expires_in"], 30);
     let ticket = body["ticket"].as_str().unwrap().to_string();
 
-    // Первый consume — ок; второй — уже нет (одноразовый).
-    let consumed = crate::requests_routes::consume_ws_ticket(&ticket);
+    // Первый consume — ок; второй — уже нет (одноразовый, через единый
+    // стор ApiEnv.tickets — тот же путь, что и у GET /v1/ws).
+    let consumed = crate::ws::consume_ticket(&env, &ticket).await;
     assert!(consumed.is_some(), "first consume ok");
     assert_eq!(consumed.unwrap(), guest_id);
-    let reused = crate::requests_routes::consume_ws_ticket(&ticket);
+    let reused = crate::ws::consume_ticket(&env, &ticket).await;
     assert!(reused.is_none(), "ticket is single-use");
 
     // Без JWT → 401.
@@ -734,4 +735,177 @@ async fn e2e_guest_upgrade() {
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN, "dj role: {body}");
     assert_eq!(body["code"], "forbidden");
+}
+
+// ============================================================
+// W5-E: транзакционная идемпотентность создания заявки
+// ============================================================
+
+/// Два параллельных и один повторный POST /v1/requests с одним
+/// Idempotency-Key: в БД ровно одна заявка, один outbox-эвент, все
+/// ответы ссылаются на один request_id (replay, не дубль).
+///
+/// Регрессия на дефект W5-E: раньше `save_idempotency_response`
+/// вызывался ПОСЛЕ коммита транзакции создания — два параллельных POST
+/// с одним ключом видели «ключа нет», оба коммитили разные request_id,
+/// затем `ON CONFLICT DO NOTHING` оставлял один ключ → в БД две заявки
+/// на ключ. Теперь идемпотентный ответ пишется ВНУТРИ транзакции:
+/// `UNIQUE(key)` откатывает всю вставку проигравшего, и он возвращает
+/// replay.
+#[tokio::test]
+async fn e2e_parallel_idempotency_no_duplicate() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e W5-E пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let requests = RequestRepo::new(repo.pool());
+    let env = app_env(
+        Some(repo.clone()),
+        Some(sessions.clone()),
+        Some(requests.clone()),
+    )
+    .await;
+    let pool = repo.pool();
+
+    // --- Фикстуры: клуб, DJ, сессия (active), грант, трек ---------
+    let club_id = uuid::Uuid::now_v7();
+    let dj_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1,'W5E Club','w5e-club','w5e@club.test','x')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name) \
+         VALUES ($1,$2,'w5e@dj.test','x','DJ W5E')",
+    )
+    .bind(dj_id)
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let session = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    sessions
+        .apply_transition(session.id, dropit_domain::SessionTransition::Open)
+        .await
+        .unwrap();
+
+    let guest_id = uuid::Uuid::now_v7();
+    repo.create_guest_device(guest_id, "ios", None)
+        .await
+        .unwrap();
+    sessions
+        .grant_session_guest(session.id, guest_id)
+        .await
+        .unwrap();
+
+    let track_id = insert_track(&pool, "itunes", "w5e-tr", "Vivir Mi Vida", "Marc Anthony").await;
+    let idem_key = "w5e-parallel-key";
+
+    // --- 1. Два ПАРАЛЛЕЛЬНЫХ POST с одним Idempotency-Key ----------
+    // tokio::join! опрашивает оба futures; на current-thread-рантайме
+    // оба sqlx-запроса уходят в пул и выполняются конкурентно против
+    // Postgres. Независимо от того, успеют ли они наложиться (гонка) или
+    // сериализуются — инвариант один: ровно одна заявка.
+    let token_str = guest_id.to_string();
+    let (r1, r2) = tokio::join!(
+        call_with_key(
+            &env,
+            "POST",
+            "/v1/requests",
+            Some(json!({ "track_id": track_id })),
+            Some(&token_str),
+            idem_key,
+        ),
+        call_with_key(
+            &env,
+            "POST",
+            "/v1/requests",
+            Some(json!({ "track_id": track_id })),
+            Some(&token_str),
+            idem_key,
+        ),
+    );
+    let (s1, b1) = r1;
+    let (s2, b2) = r2;
+    assert_eq!(s1, StatusCode::CREATED, "parallel #1: {b1}");
+    assert_eq!(s2, StatusCode::CREATED, "parallel #2: {b2}");
+    let id1 = b1["request_id"].as_str().expect("request_id #1");
+    let id2 = b2["request_id"].as_str().expect("request_id #2");
+    assert_eq!(id1, id2, "both responses must reference the same request_id");
+
+    // --- 2. В БД ровно одна заявка этого гостя ---------------------
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+        .bind(guest_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cnt, 1, "parallel POSTs must not create a second request");
+
+    // --- 3. Один идемпотентный ответ на ключ -----------------------
+    let (idem_cnt,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM idempotency_response WHERE key = $1")
+            .bind(idem_key)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(idem_cnt, 1, "exactly one idempotency_response per key");
+
+    // --- 4. Ровно одно outbox-событие request.created на заявку ----
+    // (replay проигравшего не доходит до INSERT outbox — конфликт
+    // ключа откатывает транзакцию до вставки события).
+    let request_id = uuid::Uuid::parse_str(id1).unwrap();
+    let (ob_cnt,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM outbox WHERE aggregate_type = 'request' \
+         AND aggregate_id = $1 AND event_type = 'request.created'",
+    )
+    .bind(request_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ob_cnt, 1, "exactly one request.created outbox event per request");
+
+    // --- 5. Последовательный повтор → тот же id, без дубля ---------
+    let (s3, b3) = call_with_key(
+        &env,
+        "POST",
+        "/v1/requests",
+        Some(json!({ "track_id": track_id })),
+        Some(&guest_id.to_string()),
+        idem_key,
+    )
+    .await;
+    assert_eq!(s3, StatusCode::CREATED, "sequential replay: {b3}");
+    assert_eq!(
+        b3["request_id"].as_str().unwrap(),
+        id1,
+        "replay returns same request_id"
+    );
+
+    let (cnt2,): (i64,) = sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+        .bind(guest_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cnt2, 1, "sequential replay must not create a second request");
+
+    let (ob_cnt2,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM outbox WHERE aggregate_type = 'request' \
+         AND aggregate_id = $1 AND event_type = 'request.created'",
+    )
+    .bind(request_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ob_cnt2, 1, "replay must not duplicate outbox event");
 }

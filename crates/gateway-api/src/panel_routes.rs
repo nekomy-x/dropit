@@ -955,16 +955,39 @@ async fn admin_club_patch(
     }
 }
 
+/// Допустимые значения `payment.status` — зеркало перечисления
+/// `PaymentStatus` (`infra-db::billing`). Валидация фильтра `status` в
+/// [`admin_payments`]: значение вне списка → `400 invalid_status`, чтобы
+/// мусор не доходил до SQL и не маскировал опечатку как «нет строк».
+const PAYMENT_STATUSES: &[&str] = &[
+    "intent",
+    "processing",
+    "captured",
+    "partially_refunded",
+    "refunded",
+    "failed",
+    "cancelling",
+    "cancelled",
+];
+
 #[derive(Deserialize)]
 pub struct PaymentsParams {
-    #[allow(dead_code)]
+    /// Фильтр по статусу платежа; валидируется по [`PAYMENT_STATUSES`].
     pub status: Option<String>,
-    #[allow(dead_code)]
+    /// Фильтр по клубу (через `payment → request → session → club`):
+    /// у `payment` нет колонки `club_id`, поэтому изоляция клуба — JOIN.
     pub club_id: Option<Uuid>,
     pub limit: Option<i64>,
 }
 
 /// Платежи (фильтры: статус, клуб) для админа.
+///
+/// Без параметров — прежнее поведение: последние платежи (`ORDER BY
+/// created_at DESC`, `LIMIT`, дефолт 100, кламп 1..500). `status` и
+/// `club_id` добавляются как `WHERE`-предикаты к тому же `ORDER BY`/`LIMIT`
+/// (keyset/лимит-пагинация сохранена). `club_id` фильтрует через JOIN
+/// `request → session` (INNER JOIN безопасен: FK-инвариант гарантирует,
+/// что у каждого payment есть request и session — строк не теряется).
 async fn admin_payments(
     ctx: AuthContext,
     State(state): State<ApiEnv>,
@@ -976,15 +999,32 @@ async fn admin_payments(
     let Ok(pool) = pool_of(&state) else {
         return pool_of(&state).unwrap_err();
     };
+    // Валидация статуса: мусор → 400 (до SQL). None — фильтр выключен.
+    if let Some(status) = &params.status {
+        if !PAYMENT_STATUSES.contains(&status.as_str()) {
+            return crate::routes::api_error_with_code(
+                StatusCode::BAD_REQUEST,
+                "invalid_status",
+                "The request failed validation.",
+                "unknown payment status",
+            );
+        }
+    }
     let rows = sqlx::query_as::<_, (Uuid, Uuid, i64, String, Option<String>, chrono::DateTime<chrono::Utc>)>(
             "SELECT p.id, p.request_id, p.amount_minor, p.status, p.stripe_payment_intent_id, p.created_at \
-             FROM payment p ORDER BY p.created_at DESC LIMIT $1",
+             FROM payment p \
+             JOIN request r ON r.id = p.request_id \
+             JOIN session s ON s.id = r.session_id \
+             WHERE ($2::text IS NULL OR p.status = $2::text) \
+               AND ($3::uuid IS NULL OR s.club_id = $3::uuid) \
+             ORDER BY p.created_at DESC LIMIT $1",
         )
         .bind(params.limit.unwrap_or(100).clamp(1, 500))
+        .bind(params.status.as_deref())
+        .bind(params.club_id)
         .fetch_all(&pool)
         .await
         .map_err(|_| ());
-    let _ = params;
     let Ok(rows) = rows else {
         return api_error(ApiError::Internal, "db error");
     };

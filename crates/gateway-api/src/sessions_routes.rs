@@ -81,6 +81,26 @@ pub struct QrGenerateResponse {
     pub expires_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Ответ `qr/activate` и `qr/deactivate`.
+///
+/// Форма ответа совпадает с прежним контрактом (`session_id` + `qr_active`),
+/// но теперь `qr_active` правдиво отражает состояние БД. При первичной
+/// активации (когда у сессии ещё нет рабочего QR-токена) дополнительно
+/// возвращаются `qr_token` (plain, для показа в QR-картинке — как в
+/// `/qr/generate`, показывается один раз) и `expires_at`; при
+/// идемпотентном повторном activate, а также при deactivate, эти поля
+/// опускаются (`skip_serializing_if`), чтобы не ломать существующих
+/// клиентов, рассчитывающих только на `session_id`/`qr_active`.
+#[derive(Serialize)]
+pub struct QrSetActiveResponse {
+    pub session_id: Uuid,
+    pub qr_active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qr_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 // ============================================================
 // DTO: GET /v1/sessions/current
 // ============================================================
@@ -489,11 +509,34 @@ async fn qr_deactivate(
     qr_set_active(ctx, state, session_id, false).await
 }
 
+/// Включает (`active=true`) или выключает (`active=false`) приём гостей
+/// по QR-токену сессии. Реальное состояние хранится в `qr_token.active`
+/// (частичный уникальный индекс гарантирует максимум один активный
+/// токен на сессию).
+///
+/// **Activate (идемпотентный):** если у сессии уже есть рабочий
+/// (активный, не истёкший) QR-токен — отвечаем `200 { qr_active: true }`
+/// **без** повторного выпуска (тот же токен остаётся в БД, дублирования
+/// нет). Если рабочего токена нет — выпускается новый 256-бит токен
+/// (хеш sha256 в БД, plain показывается клубу один раз), как в
+/// `/qr/generate`; ответ дополняется `qr_token`/`expires_at`.
+///
+/// **Deactivate (идемпотентный):** все активные токены сессии
+/// помечаются `active=FALSE` (`deactivate_qr`). Уже выданные гранты
+/// гостей (`session_guest`) **не отзываются** — вошедший по QR гость
+/// сохраняет доступ до планового закрытия сессии; блокируется только
+/// **новый** вход по этому QR (`find_active_qr` → `QrInvalid` → 404).
+/// Повторный deactivate при отсутствии активного токена — `200`,
+/// изменений нет.
+///
+/// RBAC: только владелец клуба (`ctx.role()==Club` и
+/// `club_id == ctx.subject_id()`); чужая сессия → `404` (как и
+/// `/qr/generate`/`close`), чужая роль → `403`, без токена → `401`.
 async fn qr_set_active(
     ctx: AuthContext,
     state: ApiEnv,
     session_id: Uuid,
-    _active: bool,
+    active: bool,
 ) -> Response {
     if ctx.role() != Role::Club {
         return auth_error_response(ApiError::Forbidden);
@@ -507,19 +550,78 @@ async fn qr_set_active(
             )
         }
     };
-    // Деактивация = выпуск нового НЕ активного пути в F2 упрощён:
-    // полный activate/deactivate набор — при интеграции панелей F7;
-    // контракт уже зафиксирован openapi.yaml.
+    // Владение сессией проверяем ДО изменения состояния (404 на чужую).
     let session = match sessions.find_session(session_id).await {
         Ok(Some(s)) if s.club_id == ctx.subject_id() => s,
         Ok(_) => return api_error(ApiError::NotFound, "session not found"),
         Err(_) => return api_error(ApiError::Internal, "db error"),
     };
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({ "session_id": session.id, "qr_active": true })),
-    )
-        .into_response()
+
+    if active {
+        // Идемпотентность: рабочий токен уже есть — не выпускаем второй.
+        match sessions.active_qr_for_session(session.id).await {
+            Ok(Some(_)) => {
+                return (
+                    StatusCode::OK,
+                    Json(QrSetActiveResponse {
+                        session_id: session.id,
+                        qr_active: true,
+                        qr_token: None,
+                        expires_at: None,
+                    }),
+                )
+                    .into_response();
+            }
+            Ok(None) => {} // нет рабочего токена — выпустим новый
+            Err(_) => return api_error(ApiError::Internal, "db error"),
+        }
+
+        // Выпуск нового токена: та же логика, что в qr_generate
+        // (256 бит → hex 64, sha256-хеш в БД, expires_at = плановое
+        // авто-закрытие в зоне клуба).
+        let tz: chrono_tz::Tz = match session.timezone.parse() {
+            Ok(t) => t,
+            Err(_) => return api_error(ApiError::Internal, "bad timezone stored"),
+        };
+        let expires_at = dropit_domain::qr::next_close_at(&tz, chrono::Utc::now());
+
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        let plain = hex::encode(bytes);
+        let token_hash = hash_qr(&plain);
+
+        match sessions
+            .issue_qr_token(session.id, &token_hash, expires_at)
+            .await
+        {
+            Ok(row) => (
+                StatusCode::OK,
+                Json(QrSetActiveResponse {
+                    session_id: row.session_id,
+                    qr_active: true,
+                    qr_token: Some(plain),
+                    expires_at: Some(row.expires_at),
+                }),
+            )
+                .into_response(),
+            Err(_) => api_error(ApiError::Internal, "db error"),
+        }
+    } else {
+        // Deactivate: гранты гостей НЕ отзываются (см. deactivate_qr rustdoc).
+        match sessions.deactivate_qr(session.id).await {
+            Ok(()) => (
+                StatusCode::OK,
+                Json(QrSetActiveResponse {
+                    session_id: session.id,
+                    qr_active: false,
+                    qr_token: None,
+                    expires_at: None,
+                }),
+            )
+                .into_response(),
+            Err(_) => api_error(ApiError::Internal, "db error"),
+        }
+    }
 }
 
 async fn close_session(

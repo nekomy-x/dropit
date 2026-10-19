@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dropit-common = { path = "../common" }
 dropit-domain = { path = "../domain" }
+dropit-infra-nats = { path = "../infra-nats" }
 tokio.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
@@ -14,3 +15,5 @@ chrono-tz.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+async-trait.workspace = true
+tracing.workspace = true

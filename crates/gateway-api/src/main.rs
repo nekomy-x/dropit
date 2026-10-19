@@ -104,7 +104,6 @@ async fn main() -> anyhow::Result<()> {
         bus: Some(infra::event_bus().await),
         stripe: Some(infra::stripe()),
         catalog: Some(infra::catalog()),
-        push: Some(infra::push()),
     };
     let app = routes::router(env);
 

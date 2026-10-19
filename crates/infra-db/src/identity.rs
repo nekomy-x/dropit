@@ -302,4 +302,64 @@ impl IdentityRepo {
         .await?;
         Ok(())
     }
+
+    // ---------------------------------------------------------
+    // Вход клуба по master-токену (W5-C): поиск по хешу + лимит 10/15 мин/IP.
+    // Переиспользуется таблица login_attempt (subject_type='club_master'),
+    // отдельная миграция не нужна: email NOT NULL заполняется сентиinel-значением.
+    // ---------------------------------------------------------
+
+    /// Ищет клуб по хешу master-токена. Возвращает `(id, status, stored_hash)` —
+    /// хеш нужен вызывающему для сравнения в постоянном времени (defense-in-depth:
+    /// БД уже фильтрует по хешу, но явное ct-сравнение защищает от нюансов
+    /// сравнения строк в Postgres и удовлетворяет контракту безопасности).
+    pub async fn find_club_by_master_token_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<(Uuid, String, String)>, super::IdentityError> {
+        let row = sqlx::query_as::<_, (Uuid, String, String)>(
+            "SELECT id, status, qr_master_token_hash \
+             FROM club WHERE qr_master_token_hash = $1 LIMIT 1",
+        )
+        .bind(hash)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Считает неудачные попытки входа по master-токену с одного IP за 15 мин
+    /// (лимит 10). Использует `subject_type='club_master'` в `login_attempt`.
+    pub async fn count_failed_master_logins(
+        &self,
+        ip: &str,
+    ) -> Result<i64, super::IdentityError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM login_attempt \
+             WHERE subject_type = 'club_master' AND ip = $1::inet \
+             AND NOT ok AND at > now() - interval '15 minutes'",
+        )
+        .bind(ip)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count)
+    }
+
+    /// Фиксирует попытку входа по master-токену (успех/неудача) для лимита и
+    /// аудита. `email` — сentiinel `'master'` (колонка NOT NULL; реальный
+    /// идентификатор клуба — `qr_master_token_hash`, а лимит считается по IP).
+    pub async fn record_master_login_attempt(
+        &self,
+        ip: Option<&str>,
+        ok: bool,
+    ) -> Result<(), super::IdentityError> {
+        sqlx::query(
+            "INSERT INTO login_attempt (subject_type, email, ip, ok) \
+             VALUES ('club_master', 'master', $1::inet, $2)",
+        )
+        .bind(ip)
+        .bind(ok)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }

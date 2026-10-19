@@ -28,7 +28,6 @@ dropit-infra-db = { path = "../infra-db" }
 dropit-infra-redis = { path = "../infra-redis" }
 dropit-infra-stripe = { path = "../infra-stripe" }
 dropit-infra-catalog = { path = "../infra-catalog" }
-dropit-infra-push = { path = "../infra-push" }
 sqlx.workspace = true
 argon2.workspace = true
 jsonwebtoken.workspace = true
@@ -36,3 +35,9 @@ totp-rs.workspace = true
 sha2.workspace = true
 hex.workspace = true
 rand.workspace = true
+
+[dev-dependencies]
+# Контрактный тест openapi_contract читает docs/openapi.yaml как текст и
+# разбираёт его в serde_json::Value. serde_yaml — только для тестов, в
+# рантайме бинарника не участвует (контракт не ходит в БД/сеть).
+serde_yaml = "0.9"

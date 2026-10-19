@@ -3,8 +3,75 @@
 Гость сканирует QR сессии → платит за запрос трека → DJ решает, играть ли.
 Клуб и DJ получают доли; платформа — комиссию.
 
-**Состояние: Test Mode (мок-Stripe, без внешних интеграций).**
-Полная документация — `IMPLEMENTATION_STATUS.md`; план — `tehnicheskaya-karta.md`.
+**Состояние: бэкенд доведён до плана.** Внешние интеграции (Stripe, push,
+каталог, NATS, Redis) написаны и включаются env-переменными; без них —
+mock/noop (Test Mode). Полный статус — `IMPLEMENTATION_STATUS.md`;
+план доводки — `docs/BACKEND_COMPLETION_PLAN.md`; контракт —
+`docs/openapi.yaml` (0.7.0); техкарта — `tehnicheskaya-karta.md`.
+
+---
+
+## Бэкенд
+
+Rust workspace: `common`, `domain`, `infra-db`, `infra-redis`, `infra-nats`,
+`infra-stripe`, `infra-catalog`, `infra-push`, `workers` (бинарник
+`dropit-workers`), `gateway-api` (бинарник `dropit-api`, axum 0.7). 65
+HTTP-путей, 10 миграций, 403 теста.
+
+### Запуск
+
+Локальный стенд (Docker, приближён к проду — Postgres, Redis, NATS JetStream,
+API, workers):
+
+```sh
+docker compose -f deploy/docker-compose.yml up -d
+# воркер применяет миграции при старте; healthcheck API — http://localhost:8080/healthz
+```
+
+На хосте (dev):
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+export CARGO_HOME="$(pwd)/.cargo-home"     # без неё cargo падает (Operation not permitted)
+export DATABASE_URL="postgres://dropit:dropit_local@localhost:5432/dropit"
+export REDIS_URL="redis://localhost:6379"
+export NATS_URL="nats://localhost:4222"
+
+cargo run -p dropit-gateway-api --bin seed_demo     # демо-данные (клуб/DJ/админ+TOTP)
+cargo run -p dropit-gateway-api --bin dropit-api    # API: 0.0.0.0:8080
+cargo run -p dropit-workers -- run                  # супервизор фоновых задач
+cargo run -p dropit-workers -- --once outbox        # один прогон задачи (CI/крон)
+```
+
+### Тесты
+
+```sh
+# unit-тесты крейта (без БД):
+cargo test -p dropit-infra-stripe
+
+# БД-зависимые e2e — ТОЛЬКО через лок-скрипт (общая БД, параллельные агенты):
+./scripts/db-test.sh cargo test -p dropit-gateway-api e2e_payments -- --test-threads=1
+
+cargo build --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
+### Переменные окружения
+
+| Переменная | Дефолт / деградация |
+|---|---|
+| `DATABASE_URL` | нет → data-роуты 503, БД-задачи skip |
+| `REDIS_URL` | нет → WS-тикеты и pub/sub in-memory (один узел) |
+| `NATS_URL` | нет → NoopBus, outbox-реле skip |
+| `STRIPE_API_KEY` / `STRIPE_WEBHOOK_SECRET` | пусто → MockStripe |
+| `FCM_*` / `APNS_*` | нет → NoopPush |
+| `TRUST_PROXY` | `1` (прод за nginx) — доверять `X-Forwarded-For`/`X-Real-IP` для IP-лимитов; `0` — игнорировать |
+| `DROPIT_JWT_SECRET`, `DROPIT_TOTP_KEY`, `DROPIT_BIND`, `DROPIT_RUN_MIGRATIONS`, `RUST_LOG` | см. `deploy/.env.example` |
+
+Подробнее: `IMPLEMENTATION_STATUS.md` (раздел «Переменные окружения» и
+«Внешние сервисы и деградация»), `docs/BACKEND_COMPLETION_PLAN.md`,
+`docs/openapi.yaml`.
 
 ---
 
@@ -101,12 +168,13 @@ cd apps/web-admin && npm install && npm run dev   # панель админа
 | Панели клуба/админа (React) | ✅ live |
 | Приложения гость/DJ (Flutter) | ✅ каркасы |
 
-**80 тестов / clippy 0 / OpenAPI 0.7.0.** Прод-внешние интеграции
-(Stripe Connect, музыкальный каталог) — ждут решений владельца
-(Q11–Q15, B5): см. `IMPLEMENTATION_STATUS.md`.
+**403 теста / clippy 0 / OpenAPI 0.7.0.** Прод-внешние интеграции
+(Stripe Connect live, лицензии каталога, push-ключи) — ждут решений
+владельца (Q11–Q15, B5): см. `IMPLEMENTATION_STATUS.md`.
 
-## Не прод
+## Не прод (по умолчанию)
 
-- Stripe — мок (реальные деньги НЕ проводятся);
-- каталог — 5 демо-треков (лицензии B5);
+- Stripe — MockStripe (live за `STRIPE_API_KEY`, но схема Connect открыта — реальные деньги НЕ проводятся);
+- каталог — `HttpCatalog` пишет в iTunes/Deezer, но live-использование в прод ждёт лицензии B5; в e2e — `MockCatalog`;
+- NATS/Redis/push — написаны, без env-переменных работают на noop/in-memory;
 - секреты — dev-значения по умолчанию.

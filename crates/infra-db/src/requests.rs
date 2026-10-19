@@ -92,7 +92,8 @@ pub struct QueueItem {
 
 #[derive(Debug, sqlx::FromRow)]
 struct ReplayRow {
-    request_id: Uuid,
+    /// Владелец ключа (guest_device_id) — для проверки «чужой гость».
+    guest_device_id: Uuid,
     response: serde_json::Value,
 }
 
@@ -133,15 +134,21 @@ impl RequestRepo {
     // Создание запроса (гейт + идемпотентность + outbox)
     // ---------------------------------------------------------
 
-    /// Создаёт запрос. Атомарно:
-    /// (1) проверка session.status == active (FOR SHARE — гонка с паузой);
-    /// (2) проверка живого гранта session_guest;
-    /// (3) INSERT request;
-    /// (4) INSERT idempotency_response (UNIQUE — дубль ключа отловит
-    ///     вызывающий ДО второго TX);
-    /// (5) outbox(request.created).
-    /// Возвращает Ok(Ok(request)) при создании либо Ok(Err(replay))
-    /// — если ключ уже использован этим гостем (дубль POST).
+    /// Создаёт запрос атомарно с идемпотентным ответом и outbox-событием.
+    ///
+    /// Все четыре записи — гейты (`FOR SHARE`), `INSERT request`,
+    /// `INSERT idempotency_response` и `INSERT outbox` — выполняются в
+    /// **одной** транзакции и коммитятся вместе. Идемпотентный ответ
+    /// сохраняется до коммита: `UNIQUE(key)` — единственный арбитр при
+    /// гонке двух параллельных POST с одним `Idempotency-Key`.
+    ///
+    /// Поведение при дубле ключа:
+    ///   * тот же гость — `Ok(Err(replay))` (сохранённый ответ первого
+    ///     POST); вставка заявки откатывается, outbox не дублируется;
+    ///   * чужой гость — `Err(IdempotencyConflict)` (→ 409).
+    ///
+    /// При любой ошибке (нет гранта, сессия не active, сбой БД) ни одна
+    /// из записей не остаётся «полузаписанной»: транзакция откатывается.
     pub async fn create_request(
         &self,
         session_id: Uuid,
@@ -152,27 +159,21 @@ impl RequestRepo {
     ) -> Result<Result<RequestRow, serde_json::Value>, RequestError> {
         let mut tx = self.pool.begin().await?;
 
-        // Replay: тот же ключ + тот же гость → сохранённый ответ.
+        // Быстрый путь replay: ключ уже зафиксирован ранее (коммитнут до
+        // старта этой транзакции). Возвращает сохранённый ответ без
+        // захвата блокировок сессии — корректно даже если сессия уже
+        // закрыта/на паузе (идемпотентность важнее текущего состояния).
         if let Some(replay) = sqlx::query_as::<_, ReplayRow>(
-            "SELECT request_id, response FROM idempotency_response WHERE key = $1",
+            "SELECT guest_device_id, response FROM idempotency_response WHERE key = $1",
         )
         .bind(idempotency_key)
         .fetch_optional(&mut *tx)
         .await?
         {
-            if replay.request_id != Uuid::nil() {
-                // Тот же ключ, тот же гость? Чужой гость с тем же ключом — конфликт.
-                let (owner,): (Uuid,) = sqlx::query_as(
-                    "SELECT guest_device_id FROM idempotency_response WHERE key = $1",
-                )
-                .bind(idempotency_key)
-                .fetch_one(&mut *tx)
-                .await?;
-                if owner != guest_device_id {
-                    return Err(RequestError::IdempotencyConflict);
-                }
-                return Ok(Err(replay.response));
+            if replay.guest_device_id != guest_device_id {
+                return Err(RequestError::IdempotencyConflict);
             }
+            return Ok(Err(replay.response));
         }
 
         // Гейт 1: сессия active. FOR SHARE не даёт параллельной паузе
@@ -199,7 +200,7 @@ impl RequestRepo {
             return Err(RequestError::NoGrant);
         }
 
-        // INSERT запроса (F4: цена 0 — деньги в F5).
+        // INSERT заявки (F4: цена 0 — деньги в F5).
         let row = sqlx::query_as::<_, RequestRow>(
             "INSERT INTO request (id, session_id, guest_device_id, track_cache_id, style) \
              VALUES ($1, $2, $3, $4, $5) \
@@ -214,7 +215,62 @@ impl RequestRepo {
         .fetch_one(&mut *tx)
         .await?;
 
-        // Outbox-событие request.created.
+        // Идемпотентный ответ формируем из строки и фиксируем ВНУТРИ
+        // транзакции. ON CONFLICT (key) DO NOTHING: при гонке двух POST
+        // с одним ключом второй TX блокируется до коммита первого —
+        //   * первый закоммитил ключ → второй получает 0 строк, откатывает
+        //     свою заявку и возвращает сохранённый ответ (replay);
+        //   * первый откатился → второй вставляет ключ и создаёт заявку.
+        // Заявка уже вставлена (FK request_id), но будет откатана вместе
+        // с транзакцией при конфликте — никакого «полузаписанного» состояния.
+        let response_body = serde_json::json!({
+            "request_id": row.id,
+            "status": row.status,
+            "session_id": row.session_id,
+            "queue_position": null,
+        });
+        let inserted = sqlx::query(
+            "INSERT INTO idempotency_response (key, guest_device_id, request_id, response) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (key) DO NOTHING",
+        )
+        .bind(idempotency_key)
+        .bind(guest_device_id)
+        .bind(row.id)
+        .bind(&response_body)
+        .execute(&mut *tx)
+        .await?;
+
+        if inserted.rows_affected() == 0 {
+            // Конфликт ключа: параллельный POST (или строка, коммитнутая
+            // уже после нашего быстрого пути) владеет ключом. Откатываем
+            // нашу вставку заявки, затем читаем зафиксированный ответ
+            // владельца из пула (свежий READ COMMITTED-снапшот видит
+            // коммитнутую строку).
+            tx.rollback().await?;
+            let owner = sqlx::query_as::<_, ReplayRow>(
+                "SELECT guest_device_id, response FROM idempotency_response WHERE key = $1",
+            )
+            .bind(idempotency_key)
+            .fetch_optional(&self.pool)
+            .await?;
+            return match owner {
+                Some(r) if r.guest_device_id == guest_device_id => Ok(Err(r.response)),
+                Some(_) => Err(RequestError::IdempotencyConflict),
+                // Невозможно при отсутствии DELETE idempotency_response:
+                // ON CONFLICT DO NOTHING = 0 строк означает, что
+                // коммитнутая строка-владелец существует. Если будущий
+                // TTL-воркер удалит её в окне между конфликтом и чтением —
+                // вернём 500; повторный POST создаст заявку заново
+                // (ключ снова свободен).
+                None => Err(RequestError::Db(sqlx::Error::RowNotFound)),
+            };
+        }
+
+        // Outbox-событие request.created — в той же транзакции, что и
+        // заявка + идемпотентный ответ: либо все три коммитятся, либо ни
+        // один (атомарность transactional outbox, ADR-002). При replay
+        // (конфликт ключа) сюда не доходим — outbox не дублируется.
         sqlx::query(
             "INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload) \
              VALUES ($1, 'request', $2, 'request.created', $3)",
@@ -227,29 +283,6 @@ impl RequestRepo {
 
         tx.commit().await?;
         Ok(Ok(row))
-    }
-
-    /// Сохраняет replay-ответ первого POST (вызывается создателем
-    /// после успешного TX).
-    pub async fn save_idempotency_response(
-        &self,
-        key: &str,
-        guest_device_id: Uuid,
-        request_id: Uuid,
-        response: &serde_json::Value,
-    ) -> Result<(), RequestError> {
-        sqlx::query(
-            "INSERT INTO idempotency_response (key, guest_device_id, request_id, response) \
-             VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (key) DO NOTHING",
-        )
-        .bind(key)
-        .bind(guest_device_id)
-        .bind(request_id)
-        .bind(response)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
     }
 
     // ---------------------------------------------------------
@@ -629,11 +662,241 @@ fn status_str(s: RequestStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sessions::SessionRepo;
+    use crate::IdentityRepo;
 
     #[test]
     fn status_strings_roundtrip() {
         assert_eq!(status_str(RequestStatus::Pending), "pending");
         assert_eq!(status_str(RequestStatus::Accepted), "accepted");
         assert_eq!(status_str(RequestStatus::Played), "played");
+    }
+
+    /// Подключение к общей тестовой Postgres (миграции применены).
+    /// При недоступной БД тест пропускается.
+    async fn test_pool() -> Option<PgPool> {
+        let url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://dropit:dropit_local@localhost:5432/dropit".into());
+        crate::connect(&url).await.ok()
+    }
+
+    /// Фикстуры: клуб, DJ, active-сессия, грант гостя, трек в кэше.
+    /// Все идентификаторы — свежие UUIDv7, поэтому тест изолирован от
+    /// данных других прогонов (UNIQUE-колонки тоже не конфликтуют).
+    async fn fixtures(pool: &PgPool) -> (Uuid, Uuid, Uuid, Uuid, Uuid) {
+        let sessions = SessionRepo::new(pool.clone());
+        let identity = IdentityRepo::new(pool.clone());
+        let tag = Uuid::now_v7();
+        let club_id = Uuid::now_v7();
+        let dj_id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO club (id, name, slug, email, password_hash) \
+             VALUES ($1, 'W5E', $2, $3, 'x')",
+        )
+        .bind(club_id)
+        .bind(format!("w5e-{}", tag))
+        .bind(format!("w5e-{}@club.test", tag))
+        .execute(pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO dj (id, club_id, email, password_hash, display_name) \
+             VALUES ($1, $2, $3, 'x', 'DJ W5E')",
+        )
+        .bind(dj_id)
+        .bind(club_id)
+        .bind(format!("w5e-{}@dj.test", tag))
+        .execute(pool)
+        .await
+        .unwrap();
+        let session = sessions
+            .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+            .await
+            .unwrap();
+        sessions
+            .apply_transition(session.id, dropit_domain::SessionTransition::Open)
+            .await
+            .unwrap();
+        let guest_id = Uuid::now_v7();
+        identity.create_guest_device(guest_id, "ios", None).await.unwrap();
+        sessions
+            .grant_session_guest(session.id, guest_id)
+            .await
+            .unwrap();
+        let canonical = format!("itunes:w5e-{}", tag);
+        let (track_id,): (Uuid,) = sqlx::query_as(
+            "INSERT INTO track_cache (id, source, source_id, canonical_key, title, artist) \
+             VALUES ($1, 'itunes', $2, $3, 'Vivir Mi Vida', 'Marc Anthony') RETURNING id",
+        )
+        .bind(Uuid::now_v7())
+        .bind(format!("w5e-{}", tag))
+        .bind(canonical)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        (session.id, guest_id, track_id, club_id, dj_id)
+    }
+
+    /// Два ПАРАЛЛЕЛЬНЫХ `create_request` с одним Idempotency-Key: ровно
+    /// одна заявка, один outbox-эвент, оба вызова возвращают один
+    /// request_id (один — создатель, второй — replay). Регрессия на
+    /// дефект, когда идемпотентный ответ писался после коммита.
+    #[tokio::test]
+    async fn parallel_create_request_one_key_one_row() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => {
+                eprintln!("DATABASE_URL недоступен — W5-E repo-тест пропущен");
+                return;
+            }
+        };
+        let (session_id, guest_id, track_id, _club_id, _dj_id) = fixtures(&pool).await;
+        let repo = RequestRepo::new(pool.clone());
+        let key = format!("w5e-par-{}", Uuid::now_v7());
+
+        // tokio::join! — два конкурентных вызова против одного ключа.
+        let (a, b) = tokio::join!(
+            repo.create_request(session_id, guest_id, track_id, None, &key),
+            repo.create_request(session_id, guest_id, track_id, None, &key),
+        );
+        let a = a.expect("a no db err");
+        let b = b.expect("b no db err");
+
+        // Ровно один создатель (Ok(Ok)) и ровно один replay (Ok(Err)),
+        // причём replay ссылается на тот же request_id.
+        let (created_id, replay_id) = match (&a, &b) {
+            (Ok(row), Err(replay)) | (Err(replay), Ok(row)) => {
+                let replay_id = replay["request_id"].as_str().expect("replay request_id");
+                (row.id, replay_id.to_string())
+            }
+            _ => panic!("expected one creator + one replay, got {a:?} / {b:?}"),
+        };
+        assert_eq!(
+            replay_id,
+            created_id.to_string(),
+            "replay must reference the creator's request_id"
+        );
+
+        // В БД ровно одна заявка этого гостя.
+        let (cnt,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+                .bind(guest_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cnt, 1, "parallel create must not duplicate the request");
+
+        // Один идемпотентный ответ на ключ.
+        let (idem_cnt,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM idempotency_response WHERE key = $1")
+                .bind(&key)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(idem_cnt, 1, "exactly one idempotency_response per key");
+
+        // Ровно одно outbox-событие request.created на заявку.
+        let (ob_cnt,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM outbox WHERE aggregate_type = 'request' \
+             AND aggregate_id = $1 AND event_type = 'request.created'",
+        )
+        .bind(created_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ob_cnt, 1, "exactly one request.created outbox event");
+
+        // Последовательный повтор → replay того же id, без дубля заявки
+        // и без дубля outbox.
+        let c = repo
+            .create_request(session_id, guest_id, track_id, None, &key)
+            .await
+            .expect("seq no db err");
+        match c {
+            Err(replay) => {
+                assert_eq!(
+                    replay["request_id"].as_str().unwrap(),
+                    created_id.to_string(),
+                    "sequential replay returns same request_id"
+                );
+            }
+            other => panic!("sequential repeat must replay, got {other:?}"),
+        }
+        let (cnt2,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+                .bind(guest_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cnt2, 1, "sequential replay must not duplicate request");
+        let (ob_cnt2,): (i64,) = sqlx::query_as(
+            "SELECT count(*) FROM outbox WHERE aggregate_type = 'request' \
+             AND aggregate_id = $1 AND event_type = 'request.created'",
+        )
+        .bind(created_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(ob_cnt2, 1, "sequential replay must not duplicate outbox");
+    }
+
+    /// Чужой гость с тем же Idempotency-Key → IdempotencyConflict (409),
+    /// а не перезапись ответа.
+    #[tokio::test]
+    async fn foreign_guest_same_key_conflicts() {
+        let pool = match test_pool().await {
+            Some(p) => p,
+            None => {
+                eprintln!("DATABASE_URL недоступен — W5-E conflict-тест пропущен");
+                return;
+            }
+        };
+        let (session_id, guest_a, track_id, _, _) = fixtures(&pool).await;
+        let identity = IdentityRepo::new(pool.clone());
+        let guest_b = Uuid::now_v7();
+        identity.create_guest_device(guest_b, "android", None).await.unwrap();
+        // Гостю B нужен грант в той же (или любой active) сессии.
+        SessionRepo::new(pool.clone()).grant_session_guest(session_id, guest_b).await.unwrap();
+        let repo = RequestRepo::new(pool.clone());
+        let key = format!("w5e-foreign-{}", Uuid::now_v7());
+
+        // Гость A создаёт заявку и фиксирует ключ.
+        let a = repo
+            .create_request(session_id, guest_a, track_id, None, &key)
+            .await
+            .unwrap()
+            .expect("a created");
+        // Гость B с тем же ключом → конфликт (чужой владелец).
+        let b = repo
+            .create_request(session_id, guest_b, track_id, None, &key)
+            .await;
+        assert!(
+            matches!(b, Err(RequestError::IdempotencyConflict)),
+            "foreign guest same key must conflict, got {b:?}"
+        );
+        // Заявка гостя A на месте; у B нет заявки.
+        let (cnt_a,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+                .bind(guest_a)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cnt_a, 1);
+        let (cnt_b,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
+                .bind(guest_b)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cnt_b, 0, "conflicting guest must have no request");
+        // Идемпотентный ответ остаётся за владельцем A.
+        let (owner,): (Uuid,) =
+            sqlx::query_as("SELECT guest_device_id FROM idempotency_response WHERE key = $1")
+                .bind(&key)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(owner, guest_a);
+        let _ = a;
     }
 }

@@ -267,6 +267,45 @@ impl SessionRepo {
         }
     }
 
+    /// Возвращает активный (не истёкший) QR-токен сессии, если он есть.
+    ///
+    /// Истёкшие строки `active=TRUE` отбрасываются: функционально токен
+    /// уже не рабочий (плановое закрытие сессии наступило). Используется
+    /// хендлером `qr/activate` для идемпотентности: если активный токен
+    /// есть — повторный activate НЕ выпускает второй токен.
+    pub async fn active_qr_for_session(
+        &self,
+        session_id: Uuid,
+    ) -> Result<Option<QrTokenRow>, SessionError> {
+        let row = sqlx::query_as::<_, QrTokenRow>(
+            "SELECT id, session_id, token_hash, active, generated_at, expires_at \
+             FROM qr_token WHERE session_id = $1 AND active AND expires_at > now() \
+             ORDER BY generated_at DESC LIMIT 1",
+        )
+        .bind(session_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    /// Деактивирует все активные QR-токены сессии (обычно один —
+    /// инвариант `idx_qr_token_one_active`). Идемпотентно: если активных
+    /// токенов нет, запрос просто затрагивает 0 строк и возвращает успех.
+    ///
+    /// **Гранты гостей (`session_guest`) НЕ отзываются.** Гость, уже
+    /// вошедший по QR до деактивации, сохраняет доступ до планового
+    /// закрытия сессии (`GET /v1/sessions/current` остаётся 200). Новый
+    /// вход по тому же QR-токену блокируется в `find_active_qr`
+    /// (`active=FALSE` → `QrInvalid` → 404): это и есть семантика
+    /// «выключить приём по QR, не выгонять уже вошедших».
+    pub async fn deactivate_qr(&self, session_id: Uuid) -> Result<(), SessionError> {
+        sqlx::query("UPDATE qr_token SET active = FALSE WHERE session_id = $1 AND active")
+            .bind(session_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     // ---------------------------------------------------------
     // Join-гранты
     // ---------------------------------------------------------

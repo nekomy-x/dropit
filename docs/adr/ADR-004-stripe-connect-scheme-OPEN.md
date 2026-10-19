@@ -1,7 +1,8 @@
 # ADR-004: Схема Stripe Connect — ОТКРЫТ (блокер Q15)
 
-**Статус:** ⛔ открыт; блокирует реализацию F5
+**Статус:** ⛔ открыт по схеме Connect (Q15); транспортный слой Stripe реализован
 **Дата:** 2026-10-12
+**Реализовано (транспорт):** 2026-10-19
 **Ответ:** требуется согласование с бухгалтером/юристом владельца
 
 ## Вопрос
@@ -24,6 +25,62 @@
 ## Безопасный временный режим
 
 До закрытия ADR-004: **никакой интеграции Stripe вообще** (ни test, ни prod). Этапы F0–F4 от этого не зависят.
+
+> Обновлено 2026-10-19: «никакой интеграции» снято на уровне **транспорта** —
+> `LiveStripe` и проверка подписи вебхуков написаны и включаются env. Схема
+> Connect (Q15) и float по-прежнему открыты — реальные деньги не проводятся
+> до выбора схемы.
+
+## Реализация (транспортный слой Stripe)
+
+Транспорт и криптография вынесены в `crates/infra-stripe` (без БД, без axum,
+без бизнес-логики сплита). Реализовано:
+
+- **Трейт `StripeApi`** + `LiveStripe` (настоящий REST-клиент) и `MockStripe`
+  (детерминированный мок, дефолт).
+- **PaymentIntent**: create / capture (полный или partial amount) / refund —
+  с idempotency-key.
+- **Connect-онбординг**: `create_connected_account`, `create_account_link`,
+  `retrieve_account`. Маппинг `connected_account` provisional
+  (`transfer_data[destination]` + `application_fee_amount`) — финализируется
+  вызывающим слоем при закрытии схемы.
+- **Transfers**: `create_transfer` (для выплат DJ/клубу).
+- **Проверка подписи вебхуков**: `verify_webhook_event` — разбор заголовка
+  `Stripe-Signature` (`t=,v1=`), HMAC-SHA256 по `"{timestamp}.{payload}"`,
+  сравнение через `verify_slice` (постоянное время), допуск `WEBHOOK_
+  TOLERANCE_SECS` = 300 с (clock-drift — отдельная ошибка).
+- **Включение**: `STRIPE_API_KEY` + `STRIPE_WEBHOOK_SECRET` → `LiveStripe`;
+  пусто → `MockStripe` (`gateway-api/src/infra.rs`). Вебхук
+  `POST /v1/stripe/webhook` проверяет подпись реально при live-ключах.
+- **Ошибки**: маппинг 402/409/429 и сетевых → `StripeError`.
+
+Покрытие: 73 теста в `crates/infra-stripe` (подпись валид/просрочена/битая,
+сериализация form, маппинг ошибок, мок-ответы) + doc-тесты.
+
+**Что осталось открытым:** выбор схемы Connect (A/B), float платформы,
+налоговая модель, страна/валюта пилота — Q11–Q15. `compute_split`
+(ADR-003) и `split_snapshot` неизменны; маппинг на Stripe-параметры
+финализируется после решения.
+
+## Реализация: WS / multi-node (перекрёстная ссылка на ADR-005)
+
+Живые WebSocket-обновления и мультиузловой relay реализованы в
+`crates/infra-redis` + `crates/gateway-api/src/ws.rs` (решение по формату
+WS — ADR-005 «ws-notification-only»).
+
+- **WS-тикеты в Redis**: `TicketStore` (трейт) + `RedisTicketStore`
+  (ключ `{prefix}:ws:ticket:{ticket}`, атомарный `GETDEL` — одноразовость,
+  TTL 30 с) и `InMemoryTicketStore`. `POST /v1/ws/ticket` выдаёт билет;
+  `GET /v1/ws?ticket=` забирает его один раз. Состояние тикетов вынесено
+  за пределы процесса API → несколько узлов API разделяют билеты.
+- **Pub/sub между узлами**: `EventBus` (трейт) + `RedisEventBus`
+  (канал `{prefix}:bus:{topic}`, broadcast-подписка) и `InMemoryEventBus`.
+  Узел, принявший запрос/действие DJ, публикует live-событие в шину; все
+  узлы с подписанными WS-клиентами доставляют его своим клиентам.
+- **Деградация**: без `REDIS_URL` — `InMemoryTicketStore` + `InMemoryEventBus`
+  (корректно в рамках одного узла; мультиузел недоступен, в лог —
+  предупреждение). Включается `REDIS_URL` без изменения кода.
+- Топики: `queue:{session}` (DJ-очередь), `guest:{device}` (статус гостя).
 
 ## Владелец должен подтвердить
 

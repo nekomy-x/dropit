@@ -472,3 +472,298 @@ async fn e2e_sessions_current() {
     assert_eq!(s, StatusCode::FORBIDDEN, "club_owner token: {body}");
     assert_eq!(body["code"], "forbidden");
 }
+
+// ============================================================
+// E2e: POST /v1/club/sessions/{id}/qr/activate|deactivate (W5-D)
+// ============================================================
+
+/// Подсчитывает активные QR-токены сессии в БД (для проверок
+/// идемпотентности и реального состояния).
+async fn count_active_qr(pool: &sqlx::PgPool, session_id: Uuid) -> i64 {
+    let row: (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM qr_token WHERE session_id = $1 AND active",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+/// Возвращает token_hash активного QR-токена сессии (для проверки,
+/// что повторный activate не выпустил новый токен — хеш тот же).
+async fn active_qr_hash(pool: &sqlx::PgPool, session_id: Uuid) -> Option<String> {
+    let row: (Option<String>,) = sqlx::query_as(
+        "SELECT token_hash FROM qr_token WHERE session_id = $1 AND active \
+         ORDER BY generated_at DESC LIMIT 1",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    row.0
+}
+
+#[tokio::test]
+async fn e2e_qr_activate_deactivate_real_state() {
+    let repo = match crate::e2e::test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e W5-D пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let env =
+        crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let pool = repo.pool();
+
+    // --- Фикстуры: клуб + DJ + сессия (active) ---------------------
+    let (club_id, dj_id) = seed_club_dj(&pool, "W5D Club", "w5d-club", "Madrid").await;
+    let session = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    // Открываем приём — чтобы GET /v1/sessions/current работал для
+    // уже вошедшего гостя после deactivate.
+    sessions
+        .apply_transition(session.id, dropit_domain::SessionTransition::Open)
+        .await
+        .unwrap();
+
+    // JWT клуба: subject_id == club_id (как требует владение сессией).
+    let club_token = env
+        .keys
+        .issue_access(club_id, Role::Club, uuid::Uuid::now_v7())
+        .unwrap();
+
+    // --- activate (первичный): 200, выпущен токен ------------------
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        Some(&club_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "activate: {body}");
+    assert_eq!(body["session_id"], json!(session.id));
+    assert_eq!(body["qr_active"], true);
+    // Первичная активация выпускает новый токен → qr_token/expires_at.
+    let qr_plain = body["qr_token"]
+        .as_str()
+        .expect("activate issues qr_token on first call")
+        .to_string();
+    assert!(qr_plain.len() >= 64, "qr_token entropy");
+    assert!(
+        body["expires_at"].as_str().is_some(),
+        "expires_at present on issue"
+    );
+
+    // В БД: ровно один активный токен.
+    assert_eq!(count_active_qr(&pool, session.id).await, 1, "one active qr");
+    let hash_after_first = active_qr_hash(&pool, session.id)
+        .await
+        .expect("active qr hash");
+
+    // --- Гость может войти по QR (join → 200) -----------------------
+    let device = Uuid::now_v7();
+    repo.create_guest_device(device, "ios", Some("e2e"))
+        .await
+        .unwrap();
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        "/v1/sessions/join",
+        Some(json!({ "qr_token": qr_plain })),
+        Some(&device.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "guest join after activate: {body}");
+    assert_eq!(body["club_name"], "W5D Club");
+
+    // --- Повторный activate: 200, идемпотентность (токен тот же) ----
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        Some(&club_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "re-activate: {body}");
+    assert_eq!(body["qr_active"], true);
+    // Повторный activate НЕ возвращает plain-токен (он показывается
+    // один раз при выпуске) и не выпускает второй токен.
+    assert!(
+        body.get("qr_token").map(|v| v.is_null()).unwrap_or(true),
+        "re-activate must not re-issue plain token"
+    );
+    assert_eq!(
+        count_active_qr(&pool, session.id).await,
+        1,
+        "idempotent: still one active qr"
+    );
+    assert_eq!(
+        active_qr_hash(&pool, session.id).await,
+        Some(hash_after_first.clone()),
+        "idempotent: same token hash"
+    );
+
+    // --- deactivate: 200, состояние выключено ----------------------
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/deactivate", session.id),
+        None,
+        Some(&club_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "deactivate: {body}");
+    assert_eq!(body["qr_active"], false);
+    // В БД: активных токенов нет.
+    assert_eq!(
+        count_active_qr(&pool, session.id).await,
+        0,
+        "no active qr after deactivate"
+    );
+
+    // --- НОВЫЙ вход по тому же QR -> 404 (деактивирован) ------------
+    let device2 = Uuid::now_v7();
+    repo.create_guest_device(device2, "ios", Some("e2e"))
+        .await
+        .unwrap();
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        "/v1/sessions/join",
+        Some(json!({ "qr_token": qr_plain })),
+        Some(&device2.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "new guest blocked after deactivate: {body}");
+    assert_eq!(body["code"], "not_found");
+
+    // --- Уже вошедший гость сохраняет доступ (current -> 200) -------
+    let (s, body) = crate::e2e::call(
+        &env,
+        "GET",
+        "/v1/sessions/current",
+        None,
+        Some(&device.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "already-joined guest keeps access: {body}");
+    assert_eq!(body["session"]["club_name"], "W5D Club");
+    // Грант не отозван — основа «вечер продолжается для вошедших».
+
+    // --- Повторный deactivate: 200 (идемпотентность) ----------------
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/deactivate", session.id),
+        None,
+        Some(&club_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "re-deactivate: {body}");
+    assert_eq!(body["qr_active"], false);
+
+    // --- Чужой клуб -> 404 (владение не раскрыто) -------------------
+    let (club_b, _) = seed_club_dj(&pool, "W5D Club B", "w5d-club-b", "Madrid").await;
+    let club_b_token = env
+        .keys
+        .issue_access(club_b, Role::Club, uuid::Uuid::now_v7())
+        .unwrap();
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        Some(&club_b_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "foreign club activate: {body}");
+    assert_eq!(body["code"], "not_found");
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/deactivate", session.id),
+        None,
+        Some(&club_b_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "foreign club deactivate: {body}");
+
+    // --- Роль guest/dj -> 403 ---------------------------------------
+    let dj_token = env
+        .keys
+        .issue_access(uuid::Uuid::now_v7(), Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+    let guest_token = env
+        .keys
+        .issue_access(uuid::Uuid::now_v7(), Role::Guest, uuid::Uuid::now_v7())
+        .unwrap();
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "dj role activate: {body}");
+    assert_eq!(body["code"], "forbidden");
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/deactivate", session.id),
+        None,
+        Some(&guest_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "guest role deactivate: {body}");
+    assert_eq!(body["code"], "forbidden");
+
+    // --- Без токена -> 401 ------------------------------------------
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "no token activate: {body}");
+    assert_eq!(body["code"], "unauthorized");
+
+    // --- re-activate после deactivate снова выпускает токен ---------
+    // (прежний деактивирован — рабочего нет → новый выпуск).
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        &format!("/v1/club/sessions/{}/qr/activate", session.id),
+        None,
+        Some(&club_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "reactivate after deactivate: {body}");
+    assert_eq!(body["qr_active"], true);
+    assert!(
+        body["qr_token"].as_str().is_some(),
+        "reactivate issues new token"
+    );
+    assert_eq!(
+        count_active_qr(&pool, session.id).await,
+        1,
+        "one active qr after reactivate"
+    );
+    // Это ДРУГОЙ токен, не тот, что был до deactivate (хеш различается).
+    let hash_after_reactivate = active_qr_hash(&pool, session.id)
+        .await
+        .expect("active qr hash after reactivate");
+    assert_ne!(
+        hash_after_reactivate, hash_after_first,
+        "reactivate issued a fresh token, old one stays deactivated"
+    );
+}
