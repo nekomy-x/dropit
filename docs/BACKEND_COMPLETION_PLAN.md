@@ -137,7 +137,7 @@ W2 (4 эндпоинта) ──► W3 (интеграция: ws/stripe/workers)
 
 ## 7. Статус выполнения (по факту, 2026-10-19)
 
-План доведён до конца за пять волн. Все пакеты W1–W5 закрыты.
+План доведён до конца за семь волн. Все пакеты W1–W7 закрыты.
 
 | Волна | Пакеты | Что дали | Статус |
 |---|---|---|---|
@@ -145,9 +145,11 @@ W2 (4 эндпоинта) ──► W3 (интеграция: ws/stripe/workers)
 | **W2** | W2-A…W2-D | эндпоинты: `sessions/current`, `my/requests/{id}`, `guest/upgrade`, `dj/styles`, `club/djs/invite`, `club/stripe/*`, `admin/clubs`, `admin/guests`, `admin/reconciliation-runs`, `guest/push-token`, `catalog/search`; миграции `0008`–`0009` | ✅ закрыто |
 | **W3** | W3-A…W3-C | Redis-тикеты + мультиузловой WS-relay (`EventBus`); `LiveStripe` по env + проверка подписи вебхуков; бинарник `dropit-workers` (outbox, payouts, reconcile, retention, close-sessions, push; `--once`) | ✅ закрыто |
 | **W4** | W4-A, W4-B | OpenAPI 0.7.0 — 65 путей, дрейфа нет (контракт-тест зелёный); ADR-002/004/006 → реализовано; `clippy --workspace --all-targets` — 0 warning; `cargo build --workspace` — зелёный | ✅ закрыто |
+| **W6** | W6-A…W6-C | OpenAPI догнан до кода (65 = 65), убрано мёртвое поле `ApiEnv.push`, документация приведена к факту; повторное adversarial-ревью нашло 3 недозакрытые гонки | ✅ закрыто |
+| **W7** | W7-A…W7-C | закрыты гонки: параллельный confirm отменял подтверждённый платёж; `ON CONFLICT` отдавал чужой платёж другому request; двойная выплата без блокировки сплитов; IP-антифрод переведён на безопасный дефолт `TRUST_PROXY` | ✅ закрыто |
 | **W5** | hardening | 8 критических дефектов закрыты: IDOR в confirm, подпись transfer-вебхука, транзакционная выплата, QR-заглушка → 128-бит, брутфорс 2FA → rate-limit, хардкод IP → `TRUST_PROXY`+`client_ip`, дубли заявок → Idempotency-Key replay, двойной платёж → идемпотентный confirm; эндпоинт `auth/club/master`; миграция `0010` | ✅ закрыто |
 
-**Итог по метрикам:** 10 крейтов, 2 бинарника (`dropit-api`, `dropit-workers`) + `seed_demo`, 10 миграций, 65 HTTP-путей (бинарник = OpenAPI), **403 теста / 0 failed**, clippy 0 warning.
+**Итог по метрикам:** 10 крейтов, 2 бинарника (`dropit-api`, `dropit-workers`) + `seed_demo`, 10 миграций, 65 HTTP-путей (бинарник = OpenAPI), **415 тестов / 0 failed**, clippy 0 warning.
 
 **Что осталось (по факту, без обещаний):**
 - Stripe **live** — `LiveStripe` написан, подпись проверяется, но схема Connect (destination charges vs separate transfers) не утверждена → реальные деньги не проводятся (ADR-004/Q15).

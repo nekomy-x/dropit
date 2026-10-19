@@ -1,8 +1,9 @@
 # DROP IT — Статус реализации
 
 **Обновлено:** 2026-10-19
-**Этап:** бэкенд доведён до плана за пять волн (W1–W5): инфра-крейты, воркеры,
-эндпоинты, WS multi-node, hardening критических дефектов, контракт. Внешние
+**Этап:** бэкенд доведён до плана за семь волн (W1–W7): инфра-крейты, воркеры,
+эндпоинты, WS multi-node, контракт, два прохода adversarial-ревью и закрытие
+11 критических дефектов (включая гонки confirm/выплат). Внешние
 интеграции (Stripe live, лицензии каталога) включаются env-переменными; без
 них — mock/noop.
 
@@ -270,9 +271,9 @@ cargo fmt --all -- --check
 команды — e2e-тесты используют одну Postgres и чистят фикстуры (TRUNCATE),
 поэтому параллельные прогоны без лока дают ложные падения.
 
-**Тестов: 403 passed / 0 failed** (полный прогон `./scripts/db-test.sh cargo test
+**Тестов: 415 passed / 0 failed** (полный прогон `./scripts/db-test.sh cargo test
 --workspace --no-fail-fast -- --test-threads=1`, 2026-10-19). Разбивка по крейтам:
-common 13, domain 42, gateway-api 75 (69 unit + 6 контракт-тест OpenAPI),
+common 13, domain 42, gateway-api 87 (81 e2e/unit в бинарнике + 6 контракт-тест OpenAPI),
 infra-catalog 88 (unit + integration-фикстуры), infra-db 8, infra-nats 15,
 infra-push 44, infra-redis 12 (unit + Redis-integration), infra-stripe 75
 (73 unit + 2 doc-test), workers 31.
@@ -325,7 +326,9 @@ SDK Flutter/Android установлен на носителе
 | 2026-10-19 | W1–W3: `cargo test -p dropit-infra-{redis,nats,stripe,catalog,push}` | ✅ зелёные (unit + интеграция) |
 | 2026-10-19 | W5: hardening дефектов (IDOR, transfer-подпись, TX-payout, QR, 2FA-лимит, IP, идемпотентность) | ✅ e2e-тесты зелёные |
 | 2026-10-19 | `cargo build --workspace` + `cargo clippy --workspace --all-targets` | ✅ 0 warning (кроме предсуществующего future-incompat sqlx-postgres) |
-| 2026-10-19 | `./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1` | ✅ 403 passed / 0 failed / 0 ignored |
+| 2026-10-19 | W6: синхронизация OpenAPI + ре-ревью (3 гонки найдены) | ✅ контракт-тест 65 путей = 65 |
+| 2026-10-19 | W7: гонки confirm-платежа, cross-request ON CONFLICT, двойная выплата, IP-антифрод | ✅ e2e-тесты гонок зелёные |
+| 2026-10-19 | `./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1` | ✅ 415 passed / 0 failed / 0 ignored |
 
 ## Приложение C. Документы
 
