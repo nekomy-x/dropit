@@ -10,15 +10,15 @@ interface ErrorStateProps {
 export default function ErrorState({ message, code, onRetry }: ErrorStateProps) {
   return (
     <div
-      className="rounded-xl border border-red-900/60 bg-red-950/40 p-6"
+      className="ops-error-state rounded-md border border-rose-400/20 bg-rose-400/[0.06] p-4"
       role="alert"
     >
-      <p className="text-sm font-semibold text-red-200">
+      <p className="text-sm font-semibold text-rose-200">
         Something went wrong
       </p>
-      <p className="mt-1 text-sm text-red-300/80">{message}</p>
+      <p className="mt-1 text-sm text-rose-200/85">{message}</p>
       {code ? (
-        <p className="mt-1 font-mono text-xs text-red-400/60">{code}</p>
+        <p className="mt-1 font-mono text-xs text-rose-200/65">{code}</p>
       ) : null}
       {onRetry ? (
         <button type="button" onClick={onRetry} className="btn-secondary mt-4">

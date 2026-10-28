@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>
+body{background:#0A0C0B;color:#F2F5F3;font:12px system-ui;padding:24px}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:18px}
+.cell{background:#141815;border:1px solid #FFFFFF17;border-radius:12px;padding:14px;text-align:center}
+svg{display:block;margin:0 auto 8px}
+.mark{width:36px;height:36px;background:#00FF87;border-radius:10px;display:flex;align-items:center;justify-content:center;margin:0 auto 8px;color:#06130C}
+</style></head><body>
+<div class="grid" id="g"></div>
+<script type="module">
+import Icon from '/src/components/connect/Icons.tsx';
+import { createElement as h } from 'react';
+import { createRoot } from 'react-dom/client';
+const names = ['headphones','arrowRight','arrowUpRight','check','plus','minus','x','qr','pin','mail','phone','globe','users','layers','music','chart','wallet','shield','spark','info','chevronDown','chevronRight','clock','printer','copy','pause','play','live','calendar','store','door','doc'];
+const g = document.getElementById('g');
+const root = createRoot(g);
+root.render(h('div', {className:'grid'},
+  names.map(n => h('div', {className:'cell', key:n},
+    n === 'headphones'
+      ? h('div', {className:'mark'}, h(Icon, {name:n, size:20, strokeWidth:1.9}))
+      : h(Icon, {name:n, size:28, strokeWidth:1.6}),
+    h('div', null, n)
+  ))
+));
+</script></body></html>

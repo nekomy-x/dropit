@@ -1,0 +1,159 @@
+/* Command palette (⌘K). Uses the club tokens; no borders on surfaces, only the
+   scrim on the backdrop. The trigger's visible text and its accessible name are
+   the same string ("Jump to… ⌘K"), which is what fixes the
+   label-content-name-mismatch axe rule. */
+.command-trigger { display:flex; align-items:center; gap:8px; min-height:var(--hit-desktop); padding:0 10px; border:0; border-radius:var(--r-control); color:var(--c-text-2); background:var(--c-raised); font-family:var(--font-sans); font-size:var(--fs-12); }
+.command-trigger:hover { color:var(--c-text); background:#1D212B; }
+/* kbd at 11px in the muted-sm ramp colour: 7.3:1 on --c-surface (was 3.96:1). */
+.command-trigger kbd, .command-search-row kbd { padding:2px 5px; border-radius:var(--r-control); color:var(--c-text-muted-sm); background:rgba(255,255,255,.06); font:11px var(--font-mono); }
+.command-backdrop { position:fixed; inset:0; z-index:80; display:flex; justify-content:center; align-items:flex-start; padding:96px var(--sp-4) var(--sp-6); background:var(--c-scrim); }
+.command-dialog { width:min(560px, 100%); overflow:hidden; border:0; border-radius:var(--r-surface); background:var(--c-surface); box-shadow:none; }
+.command-search-row { display:flex; align-items:center; gap:10px; min-height:58px; padding:0 16px; border-bottom:1px solid var(--c-hairline-row); color:var(--c-text-2); }
+.command-search-row input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:var(--c-text); font-family:var(--font-sans); font-size:var(--fs-13); }
+.command-search-row input::placeholder { color:var(--c-text-muted-sm); }
+.command-results { max-height:min(420px, 60vh); overflow:auto; padding:8px; }
+.command-result { display:flex; width:100%; align-items:center; gap:11px; min-height:var(--hit-mobile); padding:0 10px; border-radius:var(--r-tile); color:var(--c-text); text-align:left; font-family:var(--font-sans); font-size:var(--fs-13); }
+.command-result:hover, .command-result:focus-visible { background:var(--c-raised); color:var(--c-text); outline:none; }
+.command-result:focus-visible { outline:2px solid var(--c-accent); outline-offset:-2px; }
+.command-result-group { margin-left:auto; color:var(--c-text-muted); font-size:var(--fs-11); }
+.command-empty { padding:20px 10px; color:var(--c-text-muted-sm); font-size:var(--fs-12); }
+@media (max-width: 480px) { .command-trigger { padding:0 8px; } .command-trigger kbd { display:none; } }
+
+/* Authenticated operations surfaces. Public Connect keeps its own namespace.
+   Both panels paint from the shared token layer, so this file only keeps the
+   club-specific rhythm that is not part of the shared kit. */
+.club-app-shell {
+  /* The club panel paints from the shared token layer instead of a second set
+     of near-black literals (#09090b/#101113), so there is one source of truth
+     for what the room screen looks like. Scoped to the club shell only: the DJ
+     console is out of scope and keeps its own literals above. */
+  --ops-ink: var(--c-canvas);
+  --ops-surface: var(--c-surface);
+  --ops-raised: var(--c-raised);
+  --ops-border: var(--c-hairline);
+  --ops-border-strong: var(--c-hairline-strong);
+  --ops-text: var(--c-text);
+  --ops-secondary: var(--c-text-2);
+  --ops-muted: var(--c-text-muted);
+  font-family: var(--font-sans);
+  font-feature-settings: "kern" 1;
+  color: var(--c-text);
+  background: var(--c-canvas);
+}
+
+.club-app-shell .app-shell,
+.club-app-shell main { background: var(--ops-ink); }
+
+/* One rail material for both authenticated shells. It reads the token layer
+   directly rather than the `--ops-*` aliases, which exist only on
+   `.club-app-shell` and would leave the DJ shell unstyled. `--c-rail`
+   (#0B0E14) is a step away from the canvas (#0A0C11), so a rail painted with
+   it dissolves into the page; the club shell had this override and the DJ
+   shell did not, which is why the two sidebars looked unrelated. */
+.panel-shell > .panel-rail {
+  border-right-color: var(--c-hairline);
+  background: var(--c-surface);
+}
+
+.club-app-shell .venue-switcher {
+  border-color: var(--ops-border);
+  background: var(--ops-surface);
+}
+
+.club-app-shell .nav-section-label,
+.club-app-shell .account-row span:last-child span:last-child {
+  color: var(--ops-muted);
+}
+
+.club-app-shell .nav-item { color: var(--ops-secondary); }
+.club-app-shell .nav-item:hover { background: rgba(255,255,255,.045); color: var(--ops-text); }
+.club-app-shell .nav-item-active { background: rgba(255,255,255,.065); color: var(--ops-text); }
+.club-app-shell .nav-item-active::before { background: var(--ops-green); }
+.club-app-shell .nav-item-active svg { color: var(--ops-green); }
+
+.club-app-shell main > header {
+  min-height: 64px;
+  /* The one rule in the club shell is a divider, so it sits at the same <=6%
+     hairline as table rows rather than a brighter structural border. The DJ
+     console keeps --ops-border unchanged. */
+  border-color: var(--c-hairline-row);
+  background: var(--c-canvas);
+}
+.club-app-shell main > header + div { width: 100%; }
+.club-app-shell .header-account { border: 0; border-radius: var(--r-control); }
+.club-app-shell .header-account:focus-visible,
+.club-app-shell .account-row:focus-visible,
+.club-app-shell .nav-item:focus-visible { outline: 2px solid var(--ops-green); outline-offset: 2px; }
+
+.club-app-shell .card,
+.club-app-shell .panel-surface {
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.club-app-shell .card:hover,
+.club-app-shell .panel-surface:hover { background: var(--ops-surface); }
+
+/* Generic .btn-* / .field-* chrome now comes from styles/panel.css. */
+.club-app-shell .page-subtitle { max-width: 64ch; color: var(--ops-secondary); line-height: 1.55; }
+.club-app-shell .text-neutral-500 { color: var(--c-text-muted-sm); }
+.club-app-shell .text-neutral-600 { color: var(--c-text-muted); }
+.club-app-shell .text-brand-300,
+.club-app-shell .text-brand-400 { color: var(--c-accent); }
+.club-app-shell .text-red-300,
+.club-app-shell .text-red-200 { color: var(--ops-rose); }
+.club-app-shell .text-emerald-300,
+.club-app-shell .text-emerald-400 { color: var(--c-accent); }
+.club-app-shell .border-neutral-800,
+.club-app-shell .border-neutral-700,
+.club-app-shell .divide-neutral-800 > :not([hidden]) ~ :not([hidden]) { border-color: var(--ops-border); }
+.club-app-shell .bg-neutral-800 { background: var(--ops-raised); }
+.club-app-shell .bg-\[\#191919\],
+.club-app-shell .bg-\[\#151515\] { background-color: var(--ops-surface) !important; }
+.club-app-shell .bg-\[\#080808\] { background-color: var(--ops-ink) !important; }
+.club-app-shell .text-\[\#06130C\] { color: #07130d; }
+
+.club-page-heading-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: var(--sp-6);
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--ops-border);
+}
+/* Page headings: 28 / 13 / 12 from the six-step scale, no uppercase eyebrow. */
+.club-page-title { margin-top: 6px; color: var(--c-text); font-size: var(--fs-28); font-weight: 600; line-height: 1.15; letter-spacing: -.01em; }
+.club-page-eyebrow { color: var(--c-text-muted-sm); font-family: var(--font-sans); font-size: var(--fs-11); font-weight: 500; line-height: 1.3; }
+.club-page-description { margin-top: 5px; max-width: 62ch; color: var(--c-text-2); font-size: var(--fs-13); line-height: var(--lh-text); }
+.club-page-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+/* One width ceiling for the panel (01-contract.md §5). */
+.club-workspace-content { width: 100%; max-width: var(--w-content); margin-inline: auto; }
+
+/* The bottom bar is gone: below 1024px the top bar carries the burger and
+   `nav-drawer.tsx` opens the rail's own groups. Its `.club-mobile-nav` /
+   `.mobile-nav-item*` rules went with it — they are dead selectors now, and
+   they carried raw `#84848e` / `var(--ops-green)` values that the drawer's
+   token-only contract does not allow. */
+
+.operation-empty {
+  display: flex;
+  min-height: 100px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+}
+.operation-empty-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--r-tile); background: var(--c-raised); color: var(--c-text-2); }
+.operation-empty-title { color: #dedee3; font-size: 13px; font-weight: 600; }
+.operation-empty-detail { margin-top: 4px; color: #9999a2; font-size: 12px; line-height: 1.5; }
+
+/* Tables inside the club workspace are the canonical `.data-table`
+   (styles/panel.css), which reads every colour from the token layer. The
+   dark-only duplicate that used to live here (`td { color: #c4c4cb }`, a
+   white-alpha `thead`) won on specificity and left table text at 1.73:1 in
+   the light theme, so it is gone rather than re-coloured. */
+

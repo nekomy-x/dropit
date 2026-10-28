@@ -1,0 +1,49 @@
+/* ============================================================================
+   DROP IT — "this deployment is not production" pill
+   ----------------------------------------------------------------------------
+   Canonical copy: edit `packages/ui/test-badge.css`, then run
+       node scripts/sync-ui-tokens.mjs
+   which writes identical copies to
+       apps/web-club/src/styles/test-badge.css
+       apps/web-admin/src/styles/test-badge.css
+
+   A 26px label in the corner of a screen or inline in a panel top bar — the
+   shape the product owner asked for: a small pill with an orange outline, on
+   every page, not a band across the bottom.
+
+   The outline is the only non-error border in the product that carries meaning,
+   so the words always travel with it: colour alone never states a status. The
+   colour is `--c-warn` (the same token the preview banner uses).
+   ========================================================================== */
+
+.test-badge {
+  display: inline-flex;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--c-warn);
+  border-radius: var(--r-chip);
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.test-badge-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: var(--r-chip);
+  background: currentColor;
+}
+
+/* In a top bar the pill is context and gives up its space first. */
+.test-badge-inline { margin-left: auto; }
+@media (max-width: 639px) {
+  .test-badge-inline { display: none; }
+}

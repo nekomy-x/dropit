@@ -1,0 +1,59 @@
+/*
+ * Print stylesheet — the document the browser's own print dialog renders.
+ *
+ * `printCard()` writes a document that contains nothing but the card and adds
+ * this sheet to it, so the browser has no page furniture (margins, headers,
+ * footers, a URL banner) to lay over the code. The `@page` rule itself is
+ * generated per call and prepended to this text, because `size: Wmm Hmm`
+ * depends on the card and `@page` is a document rule, not a style that can be
+ * scoped to an element.
+ *
+ * Colours are forced on purpose: a printed sign *is* ink and paper, and a
+ * browser that drops backgrounds would print the card surface as plain white
+ * and take the quiet zone's contrast with it.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+}
+
+body {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  color-adjust: exact;
+}
+
+/* The card is the page: no extra box around it, no scrollbar, no padding. */
+.qr-print-card {
+  display: block;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  line-height: 0;
+}
+
+/* An inline `<svg>` is a replaced element, so it must be told to fill. */
+.qr-print-card > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media print {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .qr-print-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}

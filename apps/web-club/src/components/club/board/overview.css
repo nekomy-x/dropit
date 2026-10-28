@@ -1,0 +1,139 @@
+/* Overview — page-level extras for the club board.
+   Everything here reads tokens; no raw colour, radius or font size. */
+
+.page-identity {
+  margin: 0 0 6px;
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+.freshness {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+  white-space: nowrap;
+}
+
+.error-copy { display: block; margin-top: 2px; color: var(--c-text-2); font-size: var(--fs-12); }
+
+/* Floor load */
+.floor-total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.floor-total-value {
+  font-size: var(--fs-28);
+  font-weight: 650;
+  letter-spacing: -.025em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.floor-total-unit { color: var(--c-text-2); font-size: var(--fs-13); }
+.floor-total-share {
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: var(--r-chip);
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-row-note {
+  margin: 6px 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* Guest access */
+.access-qr { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.access-qr-frame {
+  padding: 10px;
+  border-radius: var(--r-tile);
+  background: #FFFFFF;
+  line-height: 0;
+}
+.access-meta { display: grid; gap: 10px; margin: 0; min-width: 0; flex: 1; }
+.access-meta div { display: grid; gap: 1px; }
+.access-meta dt { color: var(--c-text-muted-sm); font-size: var(--fs-11); }
+.access-meta dd { margin: 0; color: var(--c-text); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.access-meta dd.is-mono { font-family: var(--font-mono); font-size: var(--fs-12); }
+
+/* Roster */
+.dj-cell { display: inline-flex; align-items: center; gap: 10px; }
+.dj-cell .list-thumb { width: 28px; height: 28px; font-size: var(--fs-11); }
+
+/* Next actions */
+.action-row { align-items: flex-start; }
+.action-thumb { width: 28px; height: 28px; margin-top: 1px; background: var(--c-accent-tint); color: var(--c-accent-quiet); }
+.action-meta {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.board-footnote {
+  margin: 18px 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+.board-link { color: var(--c-accent-quiet); text-decoration: none; font-weight: 500; }
+.board-link:hover { text-decoration: underline; }
+
+/* Lineup mix — a share strip, closed under the next-actions list.
+   It reads the same `/v1/club/djs` counts the roster table renders, so colour
+   is never the only carrier: every segment prints its own count. */
+.roster-mix-block {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--c-hairline-row);
+}
+.roster-mix-title {
+  margin: 0 0 6px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+.roster-mix { display: grid; gap: 6px; min-width: 0; }
+.roster-mix-strip {
+  display: flex;
+  height: 6px;
+  gap: 2px;
+  overflow: hidden;
+  border-radius: var(--r-chip);
+  background: var(--c-inset);
+}
+.roster-mix-seg { flex-basis: 0; min-width: 2px; height: 100%; }
+.roster-mix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.roster-mix-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+}
+.roster-mix-dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: var(--r-chip); }
+.roster-mix-count { color: var(--c-text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.roster-mix-empty { margin: 0; color: var(--c-text-muted-sm); font-size: var(--fs-11); line-height: 1.5; }
+
+@media (max-width: 640px) {
+  .floor-total-share { margin-left: 0; }
+  .action-meta { display: none; }
+}

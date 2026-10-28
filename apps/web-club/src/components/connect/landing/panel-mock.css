@@ -1,0 +1,284 @@
+/* ============================================================================
+   Landing — owner-panel preview
+   ----------------------------------------------------------------------------
+   The section is the product's own Overview board, so the markup inside the
+   window is the panel's markup (`panel-shell`, `panel-rail`, `stat-card`,
+   `panel-card`, `bar-*`, `data-table`, `chip`) and the CSS here only does three
+   things:
+
+     1. paints the panel's token names with the DARK values inside the section,
+        so the public page stays black in both themes while the preview still
+        reads the same `--c-*` names the panel does;
+     2. fits the shell inside the window (the panel is a full-page app; here it
+        is an embedded screen with no scroll of its own);
+     3. runs the unfold — the one piece of motion on the page.
+
+   No colour literal is used for anything the panel itself paints: the palette
+   below is the dark set copied from `packages/ui/tokens.css`, which is the only
+   place those values are allowed to be authored. If the dark palette changes,
+   this block changes with it; `scripts/panel-audit.mjs` reads the preview too.
+   ========================================================================== */
+
+.connect-panel-section {
+  /* --- panel tokens, dark set (identical to :root[data-theme='dark']) ------ */
+  --c-canvas: #0a0c11;
+  --c-rail: #0b0e14;
+  --c-surface: #12151c;
+  --c-raised: #171b23;
+  --c-inset: #0e1118;
+  --c-hairline: rgba(235, 240, 250, 0.08);
+  --c-hairline-row: rgba(235, 240, 250, 0.06);
+  --c-hairline-strong: rgba(235, 240, 250, 0.14);
+  --c-scrim: rgba(3, 5, 9, 0.72);
+  --c-panel-shadow: none;
+  --c-popover: #1a1f28;
+  --c-popover-shadow: 0 18px 44px -14px rgba(2, 4, 8, 0.78), 0 2px 8px rgba(2, 4, 8, 0.38);
+  --c-accent: #00ff87;
+  --c-accent-hover: #00d873;
+  --c-accent-tint: rgba(0, 255, 135, 0.08);
+  --c-accent-tint-strong: rgba(0, 255, 135, 0.14);
+  --c-ink-on-accent: #06130c;
+  --c-accent-quiet: #7cffc0;
+  --c-text: #f1f4f7;
+  --c-text-2: #b0b8c3;
+  --c-text-muted: #858e9c;
+  --c-text-muted-sm: #9aa3b0;
+  --c-nav-active-bg: rgba(0, 255, 135, 0.1);
+  --c-nav-active-text: #f1f4f7;
+  --c-nav-hover-bg: rgba(235, 240, 250, 0.05);
+  --c-hover-strong: #1e232c;
+  --c-seg-active: #232935;
+  --c-warn: #ffc65b;
+  --c-warn-tint: rgba(255, 198, 91, 0.1);
+  --c-error: #ff6b6b;
+  --c-error-tint: rgba(255, 107, 107, 0.1);
+  --c-ok: #00ff87;
+  --c-series-1: #00ff87;
+  --c-series-3: rgba(0, 255, 135, 0.44);
+
+  position: relative;
+  z-index: 3;
+  margin-top: -220px;
+  /* The nav links to #panel; the sticky 56px header must not cover the heading. */
+  scroll-margin-top: 72px;
+  border-top: 0;
+  background: transparent;
+}
+
+/* The page's generic section rule pads every direct child; the window is the
+   content here, so the section sets its own rhythm. The `#panel` ancestor also
+   keeps this above `.connect-linear-main section:not(.connect-hero) > div`. */
+.connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
+  padding: 52px clamp(24px, 4vw, 64px) 56px;
+}
+
+.connect-panel-section .connect-display {
+  max-width: 760px;
+  color: var(--c-text);
+  font-size: clamp(23px, 2.2vw, 32px);
+  letter-spacing: -0.03em;
+}
+
+/* ---------------------------------------------------------------------------
+   Unfold — the one piece of scroll-linked motion on the page
+
+   The window is hinged on its top edge (`transform-origin: 50% 0%`) and starts
+   tipped away from the reader: the bottom edge falls back and both side edges
+   converge, so the panel reads as a screen lying down and being raised. `--u` rises from 0 to 1 while the panel travels the last screen of
+   its entrance, so the panel opens as it arrives and is flat exactly when it is
+   read; it only ever increases, so it never tips back on the way up and a
+   second visit to the section finds it unfolded.
+
+   The travel is measured on the stage — the untransformed layout box — because
+   `getBoundingClientRect()` on the window includes the transform and would feed
+   its own tilt back into the progress.
+
+   `--u: 1` is the stylesheet default: without JavaScript, before hydration and
+   under reduced motion the panel is simply flat and fully legible. The tilt is
+   never what makes the content readable.
+   ------------------------------------------------------------------------ */
+.connect-panel-unfold {
+  --u: 1;
+  margin-top: 44px;
+  perspective: 1400px;
+  /* The vanishing point sits level with the hinge, so the left and right edges
+     converge symmetrically instead of sliding towards one corner. */
+  perspective-origin: 50% 0%;
+}
+
+.connect-panel-window {
+  overflow: hidden;
+  border-radius: var(--r-surface);
+  background: var(--c-canvas);
+  color: var(--c-text);
+  font-family: var(--font-sans);
+  box-shadow: inset 0 0 0 1px var(--c-hairline), 0 64px 120px -70px rgba(0, 0, 0, 0.95);
+  /* The hinge is the TOP edge: the window hangs from it and swings away, so the
+     panel never slides out from under the heading while it opens. */
+  transform-origin: 50% 0%;
+  /* Tilt and approach share one driver, so they can never disagree: 0.72 → 1 of
+     the size, 32° → 0 of the tilt. A negative rotateX around the top edge leans
+     the far edge back, which is the direction a screen falls away from a reader
+     standing in front of it. */
+  transform: rotateX(calc((1 - var(--u)) * -32deg)) scale(calc(0.72 + var(--u) * 0.28));
+  will-change: transform;
+}
+/* The unfold is finished: stop promoting the window to its own layer. */
+.connect-panel-unfold[data-unfold='flat'] .connect-panel-window {
+  will-change: auto;
+}
+
+/* Window chrome ------------------------------------------------------------ */
+.connect-panel-chrome {
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--c-hairline);
+  background: var(--c-rail);
+}
+.connect-panel-dots {
+  display: flex;
+  gap: 6px;
+}
+.connect-panel-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-chip);
+  background: var(--c-hairline-strong);
+}
+.connect-panel-url {
+  margin: 0;
+  overflow: hidden;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   The panel shell, embedded
+   The panel is a full-page application: its shell claims the viewport height,
+   its rail is sticky and its content is capped at the content width. Inside a
+   window on a landing those three only fight the layout, so they are unset
+   here — the preview is one screen, not a scrolling app.
+   ------------------------------------------------------------------------ */
+.connect-panel-window .panel-shell {
+  min-height: 0;
+  background: var(--c-canvas);
+}
+.connect-panel-window .panel-rail {
+  position: static;
+  height: auto;
+  align-self: stretch;
+}
+.connect-panel-window .panel-topbar {
+  position: static;
+}
+.connect-panel-window .panel-rail-brand {
+  height: 48px;
+  padding: 0 18px;
+}
+.connect-panel-window .panel-content {
+  max-width: none;
+  padding: 20px 24px 24px;
+}
+
+/* The wordmark the panel shows in its rail. The landing's own brand component
+   animates (a spectrum sweep); a still screen should not, so the preview uses
+   the word alone. */
+.connect-panel-brand {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+/* The board's freshness dot, in the accent the panel uses for live state. */
+.connect-panel-live-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   Sample-data note
+   The preview is a sample night, and saying so is the difference between an
+   illustration and a claim about a live club.
+   ------------------------------------------------------------------------ */
+.connect-panel-sample {
+  margin: 14px 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   The window keeps the panel's own breakpoints (the panel drops its rail below
+   1024 and stacks its grid below 1280), because the preview is meant to show
+   the screen the visitor will actually get at that width.
+   ------------------------------------------------------------------------ */
+@media (max-width: 1279px) {
+  .connect-panel-window .panel-content {
+    padding: 18px 20px 20px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .connect-panel-section {
+    margin-top: -110px;
+  }
+  .connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
+    padding: 40px 28px 44px;
+  }
+  .connect-panel-unfold {
+    margin-top: 32px;
+  }
+  .connect-panel-window .panel-content {
+    padding: 18px 18px 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .connect-panel-section {
+    margin-top: -70px;
+  }
+  .connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
+    padding: 32px 18px 36px;
+  }
+  .connect-panel-topbar {
+    padding: 0 14px;
+  }
+  .connect-panel-chrome {
+    padding: 0 12px;
+  }
+  /* The panel's own rule is one KPI per row under 640. Two columns still fit
+     and halve the preview height, which keeps the section readable on a phone
+     without changing the panel. */
+  .connect-panel-window .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .connect-panel-window .stat-value {
+    font-size: var(--fs-20);
+  }
+  /* On a 390px column the 3D tilt only eats reading width, but the approach is
+     exactly what makes the panel read as arriving: keep the scale, drop the
+     rotation and its perspective. */
+  .connect-panel-unfold {
+    perspective: none;
+  }
+  .connect-panel-window {
+    transform: scale(calc(0.84 + var(--u) * 0.16));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connect-panel-window {
+    transform: none !important;
+    will-change: auto;
+  }
+}

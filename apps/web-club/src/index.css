@@ -1,51 +1,1327 @@
+/* Tokens first: both stylesheets (this one and operations.css) read them.
+   club-tokens.css and panel.css are generated copies from packages/ui/ —
+   edit the canonical files there and run `node scripts/sync-ui-tokens.mjs`. */
+@import './styles/club-tokens.css';
+@import './styles/panel.css';
+@import './styles/test-badge.css';
+@import './styles/status-bar.css';
+
+/* Inter, self-hosted. One variable file, latin subset, weights 100–900.
+   Declared here (not in the token layer) because the URL is app-specific. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin-var.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Club panel (C3) base styles. Dark-first palette per the design brief. */
+/* ---------------------------------------------------------------------------
+   Base
+   The canvas, text ramp and type stack come from club-tokens.css. Nothing in
+   this file declares a raw colour, radius or font family for club surfaces.
+   ------------------------------------------------------------------------ */
 
 @layer base {
   html {
-    @apply bg-neutral-950;
+    background: var(--c-canvas);
   }
 
   body {
-    @apply min-h-screen bg-neutral-950 text-neutral-100;
+    min-height: 100vh;
+    background: var(--c-canvas);
+    color: var(--c-text);
+    font-family: var(--font-sans);
+    /* The six-step ramp starts at 13px for body copy, so nothing inherits the
+       16px browser default and adds a seventh size to the screen. `html` keeps
+       16px on purpose: Tailwind's rem-based utilities resolve against it. */
+    font-size: var(--fs-13);
+    line-height: var(--lh-text);
+    font-feature-settings: "kern" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Tabular figures everywhere money/IDs are shown (minor units are integers). */
+  /* Money, IDs and timestamps are read as numbers; tabular keeps them aligned
+     and stops a changing figure from widening its own box. */
   table,
-  .tabular {
+  .tabular,
+  .club-workspace-content {
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Keyboard focus is visible on every club surface and costs no layout.
+     Text entry overrides this in styles/panel.css: a field is marked by the
+     caret and its own accent rule under the value, not by a box. */
+  :where(a, button, input, select, textarea, [tabindex], [role="radio"], [role="button"]):focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
   }
 }
 
 @layer components {
-  .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50;
+  /* Action and field chrome lives in styles/panel.css (canonical, themed):
+     .btn-primary / .btn-secondary / .btn-quiet / .btn-outline / .field-input /
+     .field-label / .card are defined there once for both panels. */
+
+  /* Role chooser on /register: a radio the label wraps, so the whole tile is
+     one keyboard- and pointer-target and focus stays visible. */
+  .role-option {
+    @apply flex cursor-pointer flex-col rounded-[12px] bg-[#171A22] px-3 py-2.5 transition-colors hover:bg-[#1D212B];
   }
 
-  .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-md border border-neutral-700 bg-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-100 transition-colors hover:border-neutral-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 disabled:cursor-not-allowed disabled:opacity-50;
+  .role-option:focus-within {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
   }
 
-  .field-label {
-    @apply mb-1 block text-sm font-medium text-neutral-300;
+  .role-option-selected {
+    background: var(--c-accent-tint-strong);
   }
 
-  .field-input {
-    @apply w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  .role-option-mark {
+    @apply block h-1.5 w-1.5 shrink-0 rounded-full border border-[#858E9C];
   }
 
-  .card {
-    @apply rounded-xl border border-neutral-800 bg-neutral-900 p-6;
+  .role-option-mark-on {
+    @apply border-[#00FF87] bg-[#00FF87];
   }
 
   .page-title {
-    @apply text-2xl font-bold tracking-tight text-white;
+    @apply text-[20px] font-semibold tracking-tight text-[#F1F4F7];
   }
 
   .page-subtitle {
-    @apply mt-1 text-sm text-neutral-400;
+    @apply mt-1 max-w-2xl text-[13px] leading-6 text-[#B0B8C3];
+  }
+
+  .club-page-heading {
+    @apply font-sans text-[28px] font-semibold leading-[1.15] tracking-tight text-[#F1F4F7];
+  }
+
+  /* Page eyebrows are a breadcrumb, NOT an uppercase eyebrow: §4.6 allows one
+     uppercase tracked element per screen and that one lives in the shell
+     header (.club-context-label). Small text uses the 11px muted ramp value
+     (7.3:1 on the canvas), not the darker 12px-only token. */
+  .club-page-eyebrow {
+    @apply font-sans text-[11px] text-[#9AA3B0];
+    letter-spacing: .01em;
+  }
+
+  .brand-logo {
+    @apply inline-flex shrink-0 items-center gap-1.5;
+    color: var(--c-text);
+    line-height: 1;
+  }
+
+  /* The wordmark paints from tokens so it is legible in both themes. */
+  .brand-logo-letters { fill: var(--c-text); }
+  .brand-logo-stop-a { stop-color: var(--c-accent); }
+  .brand-logo-stop-b { stop-color: var(--c-accent-quiet); }
+
+  .brand-logo-word {
+    display: block;
+    width: 5.1rem;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* The wordmark's letters are SVG <text> at 23 user units — a glyph size, not
+     UI type. A DOM font-size audit cannot tell the difference and would count a
+     seventh size on every screen, so the size is declared on the type step and
+     compensated with a transform: the mark stays pixel-identical while the
+     computed size sits inside the six-step scale (§4.6). The visible text and
+     the mask copy share x=0,y=22, so one origin serves both. */
+  .brand-logo-word text {
+    font-size: var(--fs-20);
+    /* 23/20 = 1.15. The SVG's own letter-spacing (-.8 user units) is scaled by
+       the same factor, so it is divided back out here to keep the tracking
+       identical to the original 23px glyph. */
+    letter-spacing: -.6957px;
+    transform: scale(1.15);
+    transform-origin: 0 22px;
+  }
+
+  .brand-logo-bar {
+    transform-box: fill-box;
+    transform-origin: center bottom;
+    animation: none;
+  }
+
+  .brand-logo-tiny .brand-logo-word { width: 3.1rem; }
+  .brand-logo-small .brand-logo-word { width: 4.5rem; }
+  .brand-logo-large .brand-logo-word { width: 6.25rem; }
+
+  .app-shell {
+    background: var(--c-canvas);
+  }
+
+  .panel-surface {
+    @apply rounded-[16px] bg-[#11131A];
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Club shell — 232px rail, 72px context bar, one 1280px content ceiling.
+   Structure and routes are unchanged from the previous shell; only the
+   material moved onto the token layer.
+   ------------------------------------------------------------------------ */
+
+.club-shell-rule {
+  /* One divider token for the club shell's horizontal rules. 6% white, the same
+     hairline the board uses for row separators, so no structural rule in the
+     club panel is brighter than that (§4.4). */
+  border-top: 1px solid var(--c-hairline-row);
+}
+
+/* --- Auth field ---------------------------------------------------------
+   A field is a line under the value, not a box — the treatment `club-field`
+   and `styles/panel.css` already ship. This unlayered rule beat the layered
+   field styles, so the sign-in form drew a 1px frame with a 10px radius, a
+   fill, and an underline at the same time: three separators where the system
+   has one. The auth kit declares no colours, so this is the only place the
+   old verdict was set. Height steps up from the panel's 38px because an auth
+   form is the only thing on its screen. */
+.field-input.auth-input {
+  height: 40px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+}
+.field-input.auth-input:hover { border-bottom-color: var(--c-text-muted); }
+.field-input.auth-input:focus { border-bottom-color: var(--c-accent); }
+@media (max-width: 640px) {
+  .field-input.auth-input { height: var(--hit-mobile); }
+}
+
+/* The rail is a container, not a floating block: one hairline separates it
+   from the workspace. Without it the surface and the canvas met edge to edge
+   and the navigation read as part of the page. */
+.app-shell aside {
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-hairline);
+  border-color: var(--c-hairline);
+}
+
+.app-shell .venue-switcher {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: .7rem;
+  border: 0;
+  border-radius: var(--r-tile);
+  padding: .55rem .65rem;
+  background: var(--c-raised);
+}
+
+.app-shell .venue-avatar,
+.app-shell .account-avatar {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-tile);
+  background: var(--c-accent-tint-strong);
+  color: var(--c-accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.app-shell .venue-avatar { width: 28px; height: 28px; }
+.app-shell .account-avatar { width: 30px; height: 30px; }
+
+.app-shell .club-sidebar-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  padding: 1.35rem .75rem 1.5rem;
+  scrollbar-width: none;
+}
+
+.app-shell .club-sidebar-nav::-webkit-scrollbar { display: none; }
+
+/* Rail group labels: normal case. The single uppercase tracked element on the
+   screen is .club-context-label in the shell header (§4.6). */
+.app-shell .club-sidebar-label {
+  margin: 0 .75rem .55rem;
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1.2;
+  text-transform: none;
+}
+
+/* The header's workspace context — exactly one per screen. */
+.club-context-label {
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: .08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.app-shell .club-sidebar-label:not(:first-child) { margin-top: 1.65rem; }
+
+.app-shell .club-sidebar-list {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-shell .club-sidebar-link {
+  position: relative;
+  display: flex;
+  min-height: var(--hit-desktop);
+  align-items: center;
+  gap: .75rem;
+  border: 0;
+  border-radius: var(--r-control);
+  padding: 0 .75rem;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.app-shell .club-sidebar-link svg {
+  flex: 0 0 auto;
+  color: var(--c-text-muted);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.app-shell .club-sidebar-link:hover {
+  background: var(--c-raised);
+  color: var(--c-text);
+}
+
+.app-shell .club-sidebar-link:hover svg {
+  color: var(--c-text-2);
+}
+
+/* The focus ring itself comes from the global :focus-visible rule. */
+.app-shell .club-sidebar-link:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.app-shell .club-sidebar-link-active,
+.app-shell .club-sidebar-link-active:hover {
+  background: var(--c-raised);
+  color: var(--c-text);
+}
+
+.app-shell .club-sidebar-link-active::before {
+  position: absolute;
+  inset-block: .65rem;
+  left: -.75rem;
+  width: 2px;
+  /* Square blade: a 2px marker is not a surface radius (§4.3), and keeping it
+     square leaves the rendered radius set at exactly 10/12/16/999. */
+  background: var(--c-accent);
+  content: '';
+}
+
+.app-shell .club-sidebar-link-active svg { color: var(--c-accent); }
+
+.app-shell .account-row {
+  display: flex;
+  min-height: var(--hit-mobile);
+  align-items: center;
+  gap: .65rem;
+  border-radius: var(--r-control);
+  padding: .35rem .45rem;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.app-shell .account-row:hover { background: var(--c-raised); }
+/* The header account chip is a mobile affordance (`lg:hidden` in the markup).
+   `display: grid` here would win over that utility, so the display value stays
+   with the utility and this rule only supplies geometry. */
+.app-shell .mobile-menu-button,
+.app-shell .header-account {
+  min-width: var(--hit-mobile);
+  min-height: var(--hit-mobile);
+  place-items: center;
+  border-radius: var(--r-control);
+  color: var(--c-text-2);
+}
+.app-shell .mobile-menu-button { display: grid; }
+.app-shell .mobile-menu-button:hover,
+.app-shell .header-account:hover { background: var(--c-raised); color: var(--c-text); }
+
+.app-shell main > header {
+  background: color-mix(in srgb, var(--c-canvas) 94%, transparent);
+}
+
+.app-shell .panel-surface,
+.app-shell .card {
+  box-shadow: none;
+  background: var(--c-surface);
+}
+
+.app-shell .panel-surface:hover { background: var(--c-surface); }
+.app-shell .bg-\[\#191919\], .app-shell .bg-\[\#151515\] { background-color: var(--c-surface); }
+.app-shell .bg-\[\#080808\], .app-shell .bg-black { background-color: var(--c-canvas); }
+.app-shell .text-white { color: var(--c-text); }
+.app-shell .bg-neutral-800 { background-color: var(--c-raised); }
+.app-shell .border-neutral-800, .app-shell .border-neutral-700 { border-color: var(--c-hairline); }
+.app-shell .text-brand-300, .app-shell .text-brand-400 { color: var(--c-accent); }
+.app-shell .text-emerald-300, .app-shell .text-emerald-400 { color: var(--c-accent); }
+.app-shell .bg-emerald-400 { background-color: var(--c-accent); }
+.app-shell .text-red-200, .app-shell .text-red-300, .app-shell .text-red-400 { color: var(--c-error); }
+.app-shell .focus-visible\:ring-brand-500:focus-visible { --tw-ring-color: var(--c-accent); }
+
+@media (min-width: 1024px) { .app-shell aside { width: 232px; } }
+
+.app-shell a,
+.app-shell button,
+.app-shell input,
+.app-shell select {
+  transition-duration: var(--dur-fast);
+}
+
+/* One width ceiling for the whole panel, and it lives on the content element
+   only (01-contract.md §5). The shell itself inherits it. */
+@media (min-width: 1024px) {
+  .app-shell main > div {
+    max-width: var(--w-content);
+  }
+}
+
+[class~="bg-[#141815]"] { background-color: var(--c-surface); }
+[class~="bg-[#101413]"] { background-color: var(--c-canvas); }
+[class~="text-[#06130C]"] { color: var(--c-ink-on-accent); }
+[class~="text-[#06130C99]"] { color: var(--c-ink-on-accent); }
+
+@media (max-width: 639px) {
+  .app-shell .page-title { font-size: var(--fs-20); line-height: 1.15; }
+  .app-shell .page-subtitle { max-width: 38rem; line-height: 1.55; }
+}
+
+/* Every interactive control keeps a 36px target on desktop and 44px at touch
+   widths (§5.3). Elements that already declare a larger minimum keep it.
+   `a.mobile-nav-item` belonged to the bottom bar and no longer exists; the
+   drawer's destinations are `.panel-nav-link`, held at `--hit-mobile` inside
+   `.panel-nav-sheet` by `styles/panel.css`. */
+@media (min-width: 641px) {
+  .club-app-shell :is(button, [role="button"], a.club-sidebar-link) {
+    min-height: var(--hit-desktop);
+  }
+}
+
+@media (max-width: 640px) {
+  .club-app-shell :is(button, [role="button"], a.club-sidebar-link) {
+    min-height: var(--hit-mobile);
+  }
+}
+
+/* The rail's own controls get the same target in BOTH authenticated shells.
+   The rules above are scoped to the club shell, so the DJ rail's workspace
+   switcher and account button fell back to their content height while the
+   club's were 36px. Scoped to `.panel-rail` rather than the shell so the DJ
+   console's page controls keep their own sizes. */
+@media (min-width: 641px) {
+  .panel-rail :is(button, [role="button"], a.panel-nav-link) {
+    min-height: var(--hit-desktop);
+  }
+}
+
+@media (max-width: 640px) {
+  .panel-rail :is(button, [role="button"], a.panel-nav-link) {
+    min-height: var(--hit-mobile);
+  }
+}
+
+/* Reduced motion means no motion, not very fast motion.
+   `transition-duration: .01ms` used to stand in for "off", but a transition
+   that is merely short still starts, still reports as running through
+   `document.getAnimations()`, and still costs a style recalc per change. The
+   token layer already collapses `--dur-*` to 1ms; this rule removes the
+   transition entirely, which is the only value that is actually still. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-property: none !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   "Connect" marketing + onboarding flow (public pages, no auth).
+    Palette/fonts use the shared graphite stage and Inter typography.
+   ------------------------------------------------------------------------ */
+
+@layer components {
+  /* The public site is a fixed dark surface in both themes. Painting the
+     document with the same colour stops the light theme's near-white canvas
+     from showing above the page on overscroll and before first paint. */
+  html:has(.connect-root),
+  body:has(.connect-root) {
+    background: theme('colors.drop.bg');
+  }
+
+  .connect-root {
+    @apply min-w-0 overflow-x-hidden bg-drop-bg font-sans text-drop-text antialiased;
+  }
+
+  /* The public site is a fixed dark surface whatever the panel theme is, but the
+     shared wordmark paints from the panel's --c-* ramp. In the light theme those
+     resolve to near-black and the lockup disappears on the black header, so the
+     mark keeps the Connect palette in both themes. */
+  .connect-root .brand-logo {
+    --c-text: theme('colors.drop.text');
+    --c-accent: theme('colors.drop.accent');
+    --c-accent-quiet: theme('colors.brand.100');
+  }
+
+  .connect-root .font-mono {
+    font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-eyebrow {
+    @apply font-mono text-[10px] uppercase tracking-[2px] text-drop-accent;
+  }
+
+  .connect-mono-label {
+    @apply font-mono text-[10px] font-medium uppercase tracking-[1.2px] text-drop-muted;
+  }
+
+  .connect-display {
+    @apply font-display font-semibold leading-[1.08] tracking-normal text-drop-text;
+  }
+
+  .connect-card {
+    @apply rounded-card border border-drop-line bg-drop-surface;
+  }
+
+  /* Shared input chrome for the wizard fields (design: 48px tall). Like every
+     field in the product it is a line under the value, not a box: no fill, no
+     radius, no side border. */
+  .connect-field {
+    @apply h-12 w-full border-0 bg-transparent px-0 text-[13px] text-drop-text placeholder:text-drop-dim focus:outline-none;
+    border-bottom: 1px solid #FFFFFF18;
+    border-radius: 0;
+  }
+  .connect-field:hover { border-bottom-color: rgba(255, 255, 255, .22); }
+  .connect-field:focus { border-bottom-color: #00FF87; }
+  .connect-field[aria-invalid='true'] { border-bottom-color: #FF6B6B; }
+
+  /* The wizard dropdown is the shared Select re-skinned for the Connect
+     palette. Only the line and the type come from here; height, keyboard
+     contract and the anchored list are the panel kit's. */
+  .connect-select .field-select__trigger {
+    height: 48px;
+    padding: 0 2px;
+    border: 0;
+    border-bottom: 1px solid #FFFFFF18;
+    border-radius: 0;
+    background: transparent;
+    color: #ECECEC;
+    font-size: 13px;
+  }
+  .connect-select .field-select__trigger:hover { border-bottom-color: rgba(255, 255, 255, .22); }
+  .connect-select .field-select__trigger[aria-expanded='true'] {
+    border-bottom-color: #00FF87;
+    box-shadow: none;
+  }
+  .connect-select .field-select__value.is-placeholder { color: #777777; }
+  .connect-select .field-select__chevron { color: #B4B4B4; }
+  .connect-select .field-select__trigger[aria-expanded='true'] .field-select__chevron { color: #00FF87; }
+
+  /* The list is portalled to <body>, so it carries its own palette class
+     instead of inheriting `.connect-root`. */
+  .connect-select-menu {
+    background: #191919;
+    border-radius: 12px;
+    box-shadow: 0 18px 40px -14px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .07);
+  }
+  .connect-select-menu .field-select__option { border-radius: 8px; color: #B4B4B4; font-size: 13px; }
+  .connect-select-menu .field-select__option:hover,
+  .connect-select-menu .field-select__option.is-active { background: rgba(255, 255, 255, .06); color: #ECECEC; }
+  .connect-select-menu .field-select__option.is-selected { background: rgba(0, 255, 135, .12); color: #ECECEC; font-weight: 500; }
+  .connect-select-menu .field-select__option-check { color: #00FF87; }
+
+  /* Language switcher in the Connect nav: a quiet 44px control, not a field. */
+  .connect-select-nav { flex: 0 0 auto; }
+  .connect-select-nav .field-select__trigger {
+    height: 44px;
+    max-width: 108px;
+    padding: 0 2px;
+    border-radius: 0;
+    background: transparent;
+    color: #B4B4B4;
+    font-size: 11px;
+  }
+  .connect-select-nav .field-select__value { overflow: hidden; text-overflow: ellipsis; }
+  @media (min-width: 640px) {
+    .connect-select-nav .field-select__trigger { max-width: 140px; padding: 0 2px; font-size: 12px; }
+  }
+
+  .connect-btn-primary {
+    @apply inline-flex h-12 items-center justify-center gap-2.5 rounded-field bg-drop-accent px-6 text-[13px] font-semibold text-drop-ink transition duration-200 hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-drop-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-drop-bg active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-45;
+  }
+
+  .connect-btn-ghost {
+    @apply inline-flex h-12 items-center justify-center gap-2 rounded-field border border-drop-line bg-drop-surface px-5 text-[13px] text-drop-text transition duration-200 hover:border-white/30 hover:bg-drop-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-drop-accent/30 active:scale-[0.985];
+  }
+
+  .connect-chip {
+    @apply inline-flex items-center rounded-full border border-drop-line px-3.5 py-2 text-xs text-drop-muted transition duration-200 hover:border-drop-accent/40 hover:text-drop-text;
+  }
+
+  .connect-chip-active {
+    @apply border-drop-accent bg-drop-accent/10 text-drop-accent hover:text-drop-accent;
+  }
+
+  .connect-root .connect-card,
+  .connect-root .rounded-card {
+    border-radius: var(--r-surface);
+  }
+
+  .connect-root .rounded-field {
+    border-radius: var(--r-control);
+  }
+
+  .connect-root .connect-btn-primary:hover {
+    box-shadow: none;
+  }
+
+  /* Thin rule used to separate landing sections. */
+  .connect-rule {
+    @apply h-px w-full bg-drop-line;
+  }
+
+  .connect-hero {
+    min-height: 720px;
+    background: #000;
+  }
+
+  .connect-hero > div:first-of-type img {
+    filter: saturate(.72) contrast(1.08);
+  }
+
+  .wizard-main {
+    padding-top: 36px;
+  }
+
+  .wizard-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    border-bottom: 1px solid #FFFFFF18;
+    padding: 18px 0 28px;
+    margin-bottom: 28px;
+  }
+
+  .wizard-stepper-wrap {
+    flex: 0 0 auto;
+    padding: 14px 16px;
+    border: 1px solid #FFFFFF18;
+    border-radius: var(--r-surface);
+    background: #101010;
+  }
+
+  .wizard-body > section:first-child {
+    min-width: 0;
+    padding: 26px;
+    border-top: 2px solid #00FF87;
+  }
+
+  .wizard-body > aside {
+    position: sticky;
+    top: 96px;
+    width: 340px;
+    padding: 22px;
+  }
+
+  .wizard-body .connect-field {
+    background-color: transparent;
+  }
+
+
+  .connect-root a,
+  .connect-root button,
+  .connect-root select {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Text entry overrides this in styles/panel.css (caret + accent rule). */
+  .connect-root :focus-visible {
+    outline: 2px solid #00FF87;
+    outline-offset: 3px;
+  }
+
+  .connect-panel-menu-list { pointer-events: none; }
+  .connect-panel-menu:hover .connect-panel-menu-list,
+  .connect-panel-menu:focus-within .connect-panel-menu-list,
+  .connect-panel-menu-list.connect-panel-menu-open { pointer-events: auto; }
+  .connect-panel-menu-link { display: block; padding: .65rem .75rem; border-radius: var(--r-control); color: #A5AEA9; font-size: 12px; line-height: 1.25; transition: background-color 160ms ease, color 160ms ease; }
+  .connect-panel-menu-link:hover { background: #FFFFFF0A; color: #F2F5F3; }
+  .connect-panel-menu-divider { display: block; height: 1px; margin: .25rem .45rem; background: #FFFFFF17; }
+  .connect-mobile-panel-link { display: flex; min-height: 44px; align-items: center; justify-content: space-between; padding: .25rem .75rem .25rem 1rem; color: #A5AEA9; font-size: 13px; }
+  .connect-mobile-panel-link:hover { color: #F2F5F3; }
+}
+
+@media (max-width: 1023px) {
+  .wizard-body > aside {
+    position: static;
+    width: 100%;
+  }
+}
+
+@media (max-width: 639px) {
+  .connect-hero {
+    min-height: 0;
+  }
+
+  .wizard-main {
+    padding-top: 20px;
+  }
+
+  .wizard-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 20px;
+    padding: 8px 0 20px;
+    margin-bottom: 20px;
+  }
+
+  .wizard-stepper-wrap {
+    overflow-x: auto;
+    padding: 12px;
+  }
+
+  .wizard-stepper-wrap ol {
+    min-width: max-content;
+  }
+
+  .wizard-body > section:first-child {
+    padding: 20px 16px;
+  }
+}
+
+/* Ticker on the Connect landing: the track repeats its run four times, so one
+   run is exactly 25% of it. The loop shifts by one run and three runs stay to
+   the right of the viewport, which keeps the seam invisible on wide screens. */
+@keyframes ticker-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-25%, 0, 0); }
+}
+
+.ticker-track {
+  animation: ticker-scroll 34s linear infinite;
+}
+
+/* Pause on hover only where a real pointer exists, so a tap on the band cannot
+   freeze it on touch screens. */
+@media (hover: hover) {
+  .ticker-band:hover .ticker-track {
+    animation-play-state: paused;
+  }
+}
+
+/* Respect the user's motion preference across every connect animation. */
+@media (prefers-reduced-motion: reduce) {
+  .motion-safe\:animate-marquee,
+  .animate-marquee,
+  .animate-float,
+  .animate-pulse-dot,
+  .animate-ring-out,
+  .ticker-track {
+    animation: none !important;
+  }
+
+  [data-reveal] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+.connect-linear-main { min-width: 0; background: var(--sprint-frame); }
+.connect-linear-main > header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 48px;
+  border-color: var(--sprint-line) !important;
+  background: rgba(9, 9, 11, .88) !important;
+  backdrop-filter: blur(14px);
+}
+.connect-linear-main > header > div { max-width: none; padding: 0 20px; }
+.connect-linear-main > header .brand-logo { display: none; }
+.connect-linear-main > header > div:first-child > nav { display: flex; gap: 18px; }
+.connect-linear-main > header > div:first-child > nav > *:first-child { color: var(--sprint-mint); }
+.connect-linear-main > header > div:first-child > nav a,
+.connect-linear-main > header > div:first-child > nav button { font-size: 11px; }
+.connect-linear-main > header select { height: 30px; min-height: 30px; border-radius: var(--r-control); }
+.connect-linear-main > header a[href="/login"] { min-height: 30px; }
+.connect-linear-main > header a.connect-nav-join { min-height: 30px; border-radius: var(--r-control); padding-inline: 12px; box-shadow: 0 0 15px rgba(0, 255, 135, .2); }
+.connect-linear-main > header a.connect-nav-signup { min-height: 30px; }
+.connect-linear-main .connect-hero { min-height: 648px; margin-top: -48px; background: var(--sprint-frame); }
+.connect-linear-main .connect-hero > div:first-of-type img { filter: saturate(.62) contrast(1.06) brightness(.7); }
+.connect-linear-main .connect-hero > div:first-of-type > div:first-of-type { background: linear-gradient(90deg, #09090bf2 0%, #09090bb8 48%, #09090b42 100%); }
+.connect-linear-main .connect-hero > div:first-of-type > div:nth-of-type(2) { background: linear-gradient(180deg, #09090b24 0%, #09090b00 38%, #09090b 100%); }
+.connect-linear-main .connect-hero > div:first-of-type > div:last-child { background: rgba(0, 255, 135, .35); }
+.connect-linear-main .connect-hero > div:nth-of-type(2) { padding-top: 112px; }
+.connect-linear-main .connect-hero h1 { max-width: 680px; font-size: clamp(2.25rem, 4vw, 4rem); letter-spacing: -.035em; }
+.connect-linear-main .connect-hero p { max-width: 560px; }
+.connect-linear-main .connect-hero .connect-btn-primary,
+.connect-linear-main .connect-btn-primary { height: 32px; border-radius: var(--r-control); padding: 0 12px; font-size: 11px; box-shadow: 0 0 15px rgba(0, 255, 135, .2); }
+.connect-linear-main .connect-hero .connect-btn-ghost,
+.connect-linear-main .connect-btn-ghost { height: 32px; border-radius: var(--r-control); padding: 0 12px; font-size: 11px; }
+.connect-linear-main section:not(.connect-hero) > div { padding-top: 48px; padding-bottom: 48px; }
+.connect-linear-main section:not(.connect-hero) h2 { font-size: clamp(1.5rem, 2.5vw, 2.2rem); letter-spacing: -.03em; }
+.connect-linear-main .connect-card,
+.connect-linear-main .panel-surface { border-color: var(--sprint-line); background: #141416; }
+.connect-linear-main .rounded-card { border-radius: var(--r-surface); }
+.connect-linear-main .rounded-field { border-radius: var(--r-control); }
+.connect-linear-main .connect-rule,
+.connect-linear-main section { border-color: var(--sprint-line); }
+.connect-linear-main .connect-mono-label,
+.connect-linear-main .connect-eyebrow { color: var(--sprint-mint); }
+.connect-linear-main .connect-chip { border-radius: var(--r-chip); padding: 4px 8px; }
+.connect-linear-main .connect-hero dl dd { font-size: 21px; }
+.connect-linear-main .connect-hero dl p { font-size: 9px; }
+.connect-linear-main .connect-hero .mt-9 { margin-top: 24px; }
+.connect-linear-main .connect-hero .mt-9 > div { padding-top: 17px; }
+.connect-linear-main .connect-hero .mt-9 p { font-size: 11px; }
+.connect-linear-main .connect-hero .mt-9 h3 { font-size: 12px; }
+.connect-linear-main .connect-hero .mt-9 .text-\[12px\] { font-size: 10px; }
+.connect-linear-main .connect-linear-panel { background: #141416; }
+/* Landing content is available immediately; motion must never hide the page. */
+.connect-linear-main [data-reveal] { opacity: 1; transform: none; }
+
+@media (max-width: 1023px) {
+  .connect-linear-main > header > div { padding-inline: 16px; }
+  .connect-linear-main > header > div:first-child > nav { display: none; }
+  .connect-linear-main > header .brand-logo { display: inline-flex; }
+  .connect-linear-main .connect-hero { margin-top: -48px; }
+  .connect-linear-main .connect-hero > div:nth-of-type(2) { padding-top: 94px; }
+}
+
+@media (max-width: 639px) {
+  .connect-linear-main section:not(.connect-hero) > div { padding-top: 36px; padding-bottom: 36px; }
+  .connect-linear-main .connect-hero { min-height: 0; }
+  .connect-linear-main .connect-hero > div:nth-of-type(2) { padding-top: 88px; }
+  .connect-linear-main .connect-hero h1 { font-size: 2.15rem; }
+}
+
+/* ---------------------------------------------------------------------------
+   DROP IT presentation page
+   The Sprint reference is a framed landing page, not an authenticated panel.
+   The product interface stays inside the presentation as a preview artifact.
+   ------------------------------------------------------------------------ */
+.connect-sprint-page {
+  --sprint-page: #0a0a0b;
+  --sprint-frame: #080809;
+  --sprint-line: rgba(255, 255, 255, .10);
+  --sprint-line-soft: rgba(255, 255, 255, .065);
+  --sprint-text: #f3f3f4;
+  --sprint-muted: #a0a0a6;
+  --sprint-dim: #77777e;
+  --sprint-mint: #00ff87;
+  min-height: 100dvh;
+  /* Full-bleed page: the landing is the site, not a preview card inside it.
+     No outer padding, no rounded frame, no border — the previous
+     `min(80vw, 1548px)` frame left the page floating in a small window with
+     up to 92px of dead margin around it. */
+  padding: 0;
+  background: var(--sprint-page);
+}
+
+.connect-sprint-frame {
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  margin: 0 auto;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: var(--sprint-frame);
+  color: var(--sprint-text);
+}
+
+.connect-sprint-frame .connect-linear-main {
+  min-width: 0;
+  background: var(--sprint-frame);
+  color: var(--sprint-text);
+}
+
+.connect-sprint-frame .connect-linear-main > header {
+  height: 56px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--sprint-line) !important;
+  background: rgba(8, 8, 9, .96) !important;
+  backdrop-filter: blur(10px);
+}
+
+.connect-sprint-frame .connect-linear-main > header > div {
+  width: 100%;
+  max-width: none;
+  padding: 0 28px;
+}
+
+.connect-sprint-frame .connect-linear-main > header .brand-logo {
+  display: inline-flex;
+  flex: 0 0 auto;
+  transform: scale(.92);
+  transform-origin: left center;
+}
+
+.connect-sprint-frame .connect-linear-main > header > div:first-child > nav {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 1.6vw, 27px);
+  margin: 0 auto;
+  padding-inline: 20px;
+}
+
+.connect-sprint-frame .connect-linear-main > header nav a,
+.connect-sprint-frame .connect-linear-main > header nav button {
+  color: #aaaab0;
+  font-size: 11px;
+}
+.connect-sprint-frame .connect-linear-main > header nav a:hover,
+.connect-sprint-frame .connect-linear-main > header nav button:hover { color: var(--sprint-text); }
+.connect-sprint-frame .connect-linear-main > header > div:first-child > nav > *:first-child { color: var(--sprint-mint); }
+.connect-sprint-frame .connect-linear-main > header label { display: none; }
+.connect-sprint-frame .connect-linear-main > header select {
+  width: 82px;
+  height: 30px;
+  min-height: 30px;
+  border-color: var(--sprint-line-soft);
+  border-radius: var(--r-control);
+  padding-inline: 7px;
+  font-size: 10px;
+}
+.connect-sprint-frame .connect-linear-main > header a[href="/login"] {
+  min-height: 30px;
+  padding-inline: 7px;
+  color: #aaaab0;
+  font-size: 11px;
+}
+.connect-sprint-frame .connect-linear-main > header a.connect-nav-join {
+  min-height: 32px;
+  border-radius: var(--r-control);
+  padding-inline: 12px;
+  box-shadow: none;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.connect-sprint-frame .connect-linear-main > header .connect-panel-menu-list {
+  z-index: 60;
+  background: #191919;
+}
+.connect-sprint-frame .connect-linear-main > header .mobile-menu-button { display: none; }
+
+.connect-sprint-frame .connect-hero {
+  min-height: 0;
+  margin-top: -56px;
+  overflow: visible;
+  background: var(--sprint-frame);
+}
+.connect-sprint-frame .connect-hero > div:first-of-type { display: none; }
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) {
+  position: relative;
+  max-width: 1440px;
+  padding: 154px 54px 48px;
+  display: block;
+}
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:first-child {
+  width: min(76%, 790px);
+  margin-left: 26%;
+  gap: 20px;
+}
+.connect-sprint-frame .connect-hero .font-mono.text-\[11px\] { font-size: 10px; letter-spacing: 1.6px; }
+.connect-sprint-frame .connect-hero h1 {
+  max-width: 780px;
+  font-size: clamp(36px, 3.25vw, 52px);
+  line-height: 1.08;
+  letter-spacing: -.035em;
+  text-wrap: balance;
+}
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:first-child > p:not(.font-mono) {
+  max-width: 600px;
+  color: var(--sprint-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.connect-sprint-frame .connect-hero .connect-btn-primary,
+.connect-sprint-frame .connect-linear-main .connect-btn-primary {
+  height: 34px;
+  min-height: 34px;
+  border-radius: var(--r-control);
+  padding: 0 14px;
+  background: var(--sprint-mint);
+  color: #090d0b;
+  font-size: 11px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+/* The secondary button must stay the primary's twin in metrics wherever the
+   compact landing scale applies, otherwise a pair reads as two systems. */
+.connect-sprint-frame .connect-hero .connect-btn-ghost,
+.connect-sprint-frame .connect-linear-main .connect-btn-ghost {
+  height: 34px;
+  min-height: 34px;
+  border-radius: var(--r-control);
+  border-color: var(--sprint-line);
+  background: transparent;
+  padding: 0 13px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* Below sm the closing pair stacks full width, so it takes a thumb-sized row
+   instead of a 34 px desktop bar. Both buttons move together. */
+@media (max-width: 639px) {
+  .connect-sprint-frame .connect-final-cta .connect-btn-primary,
+  .connect-sprint-frame .connect-final-cta .connect-btn-ghost {
+    height: 44px;
+    min-height: 44px;
+    font-size: 12px;
+  }
+}
+/* The same pair lives in the mobile menu — the header nav is the menu up to
+   1280 px, and there the 34 px row was both inconsistent and small to tap. */
+@media (max-width: 1279px) {
+  .connect-sprint-frame .connect-linear-main > header .connect-btn-primary,
+  .connect-sprint-frame .connect-linear-main > header .connect-btn-ghost {
+    height: 44px;
+    min-height: 44px;
+    font-size: 12px;
+  }
+}
+.connect-sprint-frame .connect-hero dl { padding-top: 2px; gap: 24px; }
+.connect-sprint-frame .connect-hero dl dd { font-size: 18px; }
+.connect-sprint-frame .connect-hero dl p { font-size: 9px; }
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:nth-child(2) {
+  position: absolute;
+  top: 248px;
+  right: 1%;
+  z-index: 1;
+  display: flex !important;
+  width: 460px;
+  height: 370px;
+  justify-content: center;
+  transform: scale(.63);
+  transform-origin: top right;
+  opacity: .76;
+  pointer-events: none;
+}
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:nth-child(2) > div { filter: saturate(.74); }
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 {
+  position: relative;
+  z-index: 2;
+  margin-top: 72px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  border-top-color: var(--sprint-line);
+  padding-top: 22px;
+}
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 h3 { font-size: 12px; }
+.connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 p { max-width: 320px; font-size: 10px; line-height: 1.5; }
+
+.connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div { padding: 52px clamp(24px, 4vw, 64px); }
+.connect-sprint-frame .connect-linear-main section:not(.connect-hero) h2 { max-width: 790px; font-size: clamp(23px, 2.2vw, 32px); line-height: 1.16; letter-spacing: -.03em; }
+.connect-sprint-frame .connect-linear-main .connect-mono-label,
+.connect-sprint-frame .connect-linear-main .connect-eyebrow,
+.connect-sprint-frame .connect-linear-main .connect-hero .font-mono { color: var(--sprint-mint); }
+.connect-sprint-frame .connect-linear-main .connect-card,
+.connect-sprint-frame .connect-linear-main .panel-surface { border-color: var(--sprint-line); background: #141416; }
+.connect-sprint-frame .connect-linear-main .rounded-card { border-radius: var(--r-surface); }
+.connect-sprint-frame .connect-linear-main .rounded-field { border-radius: var(--r-control); }
+.connect-sprint-frame .connect-linear-main #benefits .group > span[aria-hidden="true"] { display: none; }
+.connect-sprint-frame .connect-linear-main #benefits .group:hover { background: rgba(255, 255, 255, .025); }
+.connect-sprint-frame .connect-linear-main #benefits .rounded-full { border-radius: var(--r-chip); padding: 4px 8px; }
+.connect-sprint-frame .connect-linear-main #faq button:focus-visible,
+.connect-sprint-frame .connect-linear-main a:focus-visible,
+.connect-sprint-frame .connect-linear-main button:focus-visible,
+.connect-sprint-frame .connect-linear-main select:focus-visible { outline: 2px solid var(--sprint-mint); outline-offset: 2px; }
+.connect-sprint-frame .connect-linear-main [data-reveal] { opacity: 1; transform: none; }
+.connect-sprint-frame .connect-linear-main > footer { border-top: 1px solid var(--sprint-line); }
+
+@media (min-width: 1024px) {
+  .connect-sprint-frame .connect-linear-main > header > div:first-child > nav { display: flex; }
+  .connect-sprint-frame .connect-linear-main > header .mobile-menu-button { display: none; }
+}
+
+@media (max-width: 1279px) and (min-width: 1024px) {
+  /* full-bleed at every width — see .connect-sprint-frame above */
+  .connect-sprint-frame .connect-linear-main > header > div:first-child > nav { gap: 11px; padding-inline: 10px; }
+  .connect-sprint-frame .connect-linear-main > header > div:first-child > nav a,
+  .connect-sprint-frame .connect-linear-main > header > div:first-child > nav button { font-size: 10px; }
+  .connect-sprint-frame .connect-linear-main > header select { width: 70px; }
+}
+
+@media (max-width: 1023px) {
+  .connect-sprint-page { padding: 0; }
+  .connect-sprint-frame { width: 100%; border-radius: 0; }
+  .connect-sprint-frame .connect-linear-main > header { height: 52px; min-height: 52px; }
+  .connect-sprint-frame .connect-linear-main > header > div { padding-inline: 14px; }
+  .connect-sprint-frame .connect-linear-main > header > div:first-child > nav { display: none; }
+  .connect-sprint-frame .connect-linear-main > header .mobile-menu-button { display: grid; min-width: 38px; min-height: 38px; width: 38px; height: 38px; }
+  .connect-sprint-frame .connect-hero { margin-top: -52px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) { padding: 126px 30px 38px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:first-child { width: min(78%, 720px); margin-left: 16%; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:nth-child(2) { right: -2%; top: 270px; transform: scale(.5); }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 { margin-top: 52px; }
+  .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div { padding: 40px 28px; }
+}
+
+@media (max-width: 767px) {
+  .connect-sprint-page { padding: 0; }
+  .connect-sprint-frame { border-radius: 0; }
+  .connect-sprint-frame .connect-linear-main > header select { width: 78px; max-width: 78px; }
+  .connect-sprint-frame .connect-linear-main > header > div { gap: 6px; padding-inline: 10px; }
+  .connect-sprint-frame .connect-linear-main > header .brand-logo { transform: scale(.82); }
+  .connect-sprint-frame .connect-linear-main > header a[href="/login"] { display: none; }
+  .connect-sprint-frame .connect-linear-main > header a.connect-nav-join { padding-inline: 9px; font-size: 10px; }
+  .connect-sprint-frame .connect-hero { min-height: 0; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) { padding: 100px 20px 28px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:first-child { width: 100%; margin-left: 0; gap: 17px; }
+  .connect-sprint-frame .connect-hero h1 { max-width: 580px; font-size: clamp(32px, 9vw, 42px); }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:first-child > p:not(.font-mono) { font-size: 13px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > div:nth-child(2) {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 460px;
+    height: 285px;
+    margin: -8px auto -95px;
+    transform: scale(.48);
+    transform-origin: center top;
+    opacity: .9;
+  }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 { grid-template-columns: 1fr; gap: 12px; margin-top: 16px; padding-top: 17px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 > div { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 8px; }
+  .connect-sprint-frame .connect-hero > div:nth-of-type(2) > .mt-9 > div p { grid-column: 2; }
+  .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div { padding: 34px 18px; }
+  .connect-sprint-frame .connect-linear-main > footer { padding-inline: 18px; }
+}
+
+/* Final hero composition: a broad text measure and a quiet product preview below. */
+.connect-sprint-frame .sprint-hero {
+  position: relative;
+  min-height: 0;
+  margin-top: -56px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--sprint-frame);
+}
+.connect-sprint-frame .sprint-hero-photo { display: none; }
+.connect-sprint-frame .sprint-hero-content {
+  position: relative;
+  z-index: 2;
+  /* Full-bleed page: the hero shares the same gutter as the sections below it
+     instead of being pushed into the right three quarters of a framed card. */
+  width: auto;
+  max-width: 860px;
+  margin-left: 0;
+  padding: 120px 54px 44px;
+}
+.connect-sprint-frame .sprint-hero-eyebrow {
+  margin: 0 0 16px;
+  color: var(--sprint-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+.connect-sprint-frame .sprint-hero h1 {
+  max-width: 740px;
+  color: var(--sprint-text);
+  font-size: clamp(38px, 3.4vw, 52px);
+  font-weight: 600;
+  letter-spacing: -.04em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+.connect-sprint-frame .sprint-hero-copy {
+  max-width: 590px;
+  margin-top: 16px;
+  color: var(--sprint-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.connect-sprint-frame .sprint-hero-actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; }
+.connect-sprint-frame .sprint-hero .connect-btn-primary {
+  height: 34px;
+  min-height: 34px;
+  border-radius: var(--r-control);
+  padding: 0 13px;
+  background: var(--sprint-mint);
+  color: #090d0b;
+  font-size: 11px;
+  box-shadow: none;
+  white-space: nowrap;
+}
+.connect-sprint-frame .sprint-hero-secondary { color: var(--sprint-muted); font-size: 11px; text-decoration: none; }
+.connect-sprint-frame .sprint-hero-secondary:hover { color: var(--sprint-text); }
+.connect-sprint-frame .sprint-hero-device { display: none; }
+.connect-sprint-frame .sprint-hero-details { padding: 20px 54px 36px; border-bottom: 1px solid var(--sprint-line); }
+.connect-sprint-frame .sprint-proof-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px 30px;
+  padding: 14px 0 20px;
+  border-top: 1px solid var(--sprint-line-soft);
+  border-bottom: 1px solid var(--sprint-line-soft);
+}
+.connect-sprint-frame .sprint-proof-item { display: flex; flex-direction: column; gap: 4px; }
+.connect-sprint-frame .sprint-proof-value { color: var(--sprint-text); font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.connect-sprint-frame .sprint-proof-label { color: var(--sprint-dim); font-size: 8px; letter-spacing: .07em; text-transform: uppercase; }
+.connect-sprint-frame .sprint-venue-proof { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--sprint-muted); font-size: 10px; }
+.connect-sprint-frame .sprint-avatars { display: flex; align-items: center; padding-left: 4px; }
+.connect-sprint-frame .sprint-avatars > span { width: 20px; height: 20px; margin-left: -4px; border: 1px solid #101012; border-radius: var(--r-chip); }
+.connect-sprint-frame .sprint-avatars .sprint-avatar-count { display: grid; place-items: center; width: 28px; border-radius: var(--r-chip); background: #171719; color: #ddd; font-size: 8px; }
+.connect-sprint-frame .sprint-how-row { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 26px; padding-top: 20px; }
+.connect-sprint-frame .sprint-how-item { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 8px; }
+.connect-sprint-frame .sprint-how-number { color: var(--sprint-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.connect-sprint-frame .sprint-how-item h2 { color: var(--sprint-text); font-size: 11px; font-weight: 600; }
+.connect-sprint-frame .sprint-how-item p { margin-top: 6px; color: var(--sprint-dim); font-size: 9px; line-height: 1.5; }
+
+@media (min-width: 1024px) {
+  .connect-sprint-frame .sprint-hero { min-height: 650px; }
+  .connect-sprint-frame .sprint-hero-content { padding-top: 132px; }
+  .connect-sprint-frame .sprint-hero-device {
+    position: absolute;
+    z-index: 1;
+    top: 265px;
+    left: 6%;
+    display: block;
+    width: 460px;
+    height: 370px;
+    opacity: .52;
+    pointer-events: none;
+    transform: perspective(1400px) rotateX(49deg) rotateZ(-12deg) scale(1.45);
+    transform-origin: center top;
+    mask-image: linear-gradient(to bottom, black 0%, black 52%, transparent 100%);
+  }
+  .connect-sprint-frame .sprint-hero-device > div { transform: scale(.82); transform-origin: top left; }
+  .connect-sprint-frame .sprint-hero-details { margin-top: -4px; }
+}
+
+@media (max-width: 1023px) {
+  .connect-sprint-frame .sprint-hero { margin-top: -52px; }
+  .connect-sprint-frame .sprint-hero-content { width: auto; max-width: 760px; margin-left: 0; padding: 110px 28px 40px; }
+  .connect-sprint-frame .sprint-hero h1 { font-size: clamp(35px, 5vw, 48px); }
+  .connect-sprint-frame .sprint-hero-details { padding: 18px 28px 30px; }
+}
+
+@media (max-width: 767px) {
+  .connect-sprint-frame .sprint-hero-content { width: 100%; max-width: none; margin-left: 0; padding: 96px 20px 32px; }
+  .connect-sprint-frame .sprint-hero-eyebrow { font-size: 8px; letter-spacing: .9px; }
+  .connect-sprint-frame .sprint-hero h1 { font-size: clamp(32px, 9vw, 42px); }
+  .connect-sprint-frame .sprint-hero-copy { font-size: 13px; }
+  .connect-sprint-frame .sprint-hero-details { padding: 14px 18px 24px; }
+  .connect-sprint-frame .sprint-proof-row { gap: 14px 20px; }
+  .connect-sprint-frame .sprint-venue-proof { flex-basis: 100%; margin-left: 0; }
+  .connect-sprint-frame .sprint-how-row { grid-template-columns: 1fr; gap: 14px; }
+  .connect-sprint-frame .sprint-how-item p { font-size: 10px; }
+}
+
+/* Tie the site to the reference composition: image-led lower hero + framed preview. */
+.connect-sprint-frame .sprint-hero { min-height: 770px; }
+/* `.connect-hero > div:first-of-type` is hidden above; the hero photo is the
+   one exception, so this selector has to out-specify it.
+   The photo carries its own scrim: the element stays fully opaque and only the
+   gradients darken it. Fading the whole element as well multiplied the two
+   together and left the right half of the hero at ~14/255, i.e. black. */
+.connect-sprint-frame .connect-linear-main .connect-hero > .sprint-hero-photo {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background-image:
+    linear-gradient(90deg, rgba(8, 8, 9, .97) 0%, rgba(8, 8, 9, .93) 42%, rgba(8, 8, 9, .64) 70%, rgba(8, 8, 9, .18) 100%),
+    linear-gradient(0deg, #080809 0%, rgba(8, 8, 9, 0) 46%),
+    url('/hero-club.jpg');
+  background-position: center, center, center 58%;
+  background-size: cover;
+  opacity: 1;
+  pointer-events: none;
+}
+/* Below 1024px the headline spans the full width and sits over the brightest
+   part of the frame, so the horizontal scrim no longer protects it. A flat
+   overlay brings the backdrop under the text, then the photo stays visible
+   again toward the bottom of the hero. */
+@media (max-width: 1023px) {
+  .connect-sprint-frame .connect-linear-main .connect-hero > .sprint-hero-photo {
+    background-image:
+      linear-gradient(180deg, rgba(8, 8, 9, .95) 0%, rgba(8, 8, 9, .92) 55%, rgba(8, 8, 9, .66) 76%, rgba(8, 8, 9, .38) 100%),
+      url('/hero-club.jpg');
+    background-position: center, center 40%;
+    background-size: cover;
+  }
+}
+/* The hero's product preview is the owner-panel section itself (see
+   panel-mock.css), so the duplicate tilted device is not rendered. */
+.connect-sprint-frame .sprint-hero-device { display: none; }
+.connect-sprint-frame .sprint-hero-content { padding-top: 132px; }
+.connect-sprint-frame .sprint-hero h1 { font-size: clamp(42px, 3.6vw, 56px); }
+.connect-sprint-frame .sprint-hero-device {
+  top: 468px;
+  right: 5%;
+  left: auto;
+  opacity: .36;
+  transform: perspective(1400px) rotateX(47deg) rotateZ(-11deg) scale(1.08);
+  transform-origin: center top;
+  mask-image: linear-gradient(to bottom, black 0%, black 45%, transparent 95%);
+}
+/* Closing CTA: a tilted mosaic of small triangles reacts to a beat and to the pointer.
+   The flat colour is the fallback when WebGL is unavailable. */
+.connect-sprint-frame .connect-linear-main section.connect-final-cta {
+  background: #0c0c0e;
+}
+.connect-sprint-frame .connect-linear-main section.connect-final-cta > div.connect-final-cta-stage {
+  padding: 0;
+}
+.connect-triangle-field {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .connect-triangle-field { opacity: .72; }
+}
+.connect-sprint-frame .connect-linear-main #benefits .group > span[aria-hidden="true"] { display: none; }
+
+@media (min-width: 1024px) {
+  .connect-sprint-frame .sprint-hero { min-height: 770px; }
+}
+
+@media (max-width: 1023px) {
+  .connect-sprint-frame .sprint-hero { min-height: 660px; }
+  .connect-sprint-frame .sprint-hero-content { padding-top: 120px; }
+  .connect-sprint-frame .sprint-hero-device { top: 445px; right: -6%; transform: perspective(1400px) rotateX(45deg) rotateZ(-10deg) scale(.88); }
+}
+
+@media (max-width: 767px) {
+  .connect-sprint-frame .sprint-hero { min-height: 580px; }
+  .connect-sprint-frame .sprint-hero-content { padding-top: 95px; }
+  .connect-sprint-frame .sprint-hero-device { top: 440px; right: -22%; opacity: .26; transform: perspective(1400px) rotateX(43deg) rotateZ(-10deg) scale(.62); }
+}
+

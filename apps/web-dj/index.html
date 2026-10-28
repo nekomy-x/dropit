@@ -27,7 +27,6 @@
   --red-dim: rgba(255, 56, 96, 0.12);
   --amber: #ffb800;         /* пауза / внимание */
   --amber-dim: rgba(255, 184, 0, 0.12);
-  --blue: #4dd7ff;          /* инфо / время */
   --font-display: 'Unbounded', sans-serif;
   --font-mono: 'Space Mono', monospace;
   --r-lg: 20px;
@@ -89,6 +88,19 @@ button:active { transform: scale(0.97); }
   background: var(--neon-dim); border: 1px solid rgba(166,255,0,0.25);
   padding: 5px 12px; border-radius: 999px;
 }
+
+/* ============ ТЕСТОВЫЙ РЕЖИМ ============ */
+/* Стенд работает на моках: подпись постоянная, не закрывается и не мигает.
+   Без ведущей точки: слово «Тестовый режим» уже несёт состояние, а 5px-диск
+   рядом с ним — иконка без содержания. Тон остаётся в самом слове. */
+.test-mode {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 0 0 14px;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
+  color: var(--text-dim);
+}
+.test-mode strong { color: var(--amber); font-weight: 400; }
+.test-mode .sep { color: var(--text-faint); }
 
 /* ============ ПЕРЕКЛЮЧАТЕЛЬ ПАУЗЫ ============ */
 .pause-wrap { padding: 4px 0 16px; }
@@ -194,7 +206,7 @@ button:active { transform: scale(0.97); }
   border-radius: 6px; background: var(--bg-elev-2); border: 1px solid var(--stroke); color: var(--text-dim);
 }
 .chip.hot { color: var(--neon); border-color: rgba(166,255,0,0.4); background: var(--neon-dim); font-weight: 700; }
-.chip.time { color: var(--blue); border-color: rgba(77,215,255,0.3); }
+.chip.time { color: var(--neon); border-color: rgba(166,255,0,0.3); }
 .chip.money { color: var(--text); }
 .chip.isrc { color: var(--text-faint); }
 
@@ -273,6 +285,15 @@ button:active { transform: scale(0.97); }
     <div class="brand"><span class="dot" aria-hidden="true"></span>DROP&nbsp;IT</div>
     <div class="live"><span aria-hidden="true">◉</span>&nbsp;LIVE · BARRIO LATINO</div>
   </header>
+
+  <!-- ТЕСТОВЫЙ РЕЖИМ: статичный мок пульта на стенде -->
+  <p class="test-mode reveal" style="animation-delay: 0.08s" role="note">
+    <strong>Тестовый режим</strong>
+    <span class="sep" aria-hidden="true">·</span>
+    <span>платежи мок</span>
+    <span class="sep" aria-hidden="true">·</span>
+    <span>данные демо</span>
+  </p>
 
   <!-- ПАУЗА ПРИЁМА -->
   <section class="pause-wrap reveal" style="animation-delay: 0.15s">

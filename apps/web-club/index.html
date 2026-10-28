@@ -7,9 +7,29 @@
          The backend renders this tag on the served HTML; a fallback constant
          is used only for local development before F2 lands. -->
     <meta name="csrf-token" content="dev-csrf-placeholder" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Type is self-hosted (public/fonts/inter-latin-var.woff2, declared in
+         src/styles/club-tokens.css) and icons are bundled from lucide-react.
+         There is intentionally no CDN <script> or <link> here: §5.4 forbids
+         runtime icon/font CDNs, and the panel must boot with no outbound calls. -->
+    <!-- Theme is applied before first paint: no flash, no layout shift. The
+         stored value is the only source of truth; `dark` is the product default. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('dropit-theme');
+          document.documentElement.setAttribute('data-theme', stored === 'light' ? 'light' : 'dark');
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <title>DROP IT — Club Panel</title>
   </head>
-  <body class="bg-neutral-950 text-neutral-100 antialiased">
+  <!-- The body carries no colour utilities: the canvas and text ramp come from
+       the token layer (src/styles/club-tokens.css) via src/index.css, so there
+       is exactly one place that decides what the page paints. -->
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

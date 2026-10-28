@@ -1,0 +1,687 @@
+/* ============================================================================
+   Club panel primitives — src/components/club/
+   Every rule here consumes src/styles/club-tokens.css. No raw radii, greens,
+   durations or font sizes are declared below; the only literals are the
+   contract values (16/12/10/999) that the token layer already owns, and 1px
+   hairlines which §4.4 permits.
+
+   The data-* attributes (data-surface / data-control / data-metric /
+   data-source / data-preview-banner / data-abstract) live in the components,
+   not in the pages, so scripts/club-ui-check.mjs can assert the contract on
+   any route that uses a primitive.
+   ========================================================================== */
+
+/* --- Panel ---------------------------------------------------------------- */
+.club-panel {
+  min-width: 0;
+  padding: var(--pad-panel);
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--c-panel-shadow);
+}
+
+@media (min-width: 1024px) {
+  .club-panel { padding: var(--pad-panel-lg); }
+}
+
+.club-panel-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.club-panel-head-copy { min-width: 0; }
+
+.club-panel-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.club-panel-detail {
+  margin: var(--sp-1) 0 0;
+  max-width: 62ch;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-text);
+}
+
+.club-panel-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* --- Tile ----------------------------------------------------------------- */
+.club-tile {
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  color: var(--c-text);
+  box-shadow: none;
+}
+
+.club-tile-inset {
+  background: var(--c-inset);
+}
+
+/* A selected tile gets a tint and a 2px accent blade on the left — never a
+   border around it (§4.4). */
+.club-tile-selected {
+  position: relative;
+  background: var(--c-accent-tint);
+}
+
+.club-tile-selected::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+  content: '';
+}
+
+/* --- Metric --------------------------------------------------------------- */
+.club-metric {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.club-metric-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.club-metric-label {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.club-metric-body {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.club-metric-value {
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-28);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  line-height: var(--lh-tight);
+  white-space: nowrap;
+}
+
+.club-metric-compact .club-metric-value { font-size: var(--fs-20); }
+
+/* Honest "no reading" state: the placeholder is text, not a zero. */
+.club-metric-value-unavailable {
+  color: var(--c-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--fs-20);
+  font-weight: 500;
+}
+
+.club-metric-unit {
+  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.club-metric-caption {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  line-height: var(--lh-text);
+}
+
+/* Value cross-fade on update (§4.8 #5): short, transform-free, never shifts
+   the surrounding layout because the element keeps its box. */
+.club-metric-value {
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .club-metric-value { transition: none; }
+}
+
+/* --- Chips / source chips ------------------------------------------------- */
+.club-chip {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: .01em;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.club-chip-live { background: var(--c-accent-tint-strong); color: var(--c-accent); }
+.club-chip-warn { background: var(--c-warn-tint); color: var(--c-warn); }
+.club-chip-error { background: var(--c-error-tint); color: var(--c-error); }
+.club-chip-neutral { background: var(--c-raised); color: var(--c-text-2); }
+
+/* Chip as a button keeps a 36px hit target on desktop, 44px on touch widths. */
+button.club-chip,
+a.club-chip {
+  min-height: var(--hit-desktop);
+  padding: 0 var(--sp-3);
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+@media (max-width: 640px) {
+  button.club-chip,
+  a.club-chip { min-height: var(--hit-mobile); }
+}
+
+button.club-chip:hover,
+a.club-chip:hover { background: var(--c-accent-tint); color: var(--c-text); }
+
+/* The source chip always carries a word: `live`, `preview`, `unavailable`.
+   Colour is a second signal, never the only one (§4.5, §5.3). */
+.club-source-chip {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-chip);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.club-source-live { background: var(--c-accent-tint-strong); color: var(--c-accent); }
+.club-source-preview { background: var(--c-warn-tint); color: var(--c-warn); }
+.club-source-unavailable { background: var(--c-error-tint); color: var(--c-error); }
+
+/* --- Preview banner ------------------------------------------------------- */
+.club-preview-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+  font-size: var(--fs-12);
+  line-height: var(--lh-text);
+}
+
+.club-preview-banner strong { color: var(--c-warn); font-weight: 600; }
+
+/* --- Segmented ------------------------------------------------------------ */
+.club-segmented {
+  display: inline-flex;
+  position: relative;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+}
+
+.club-segmented-runner {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  height: calc(100% - 6px);
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+  transform: translateX(0);
+  /* Only `transform` animates (§4.8): width is applied instantly so the
+     runner never animates a layout property. */
+  transition: transform var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+
+.club-segmented-option {
+  position: relative;
+  z-index: 1;
+  min-height: var(--hit-desktop);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-chip);
+  background: transparent;
+  color: var(--c-text-2);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.club-segmented-option:hover { color: var(--c-text); }
+.club-segmented-option[aria-checked='true'] { color: var(--c-text); }
+.club-segmented-option:focus-visible { outline-offset: -2px; }
+
+@media (max-width: 640px) {
+  .club-segmented { width: 100%; }
+  .club-segmented-option { flex: 1 1 0; min-height: var(--hit-mobile); padding: 0 var(--sp-2); }
+}
+
+/* --- ListRow -------------------------------------------------------------- */
+.club-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.club-list-row {
+  display: flex;
+  min-height: var(--hit-mobile);
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+  /* Pin every side, not just the bottom: a row whose divider is removed by a
+     variant must never fall back to the near-white UA/Tailwind default. */
+  border-color: var(--c-hairline-row);
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  line-height: var(--lh-text);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.club-list-row:last-child { border-bottom: 0; }
+
+a.club-list-row,
+button.club-list-row {
+  width: 100%;
+  padding-inline: var(--sp-2);
+  border-radius: var(--r-tile);
+  border-bottom-color: var(--c-hairline-row);
+  background: transparent;
+  text-align: left;
+}
+
+a.club-list-row:hover,
+button.club-list-row:hover { background: var(--c-raised); }
+
+.club-list-row-main { min-width: 0; flex: 1 1 auto; }
+
+.club-list-row-title {
+  display: block;
+  overflow: hidden;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.club-list-row-detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+
+.club-list-row-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Meter ---------------------------------------------------------------- */
+.club-meter {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.club-meter-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--r-chip);
+  background: var(--c-inset);
+}
+
+.club-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+.club-meter-value {
+  flex: 0 0 auto;
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .club-meter-fill { transition: none; }
+}
+
+/* --- Toast ---------------------------------------------------------------- */
+.club-toast-region {
+  position: fixed;
+  z-index: 120;
+  right: var(--sp-5);
+  bottom: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: min(420px, calc(100vw - var(--sp-8)));
+  pointer-events: none;
+}
+
+.club-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  color: var(--c-text);
+  box-shadow: none;
+  pointer-events: auto;
+  animation: club-toast-in var(--dur-base) var(--ease-out) both;
+}
+
+.club-toast-closing { animation: club-toast-out var(--dur-fast) var(--ease-out) both; }
+
+.club-toast-icon { flex: 0 0 auto; margin-top: 1px; }
+.club-toast-live .club-toast-icon { color: var(--c-accent); }
+.club-toast-warn .club-toast-icon { color: var(--c-warn); }
+.club-toast-error .club-toast-icon { color: var(--c-error); }
+.club-toast-neutral .club-toast-icon { color: var(--c-text-2); }
+
+.club-toast-copy { min-width: 0; flex: 1 1 auto; }
+
+.club-toast-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.club-toast-message {
+  margin: var(--sp-1) 0 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-text);
+}
+
+.club-toast-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.club-toast-action {
+  min-height: var(--hit-desktop);
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-accent);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.club-toast-action:hover { background: var(--c-accent-tint); }
+
+.club-toast-close {
+  display: grid;
+  width: var(--hit-desktop);
+  min-width: var(--hit-desktop);
+  height: var(--hit-desktop);
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.club-toast-close:hover { background: rgba(255, 255, 255, .06); color: var(--c-text); }
+
+@keyframes club-toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes club-toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+@media (max-width: 640px) {
+  .club-toast-region { right: var(--sp-3); left: var(--sp-3); bottom: calc(76px + env(safe-area-inset-bottom)); width: auto; }
+  .club-toast-close { width: var(--hit-mobile); min-width: var(--hit-mobile); height: var(--hit-mobile); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .club-toast,
+  .club-toast-closing { animation: none; }
+}
+
+/* --- Skeleton ------------------------------------------------------------- */
+.club-skeleton {
+  min-height: 14px;
+  border-radius: var(--r-tile);
+  background: rgba(255, 255, 255, .06); /* §4.9: no shimmer brighter than 6% */
+}
+
+.club-skeleton-value { min-height: var(--fs-28); width: 52%; }
+.club-skeleton-line { width: 100%; }
+.club-skeleton-line-short { width: 42%; }
+
+.club-skeleton-stack { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* --- Empty / error states ------------------------------------------------- */
+.club-state {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-4) 0;
+}
+
+.club-state-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.club-state-detail {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: var(--lh-text);
+}
+
+.club-state-code {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+/* One banner per board; tint only, no border (§4.9 ErrorState). */
+.club-error-banner {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+.club-error-banner .club-state-title { color: var(--c-error); }
+.club-error-banner .club-state-detail { color: var(--c-text-2); }
+.club-error-banner-copy { min-width: 0; flex: 1 1 240px; }
+
+/* The honest (no-backend) board stacks ErrorState + PreviewBanner; at 1024x768
+   that stack used to push the page to 2008px, over the §7.4 ≤2000 budget. The
+   breakpoint compresses banner padding only — no type size drops below 11px and
+   no hit target (36px desktop / 44px touch) changes. Measured: 2008 → 1984. */
+@media (max-width: 1024px) {
+  .club-error-banner { padding: var(--sp-2) var(--sp-4); }
+  .club-preview-banner { padding: var(--sp-1) var(--sp-4); }
+}
+
+/* --- Buttons (contract: data-control="button", r10, >=36px / 44px) -------- */
+.club-button {
+  display: inline-flex;
+  min-height: var(--hit-desktop);
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.club-button:hover:not(:disabled) { background: #1D212B; }
+.club-button:active:not(:disabled) { transform: scale(.99); }
+.club-button:disabled { cursor: not-allowed; opacity: .55; }
+
+.club-button-primary { background: var(--c-accent); color: var(--c-ink-on-accent); }
+.club-button-primary:hover:not(:disabled) { background: var(--c-accent-hover); }
+
+.club-button-quiet { background: transparent; color: var(--c-text-2); }
+.club-button-quiet:hover:not(:disabled) { background: var(--c-raised); color: var(--c-text); }
+
+.club-button-icon {
+  width: var(--hit-desktop);
+  min-width: var(--hit-desktop);
+  padding: 0;
+}
+
+@media (max-width: 640px) {
+  .club-button { min-height: var(--hit-mobile); }
+  .club-button-icon { width: var(--hit-mobile); min-width: var(--hit-mobile); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .club-button:active:not(:disabled) { transform: none; }
+  .club-button { transition: none; }
+}
+
+/* --- Field ---------------------------------------------------------------- */
+/* A field is a line under the value: no box, no fill, no radius — the same
+   treatment as `.field-input` in styles/panel.css. */
+.club-field {
+  min-height: var(--hit-desktop);
+  width: 100%;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+}
+
+.club-field::placeholder { color: var(--c-text-muted); opacity: 1; }
+.club-field:hover { border-bottom-color: var(--c-text-muted); }
+/* A native select carrying `club-field` keeps the line and only adds the
+   chevron room — the rule same height and baseline as a text field. */
+select.club-field { appearance: none; padding-right: 24px; cursor: pointer; }
+/* Text entry is marked by the caret and the accent rule, in both themes: no
+   outline, no box, no tint halo. The shared rule in styles/panel.css owns the
+   focus frame for every field; keeping a second treatment here is what made a
+   focused field read as a text selection. */
+.club-field:focus { outline: none; border-bottom-color: var(--c-accent); }
+
+@media (max-width: 640px) {
+  .club-field { min-height: var(--hit-mobile); }
+}
+
+/* --- Focus ring ----------------------------------------------------------- */
+/* Text entry overrides this in styles/panel.css (caret + accent rule, no
+   box). Everything else, including checkboxes and radios, takes the ring. */
+.club-root :where(a, button, input, select, textarea, [tabindex], [role='radio'], [role='button']):focus-visible,
+.club-panel :where(a, button, input, select, textarea, [tabindex], [role='radio']):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}

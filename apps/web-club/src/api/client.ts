@@ -7,12 +7,13 @@
  *   LIVE (implemented on the backend):
  *     - POST /v1/auth/club/login        → TokenPair | TotpChallenge
  *     - POST /v1/auth/club/2fa          → TokenPair
+ *     - POST /v1/auth/club/master       → MasterLoginResponse
  *     - POST /v1/auth/refresh           → TokenPair
  *     - POST /v1/club/sessions          → SessionResponse (201)
  *     - POST /v1/club/sessions/:id/qr/generate → {session_id, qr_token, expires_at}
  *     - PATCH /v1/club/sessions/:id/close → SessionResponse
  *
- *   Most endpoints are LIVE (panel_routes.rs); inviteDj is a 501 stub
+ *   Most endpoints are LIVE (panel_routes.rs), including DJ invitation
  *   (club profile/pricing/DJs/earnings are F3+):
  *     - GET/PATCH /v1/club/profile
  *     - GET/POST /v1/club/pricing
@@ -64,6 +65,15 @@ export interface TotpChallenge {
   mfa_required: true;
 }
 
+/** `MasterLoginResponse` (routes.rs): one-time club token exchanged for JWTs. */
+export interface MasterLoginResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  club_id: string;
+  role: 'club';
+}
+
 /** Session states per dropit_domain::SessionStatus (openapi 0.5.0). */
 export type SessionStatus = 'created' | 'active' | 'paused_acceptance' | 'closed';
 
@@ -87,18 +97,41 @@ export interface QrGenerateResponse {
   expires_at: string;
 }
 
-/** Reference type for the not-yet-implemented /v1/club/djs listing. */
-export type DjStatus = 'active' | 'suspended' | 'blocked';
+/** `GET /v1/club/djs` response domain type. */
+export type DjStatus = 'invited' | 'active' | 'suspended' | 'blocked';
 
+/**
+ * One row of the club roster.
+ *
+ * `online` / `onShift` are server facts, not panel guesses: `online` is a
+ * heartbeat younger than `presenceTtlSeconds` (`POST /v1/dj/presence` from the
+ * DJ console), `onShift` is an unclosed session assigned to this DJ.
+ * `presenceAgeSeconds === null` means the DJ has never opened the console —
+ * that is "unknown", not "offline", and the UI must say so.
+ */
 export interface Dj {
   id: string;
-  clubId: string | null;
   email: string;
   displayName: string;
-  stripeAccountId: string | null;
-  stripeOnboardingStatus: 'pending' | 'verified' | 'restricted';
   status: DjStatus;
+  note: string | null;
+  lastSeenAt: string | null;
+  presenceAgeSeconds: number | null;
+  online: boolean;
+  onShift: boolean;
+  openSessionId: string | null;
+  removed: boolean;
+  removedAt: string | null;
+  inviteExpiresAt: string | null;
+  hasPassword: boolean;
   createdAt: string;
+}
+
+/** Envelope of `GET /v1/club/djs`. */
+export interface DjListResponse {
+  items: Dj[];
+  /** How recent a heartbeat must be for `online` (server constant). */
+  presenceTtlSeconds: number;
 }
 
 export interface DjInviteRequest {
@@ -106,7 +139,71 @@ export interface DjInviteRequest {
   displayName: string;
 }
 
-/** Reference type for the not-yet-implemented /v1/club/pricing listing. */
+/**
+ * `PATCH /v1/club/djs/:id` — access state and/or the club's working note.
+ *
+ * The two fields are independent; `note: null` clears it. The API needs at
+ * least one of them and answers 400 when neither is present.
+ */
+export function patchClubDj(
+  id: string,
+  patch: { status?: 'active' | 'suspended'; note?: string | null },
+): Promise<{ id: string; display_name: string; status: DjStatus; note: string | null }> {
+  return request(`/club/djs/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
+}
+
+/** `PATCH /v1/club/djs/:id {status}` — kept for callers that only change access. */
+export function patchClubDjStatus(id: string, status: 'active' | 'suspended'): Promise<{ id: string; display_name: string; status: DjStatus }> {
+  return request(`/club/djs/${encodeURIComponent(id)}`, { method: 'PATCH', body: { status } });
+}
+
+/**
+ * `DELETE /v1/club/djs/:id` — take the DJ off the roster.
+ *
+ * `deleted: 'hard'` means an unaccepted invitation was deleted outright;
+ * `'soft'` means the row is kept (shift/payout history) and access revoked.
+ */
+export function removeClubDj(id: string): Promise<{ id: string; display_name?: string; deleted: 'soft' | 'hard'; status: DjStatus }> {
+  return request(`/club/djs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** `POST /v1/club/djs/:id/restore` — put a removed DJ back on the roster. */
+export function restoreClubDj(id: string): Promise<{ id: string; display_name: string; status: DjStatus; removed: boolean }> {
+  return request(`/club/djs/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+}
+
+/** `POST /v1/dj/presence` — heartbeat from the DJ console (30 s while visible). */
+export function pingDjPresence(): Promise<{ last_seen_at: string; online: boolean }> {
+  return request('/dj/presence', { method: 'POST' });
+}
+
+export interface DjInviteResponse {
+  djId: string;
+  inviteToken: string;
+  inviteExpiresAt: string;
+}
+
+export interface DjQueueItem {
+  id: string;
+  status: string;
+  style: string | null;
+  created_at: string;
+  title: string;
+  artist: string;
+  cover_url?: string;
+  preview_url?: string;
+  isrc?: string;
+  same_track_count: number;
+}
+
+export interface DjShift {
+  id: string;
+  status: SessionStatus;
+  timezone: string;
+  club_id: string | null;
+}
+
+/** `GET/POST /v1/club/pricing` response domain type. */
 export interface PricingPolicy {
   id: string;
   clubId: string;
@@ -119,7 +216,7 @@ export interface PricingPolicy {
   createdAt: string;
 }
 
-/** Reference type for the not-yet-implemented /v1/club/profile. */
+/** `GET/PATCH /v1/club/profile` response domain type. */
 export interface ClubProfile {
   id: string;
   name: string;
@@ -131,7 +228,7 @@ export interface ClubProfile {
   logoUrl: string | null;
   stripeAccountId: string | null;
   stripeOnboardingStatus: 'pending' | 'verified' | 'restricted';
-  status: 'active' | 'suspended' | 'blocked';
+  status: 'pending_verification' | 'active' | 'suspended' | 'blocked';
   createdAt: string;
 }
 
@@ -143,7 +240,7 @@ export interface ClubProfilePatch {
   logoUrl?: string | null;
 }
 
-/** Reference type for the not-yet-implemented /v1/club/earnings. */
+/** `GET /v1/club/earnings` response domain type. */
 export interface EarningsSummary {
   period: string;
   /** Gross turnover of paid requests for the period, minor units. */
@@ -152,6 +249,12 @@ export interface EarningsSummary {
   netMinor: number;
   currency: string;
   requestsCount: number;
+}
+
+export interface ClubDashboard {
+  session: { id: string; status: SessionStatus } | null;
+  requestsToday: number;
+  earnedTotalMinor: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,10 +292,13 @@ export class NotImplementedStubError extends Error {
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
 let expiresAt: number | null = null;
+let refreshPromise: Promise<TokenPair> | null = null;
+let authGeneration = 0;
+let authenticatedRole: 'club' | 'dj' | null = null;
 
 /** True after a successful login (password-only or 2FA) or token refresh. */
-export function isAuthenticated(): boolean {
-  return accessToken !== null;
+export function isAuthenticated(role?: 'club' | 'dj'): boolean {
+  return accessToken !== null && (role === undefined || authenticatedRole === role);
 }
 
 /** Exposed for debugging/telemetry only — do NOT log or persist this. */
@@ -202,15 +308,27 @@ export function accessTokenExpiry(): number | null {
 
 /** Clears the in-memory tokens ("sign out" — server-side revocation lands with the cookie-session backend). */
 export function clearTokens(): void {
+  authGeneration += 1;
   accessToken = null;
   refreshToken = null;
   expiresAt = null;
+  refreshPromise = null;
+  authenticatedRole = null;
 }
 
-function storePair(pair: TokenPair): void {
+function storeTokens(pair: { access_token: string; refresh_token: string; expires_in: number }, newSession = true, role?: 'club' | 'dj'): void {
+  if (newSession) {
+    authGeneration += 1;
+    refreshPromise = null;
+    if (role) authenticatedRole = role;
+  }
   accessToken = pair.access_token;
   refreshToken = pair.refresh_token;
   expiresAt = Date.now() + pair.expires_in * 1000;
+}
+
+function storePair(pair: TokenPair, newSession = true): void {
+  storeTokens(pair, newSession);
 }
 
 /**
@@ -221,7 +339,7 @@ function storePair(pair: TokenPair): void {
 async function request<T>(
   path: string,
   init: {
-    method?: 'GET' | 'POST' | 'PATCH';
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     body?: unknown;
     idempotencyKey?: string;
     auth?: boolean;
@@ -229,6 +347,8 @@ async function request<T>(
   } = {},
 ): Promise<T> {
   const { method = 'GET', body, idempotencyKey, auth = true, retryOn401 = true } = init;
+  const generation = authGeneration;
+  const sentToken = accessToken;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -241,6 +361,15 @@ async function request<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+  if (generation !== authGeneration) {
+    throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session changed' });
+  }
+
+  // Another request may already have rotated this token while this 401 was in flight.
+  if (response.status === 401 && auth && retryOn401 && accessToken && sentToken !== accessToken) {
+    return request<T>(path, { ...init, retryOn401: false });
+  }
+
   if (response.status === 401 && auth && retryOn401 && refreshToken) {
     // Access token expired (TTL 15 min) — rotate the refresh family once,
     // then replay the original request. A second 401 propagates to the UI
@@ -249,7 +378,7 @@ async function request<T>(
       await refreshTokens();
       return request<T>(path, { ...init, retryOn401: false });
     } catch {
-      clearTokens();
+      if (generation === authGeneration) clearTokens();
     }
   }
 
@@ -267,12 +396,16 @@ async function request<T>(
     } catch {
       // keep the fallback envelope
     }
-    if (response.status === 401) clearTokens();
+    if (response.status === 401 && auth && generation === authGeneration) clearTokens();
     throw new ApiRequestError(response.status, payload);
   }
 
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const result = (await response.json()) as T;
+  if (generation !== authGeneration) {
+    throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session changed' });
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +430,109 @@ export async function login(
     body: payload,
     auth: false,
   });
-  if ('access_token' in result) storePair(result);
+  if ('access_token' in result) storeTokens(result, true, 'club');
+  return result;
+}
+
+/** POST /v1/auth/club/master — exchange the one-time admin-issued token for JWTs. */
+export async function masterLogin(qrMasterToken: string): Promise<MasterLoginResponse> {
+  const result = await request<MasterLoginResponse>('/auth/club/master', {
+    method: 'POST',
+    body: { qr_master_token: qrMasterToken },
+    auth: false,
+  });
+  storeTokens(result, true, 'club');
+  return result;
+}
+
+/** POST /v1/auth/dj/login — DJ account login. */
+export async function djLogin(payload: LoginRequest): Promise<TokenPair | TotpChallenge> {
+  const result = await request<TokenPair | TotpChallenge>('/auth/dj/login', {
+    method: 'POST', body: payload, auth: false,
+  });
+  if ('access_token' in result) storeTokens(result, true, 'dj');
+  return result;
+}
+
+/** POST /v1/auth/dj/2fa — second step for DJs with MFA enabled. */
+export async function djLogin2fa(input: { email: string; totp_code: string }): Promise<TokenPair> {
+  const pair = await request<TokenPair>('/auth/dj/2fa', { method: 'POST', body: input, auth: false });
+  storeTokens(pair, true, 'dj');
+  return pair;
+}
+
+// ---------------------------------------------------------------------------
+// Open registration — docs/signup-contract.md (Test Mode stand)
+// ---------------------------------------------------------------------------
+// Open signup without e-mail confirmation, enabled by the backend flag
+// DROPIT_OPEN_SIGNUP. The 201 response is a TokenPair *plus* the created
+// entity (club / dj), so the UI never needs a second request to log in.
+// Error codes: 400 validation_failed, 403 signup_disabled, 404 club_not_found,
+// 409 email_taken, 429 rate_limited — all surface inline in the UI.
+
+/** Created club echoed back with the tokens (clients may ignore it). */
+export interface RegisteredClub {
+  id: string;
+  name: string;
+  slug: string;
+  email: string;
+}
+
+/** 201 body of POST /v1/auth/club/register. */
+export interface ClubRegisterResponse extends TokenPair {
+  club?: RegisteredClub;
+}
+
+export interface ClubRegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+  /** Optional; only sent when the manual form supplies it. */
+  city?: string;
+  /** ISO-3166 alpha-2, optional. */
+  country?: string;
+}
+
+/** POST /v1/auth/club/register — creates an active club and logs it in. */
+export async function registerClub(payload: ClubRegisterRequest): Promise<ClubRegisterResponse> {
+  const result = await request<ClubRegisterResponse>('/auth/club/register', {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  });
+  storeTokens(result, true, 'club');
+  return result;
+}
+
+/** Created DJ echoed back with the tokens. `club_id === null` means freelance. */
+export interface RegisteredDj {
+  id: string;
+  display_name: string;
+  email: string;
+  club_id: string | null;
+}
+
+/** 201 body of POST /v1/auth/dj/register. */
+export interface DjRegisterResponse extends TokenPair {
+  dj?: RegisteredDj;
+}
+
+export interface DjRegisterRequest {
+  display_name: string;
+  email: string;
+  password: string;
+  /** Optional club slug; unknown slug → 404 club_not_found. */
+  club_slug?: string;
+}
+
+/** POST /v1/auth/dj/register — creates an active DJ and logs it in. */
+export async function registerDj(payload: DjRegisterRequest): Promise<DjRegisterResponse> {
+  const result = await request<DjRegisterResponse>('/auth/dj/register', {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  });
+  storeTokens(result, true, 'dj');
   return result;
 }
 
@@ -311,20 +546,31 @@ export async function login2fa(input: {
     body: input,
     auth: false,
   });
-  storePair(pair);
+  storeTokens(pair, true, 'club');
   return pair;
 }
 
 /** POST /v1/auth/refresh — rotate the refresh-token family; reuse on the backend revokes it. */
 export async function refreshTokens(): Promise<TokenPair> {
   if (!refreshToken) throw new ApiRequestError(401, { code: 'unauthorized', message: 'No refresh token' });
-  const pair = await request<TokenPair>('/auth/refresh', {
+  if (refreshPromise) return refreshPromise;
+  const generation = authGeneration;
+  const token = refreshToken;
+  const pending = request<TokenPair>('/auth/refresh', {
     method: 'POST',
-    body: { refresh_token: refreshToken },
+    body: { refresh_token: token },
     auth: false,
+  }).then((pair) => {
+    if (generation !== authGeneration) {
+      throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session ended' });
+    }
+    storePair(pair, false);
+    return pair;
+  }).finally(() => {
+    if (refreshPromise === pending) refreshPromise = null;
   });
-  storePair(pair);
-  return pair;
+  refreshPromise = pending;
+  return pending;
 }
 
 export interface CreateSessionInput {
@@ -339,14 +585,74 @@ export function createSession(input: CreateSessionInput): Promise<SessionRespons
   return request<SessionResponse>('/club/sessions', {
     method: 'POST',
     body: input,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: newIdempotencyKey(),
   });
 }
 
 /**
+ * Ключ идемпотентности для POST.
+ *
+ * `crypto.randomUUID()` существует только в secure context (HTTPS или
+ * localhost). Стенд открывается по http://<IP>, где метода нет — вызов
+ * бросал TypeError, и создание сессии падало ещё до запроса («Could not
+ * open a session» при пустом списке сетевых вызовов). Фолбэк собирает
+ * UUID v4 из `crypto.getRandomValues`, а если недоступен и он — из
+ * Math.random: ключ нужен уникальным, не криптостойким.
+ */
+function newIdempotencyKey(): string {
+  const c = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+
+  const bytes = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === 'function') {
+    c.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  // RFC 4122 v4: версия и вариант.
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** GET /v1/club/dashboard — current shift and tonight's activity. */
+export async function getClubDashboard(): Promise<ClubDashboard> {
+  const r = await request<Record<string, unknown>>('/club/dashboard');
+  const session = r.session as { id?: string; status?: SessionStatus } | null;
+  return {
+    session: session?.id ? { id: session.id, status: session.status ?? 'created' } : null,
+    requestsToday: Number(r.requests_today ?? 0),
+    earnedTotalMinor: Number(r.earned_total_minor ?? 0),
+  };
+}
+
+/**
+ * Current open shift for the signed-in club, or `null` when there is none.
+ *
+ * F13 (restore the shift after reload): there is NO `GET /v1/club/sessions/:id`
+ * on the backend and we must not invent one. The honest source is
+ * `GET /v1/club/dashboard`, whose SQL
+ * (`crates/gateway-api/src/panel_routes.rs`, `club_dashboard`) selects the
+ * newest session of this club with `status <> 'closed'`:
+ *
+ *   WITH s AS (SELECT id, status FROM session
+ *              WHERE club_id = $1 AND status <> 'closed'
+ *              ORDER BY created_at DESC LIMIT 1)
+ *   SELECT (SELECT id FROM s), (SELECT status FROM s), ...
+ *
+ * So `getClubDashboard().session` is exactly "the shift that is still open".
+ * Returns `{id, status}` only — the dashboard response carries no `timezone`
+ * or `dj_id`, so callers must not expect a full `SessionResponse`.
+ */
+export async function getCurrentClubSession(): Promise<{ id: string; status: SessionStatus } | null> {
+  const dashboard = await getClubDashboard();
+  return dashboard.session;
+}
+
+/**
  * POST /v1/club/sessions/:id/qr/generate — rotate the QR token.
- * The plain token appears in the response ONCE; the QR image rendering
- * remains a placeholder until the encoder module lands.
+ * The plain token appears in the response ONCE and is rendered as a QR image.
  */
 export function generateSessionQr(sessionId: string): Promise<QrGenerateResponse> {
   return request<QrGenerateResponse>(
@@ -440,7 +746,6 @@ export async function getPricing(): Promise<{ items: PricingPolicy[] }> {
 /** POST /v1/club/pricing — live (новая строка, старая закрывается). */
 export function createPricing(
   input: { priceMinor: number; djShareBp: number | null },
-  _idempotencyKey: string,
 ): Promise<PricingPolicy> {
   return request<Record<string, unknown>>('/club/pricing', {
     method: 'POST',
@@ -459,29 +764,102 @@ export function createPricing(
   }));
 }
 
-/** GET /v1/club/djs — live. */
-export async function getDjs(): Promise<{ items: Dj[] }> {
-  const r = await request<{ items: Array<Record<string, unknown>> }>('/club/djs');
+/**
+ * GET /v1/club/djs — live.
+ *
+ * `includeRemoved` also returns DJs taken off the roster, so the page can offer
+ * "restore" without a second endpoint. The default roster view asks for the
+ * active list only.
+ */
+export async function getDjs(includeRemoved = false): Promise<DjListResponse> {
+  const query = includeRemoved ? '?include_removed=1' : '';
+  const r = await request<{
+    items: Array<Record<string, unknown>>;
+    presence_ttl_seconds?: number;
+  }>(`/club/djs${query}`);
   return {
     items: r.items.map((it) => ({
       id: String(it.id),
-      clubId: null,
       email: String(it.email ?? ''),
       displayName: String(it.display_name ?? ''),
-      stripeAccountId: null,
-      stripeOnboardingStatus: 'pending',
       status: ((it.status as Dj['status']) ?? 'active'),
-      createdAt: '',
+      note: (it.note as string | null) ?? null,
+      lastSeenAt: (it.last_seen_at as string | null) ?? null,
+      presenceAgeSeconds: it.presence_age_seconds === null || it.presence_age_seconds === undefined
+        ? null
+        : Number(it.presence_age_seconds),
+      online: it.online === true,
+      onShift: it.on_shift === true,
+      openSessionId: (it.open_session_id as string | null) ?? null,
+      removed: it.removed === true,
+      removedAt: (it.removed_at as string | null) ?? null,
+      inviteExpiresAt: (it.invite_expires_at as string | null) ?? null,
+      hasPassword: it.has_password === true,
+      createdAt: String(it.created_at ?? ''),
     })),
+    // A backend that does not send the TTL is not allowed to make the panel
+    // invent one: the caller falls back to the sentence "presence unknown".
+    presenceTtlSeconds: Number(r.presence_ttl_seconds ?? 0),
   };
 }
 
-/** backend not implemented yet: приглашение DJ (email + инвайт-флоу) */
-export function inviteDj(_input: DjInviteRequest): Promise<Dj> {
-  return Promise.reject(new NotImplementedStubError('POST /v1/club/djs/invite'));
+/** POST /v1/club/djs/invite — invite link is returned once, expires in 7 days. */
+export async function inviteDj(input: DjInviteRequest): Promise<DjInviteResponse> {
+  const result = await request<{ dj_id: string; invite_token: string; invite_expires_at: string }>(
+    '/club/djs/invite',
+    { method: 'POST', body: { email: input.email, display_name: input.displayName } },
+  );
+  return { djId: result.dj_id, inviteToken: result.invite_token, inviteExpiresAt: result.invite_expires_at };
 }
 
-/** GET /v1/club/earnings?period= — live. */
+export function getDjShift(): Promise<{ session: DjShift | null }> {
+  return request<{ session: DjShift | null }>('/dj/shift');
+}
+
+export async function getDjQueue(sort: 'new' | 'hot' = 'new'): Promise<{ items: DjQueueItem[] }> {
+  return request<{ items: DjQueueItem[] }>(`/dj/queue?sort=${sort}`);
+}
+
+export function djRequestAction(id: string, action: 'accept' | 'reject' | 'played', reason?: string): Promise<unknown> {
+  return request(`/dj/requests/${encodeURIComponent(id)}/${action}`, {
+    method: 'POST', body: action === 'reject' ? { reason: reason ?? 'Declined by DJ' } : undefined,
+  });
+}
+
+export function setDjAcceptance(paused: boolean): Promise<unknown> {
+  return request(`/dj/acceptance/${paused ? 'pause' : 'resume'}`, { method: 'POST' });
+}
+
+export function acceptDjInvite(inviteToken: string, password: string): Promise<{ accepted: boolean }> {
+  return request<{ accepted: boolean }>('/dj/invite/accept', {
+    method: 'POST', body: { invite_token: inviteToken, password }, auth: false,
+  });
+}
+
+export async function getDjStats(): Promise<{ requests: number; accepted: number; played: number; rejected: number; earnedMinor: number }> {
+  const r = await request<Record<string, unknown>>('/dj/stats/today');
+  return { requests: Number(r.requests_today ?? 0), accepted: Number(r.accepted ?? 0), played: Number(r.played ?? 0), rejected: Number(r.rejected ?? 0), earnedMinor: Number(r.earned_total_minor ?? 0) };
+}
+
+/**
+ * GET /v1/club/earnings?period= — live.
+ *
+ * PERIOD SEMANTICS (label honestly!): the backend does NOT use calendar days.
+ * `crates/gateway-api/src/panel_routes.rs` (`club_earnings`) builds a ROLLING
+ * window ending at `now()`: `today` = `interval '1 day'`, `week` = `7 days`,
+ * `month` = `30 days`. So "today" means "the last 24 hours", not "since
+ * midnight" — UI copy must say so (F15).
+ *
+ * Field semantics:
+ * - `netMinor` = sum of `split.amount_minor - reversed_minor` where the payee
+ *   is this club, for splits whose payment was captured inside the window.
+ *   It is the CLUB share after the platform commission; it does NOT include
+ *   the DJ share (that is `dj_share_bp` of the remainder).
+ * - `grossMinor` = sum of `payment.amount_minor` for captured payments.
+ * - `payments` → `requestsCount` = count of CAPTURED payments in the window
+ *   (unlike `getClubDashboard().requestsToday`, which counts all requests and
+ *   is not filtered by payment at all).
+ */
 export function getEarnings(period: string): Promise<EarningsSummary> {
   return request<Record<string, unknown>>(
     `/club/earnings?period=${encodeURIComponent(period)}`,
@@ -492,4 +870,47 @@ export function getEarnings(period: string): Promise<EarningsSummary> {
     currency: 'EUR',
     requestsCount: Number(r.payments ?? 0),
   }));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Password reset                                                             */
+/* ------------------------------------------------------------------------- */
+
+export type ResetRole = 'club' | 'dj' | 'admin';
+
+export interface ResetRequestResult {
+  requested: true;
+  /**
+   * Present only on a stand with `DROPIT_RESET_REVEAL_TOKEN` on: there is no
+   * mailer in this deployment, so the server hands the link back instead of
+   * pretending an e-mail went out. Absent in production.
+   */
+  reset_url?: string;
+  expires_at?: string;
+}
+
+/**
+ * POST /v1/auth/password/reset-request — always 202 for a well-formed request,
+ * whether or not the address exists (no user enumeration). A 503 means the
+ * endpoint is not deployed yet; callers must say so instead of showing
+ * "check your inbox".
+ */
+export function requestPasswordReset(input: {
+  email: string;
+  role: ResetRole;
+}): Promise<ResetRequestResult> {
+  return request<ResetRequestResult>('/auth/password/reset-request', {
+    method: 'POST',
+    body: input,
+    auth: false,
+  });
+}
+
+/** POST /v1/auth/password/reset — 204; the token is single-use and expires. */
+export async function resetPassword(input: { token: string; password: string }): Promise<void> {
+  await request<void>('/auth/password/reset', {
+    method: 'POST',
+    body: input,
+    auth: false,
+  });
 }

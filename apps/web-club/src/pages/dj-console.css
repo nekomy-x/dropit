@@ -1,0 +1,729 @@
+/* ============================================================================
+   DJ console — page-level styles for /dj
+   ----------------------------------------------------------------------------
+   Everything inside the console reads the shared token layer
+   (packages/ui/tokens.css, copied to src/styles/club-tokens.css) and the
+   primitives in src/styles/panel.css. This file adds the queue rhythm and the
+   page's own surfaces; it declares no colour, radius or type size of its own, so
+   the light and dark themes stay in sync by construction.
+
+   Moved here from src/index.css and src/operations.css (the DJ blocks). The club
+   shell and the public Connect flow keep their own blocks in those files.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   Page frame
+   ------------------------------------------------------------------------ */
+.dj-console {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-4);
+}
+
+.dj-console > main {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-4);
+}
+
+.dj-identity-sep { color: var(--c-text-muted); }
+
+/* Long status reasons wrap instead of widening the page head. */
+.dj-error-copy {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.dj-kbd {
+  padding: 2px 6px;
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+/* Card-head and row actions keep a real target: 36px desktop, 44px touch. */
+.dj-console .btn-sm {
+  height: var(--hit-desktop);
+  padding: 0 12px;
+}
+
+/* ---------------------------------------------------------------------------
+   Shift bar — the current intake state and the next safe action
+   ------------------------------------------------------------------------ */
+.dj-intake-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--r-tile);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+
+.dj-intake-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  align-items: center;
+  gap: 10px;
+}
+
+.dj-intake-text { min-width: 0; }
+.dj-intake-text strong {
+  display: block;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.dj-intake-text span {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+.dj-intake-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Two-column work area: the task on the left, the context on the right
+   ------------------------------------------------------------------------ */
+.dj-console-split {
+  display: grid;
+  align-items: start;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.dj-side-stack {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Queue toolbar
+   ------------------------------------------------------------------------ */
+.dj-queue-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.dj-queue-toolbar .field { flex: 1 1 200px; }
+.dj-queue-toolbar .field.is-narrow { flex: 0 1 150px; }
+.dj-queue-toolbar .field.is-tip { flex: 0 1 120px; }
+/* The status/genre dropdown is a field too: it takes the same flex slot as the
+   text input beside it, so the toolbar keeps one baseline and one row. */
+.dj-queue-toolbar .dj-queue-filter { flex: 0 1 168px; }
+.dj-queue-toolbar .seg { flex: 0 0 auto; }
+
+/* KPI row on the queue tab: four cards, same rhythm as the club overview. */
+.dj-stat-grid { margin-bottom: var(--sp-4); }
+
+/* Session tab metric cells: a lighter treatment than the top KPI cards. */
+.dj-session-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dj-mini-stat {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: var(--r-tile);
+  background: var(--c-inset);
+}
+.dj-mini-value {
+  font-size: var(--fs-20);
+  font-weight: 650;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+.dj-mini-value.is-muted { color: var(--c-text-muted); font-size: var(--fs-15); font-weight: 600; }
+
+@media (max-width: 1279px) {
+  .dj-session-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .dj-session-stats { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------------------------------------------------------------------------
+   Queue rows
+   One row per request: what the track is, what the room did with it, and the
+   one action that moves it forward.
+   ------------------------------------------------------------------------ */
+.dj-queue-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dj-queue-row {
+  display: grid;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 12px 8px;
+  margin-inline: -8px;
+  border-bottom: 1px solid var(--c-hairline-row);
+  border-radius: var(--r-tile);
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+}
+.dj-queue-row:last-child { border-bottom: 0; }
+.dj-queue-row:hover { background: var(--c-inset); }
+
+.dj-queue-main { min-width: 0; }
+
+.dj-queue-titleline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dj-queue-main .list-title { min-width: 0; overflow-wrap: anywhere; }
+.dj-queue-main .list-sub { overflow-wrap: anywhere; }
+
+.dj-queue-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+.dj-queue-meta .is-num { font-variant-numeric: tabular-nums; }
+
+.dj-queue-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.dj-queue-actions .btn {
+  padding: 0 12px;
+  font-size: var(--fs-12);
+}
+.dj-queue-actions .btn-sm { height: 32px; }
+
+/* ---------------------------------------------------------------------------
+   Side cards: tips, queue summary
+   ------------------------------------------------------------------------ */
+.dj-tip-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 11px 8px;
+  margin-inline: -8px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+  border-radius: var(--r-tile);
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+.dj-tip-row:last-child { border-bottom: 0; }
+.dj-tip-row:hover { background: var(--c-inset); }
+
+.dj-tip-name {
+  display: block;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+.dj-tip-hint {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+.dj-tip-amount {
+  flex: 0 0 auto;
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-13);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Definition rows used by the summary, session metadata and payouts. */
+.dj-kv {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.dj-kv-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+.dj-kv-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.dj-kv-row dt {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+.dj-kv-row dd {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+/* Rule 2 of the panel contract: an unavailable figure is the word, muted, and
+   no value at all. */
+.dj-kv-row dd.is-unavailable {
+  color: var(--c-text-muted);
+  font-weight: 500;
+}
+
+.dj-bar-row { display: grid; gap: 6px; }
+.dj-bar-row + .dj-bar-row { margin-top: var(--sp-3); }
+
+/* ---------------------------------------------------------------------------
+   Room control
+   ------------------------------------------------------------------------ */
+.dj-room-grid {
+  display: grid;
+  align-items: start;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.85fr);
+}
+
+.dj-room-stack {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.dj-rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+  cursor: pointer;
+}
+.dj-rule-row:last-child { border-bottom: 0; }
+
+.dj-rule-copy { min-width: 0; }
+.dj-rule-copy strong {
+  display: block;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.dj-rule-copy span {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+.dj-rule-row input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+.dj-chip-row {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+}
+/* Chips used as toggles keep a real target instead of the 22px label height. */
+.chip.dj-chip-toggle {
+  height: auto;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dj-form-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-4);
+}
+
+.dj-field-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--c-hairline-row);
+}
+
+.dj-counter {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   Room QR overlay
+   The QR module renders its own white/ink square (a scanner needs the contrast);
+   the frame around it stays a token surface, so the overlay matches both themes.
+   ------------------------------------------------------------------------ */
+.dj-qr-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  background: var(--c-scrim);
+}
+.dj-qr-dialog {
+  width: min(380px, 100%);
+  padding: var(--pad-panel-lg);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+  text-align: center;
+}
+.dj-qr-frame {
+  display: grid;
+  width: 210px;
+  height: 210px;
+  margin: 18px auto;
+  place-items: center;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  line-height: 0;
+}
+.dj-qr-value {
+  display: block;
+  margin-top: var(--sp-2);
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   Session details
+   ------------------------------------------------------------------------ */
+.dj-session-grid {
+  display: grid;
+  align-items: start;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+}
+
+.dj-metric-tabs { margin-bottom: var(--sp-4); }
+
+.dj-session-table th { padding-top: 2px; }
+
+/* ---------------------------------------------------------------------------
+   Toast
+   ------------------------------------------------------------------------ */
+.dj-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  box-shadow: var(--c-panel-shadow);
+  color: var(--c-text);
+  font-size: var(--fs-12);
+}
+.dj-toast button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  cursor: pointer;
+}
+.dj-toast button:hover { background: var(--c-hover-strong); color: var(--c-text); }
+
+/* ---------------------------------------------------------------------------
+   Command palette (⌘K)
+   ------------------------------------------------------------------------ */
+.dj-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 96px var(--sp-4) var(--sp-6);
+  background: var(--c-scrim);
+}
+.dj-palette {
+  width: min(520px, 100%);
+  overflow: hidden;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.dj-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--c-hairline-row);
+  color: var(--c-text-muted);
+}
+.dj-palette-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+}
+.dj-palette-search input::placeholder { color: var(--c-text-muted-sm); }
+.dj-palette-list {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+}
+.dj-palette-item {
+  display: flex;
+  min-height: var(--hit-mobile);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+}
+.dj-palette-item:hover,
+.dj-palette-item:focus-visible {
+  background: var(--c-raised);
+  color: var(--c-text);
+}
+.dj-palette-kbd {
+  padding: 2px 6px;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+/* ---------------------------------------------------------------------------
+   Rail note (DjLayout) — the queue monitor line under the DJ navigation
+   ------------------------------------------------------------------------ */
+.dj-rail-note {
+  display: block;
+  padding: 0 10px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: var(--lh-text);
+}
+/* ---------------------------------------------------------------------------
+   DJ power-feature primitives (features/dj-console/powerFeatures.tsx)
+   Kept headless-friendly so a future console view can compose them.
+   ------------------------------------------------------------------------ */
+.dj-power-dragging { opacity: .62; }
+.dj-power-drop-target {
+  box-shadow: inset 0 0 0 1px var(--c-accent);
+  background: var(--c-accent-tint);
+}
+.dj-power-queue-item { cursor: grab; }
+.dj-power-queue-item:active { cursor: grabbing; }
+.dj-power-queue-item:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+.dj-power-palette {
+  position: fixed;
+  z-index: 50;
+  top: 12vh;
+  left: 50%;
+  width: min(560px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.dj-power-palette-backdrop {
+  position: fixed;
+  z-index: 49;
+  inset: 0;
+  background: var(--c-scrim);
+}
+.dj-power-palette-command {
+  display: flex;
+  min-height: var(--hit-mobile);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 14px;
+  border-top: 1px solid var(--c-hairline-row);
+  color: var(--c-text);
+  text-align: left;
+}
+.dj-power-palette-command:hover,
+.dj-power-palette-command:focus-visible { background: var(--c-raised); }
+.dj-power-waveform {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 2px;
+  color: var(--c-accent);
+}
+.dj-power-waveform i {
+  display: block;
+  width: 2px;
+  height: var(--wave-height, 40%);
+  border-radius: 0;
+  background: currentColor;
+  opacity: .8;
+  transform-origin: center;
+}
+.dj-power-waveform-animated i {
+  animation: dj-power-wave 700ms ease-in-out infinite alternate;
+  animation-delay: calc(var(--wave-index, 0) * -45ms);
+}
+@keyframes dj-power-wave {
+  from { transform: scaleY(.68); }
+  to { transform: scaleY(1); }
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   ------------------------------------------------------------------------ */
+@media (max-width: 1279px) {
+  .dj-console-split,
+  .dj-session-grid { grid-template-columns: minmax(0, 1fr); }
+  .dj-side-stack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1023px) {
+  .dj-room-grid { grid-template-columns: minmax(0, 1fr); }
+  .dj-toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+}
+
+@media (max-width: 767px) {
+  .dj-queue-row {
+    row-gap: var(--sp-2);
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+  .dj-queue-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+  .dj-queue-actions .btn { flex: 1 1 0; }
+}
+
+@media (max-width: 640px) {
+  .dj-side-stack { grid-template-columns: minmax(0, 1fr); }
+  .dj-intake-bar { align-items: stretch; }
+  .dj-intake-actions { width: 100%; }
+  .dj-intake-actions .btn { flex: 1 1 0; }
+  .dj-console .seg { width: 100%; }
+  .dj-console .seg-item { flex: 1 1 0; }
+  .dj-toast { right: 12px; left: 12px; max-width: none; }
+  .dj-toast button { width: var(--hit-mobile); height: var(--hit-mobile); }
+  .dj-qr-frame { width: 180px; height: 180px; }
+  .dj-palette-backdrop { padding-top: 64px; }
+}
+
+/* Touch targets: 44px at touch widths, 36px on desktop. The kit already sizes
+   .btn and .field-input; the console's own controls follow the same rule. */
+@media (max-width: 640px) {
+  .dj-console .seg-item,
+  .chip.dj-chip-toggle,
+  .dj-tip-row,
+  .dj-rule-row,
+  .dj-qr-dialog .btn { min-height: var(--hit-mobile); }
+  .dj-console .btn-sm { height: var(--hit-mobile); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dj-power-waveform-animated i { animation: none; }
+  .dj-console *,
+  .dj-console *::before,
+  .dj-console *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+/* ---------------------------------------------------------------------------
+   Page head additions
+   ------------------------------------------------------------------------ */
+.dj-console .page-identity { margin: 0 0 6px; }
+.dj-console kbd.dj-kbd { font-family: var(--font-mono); }
+.dj-console .panel-note { align-items: center; }
+.dj-console .panel-error { align-items: flex-start; }
+
+/* One chip used as a toggle keeps a real target instead of the label height. */
+@media (max-width: 640px) {
+  .dj-console .dj-queue-actions .btn-sm { height: var(--hit-mobile); }
+}
+
+/* The DJ top bar shows a read-only status pill instead of the club's command
+   trigger; on touch widths it would only push the account out of reach.
+   `.panel-search` carries the underline of a command field; this element is a
+   status chip, not a field, so it keeps the original box: full-width up to
+   340px, 36px tall, 10px radius, inset surface. */
+.panel-search.dj-topbar-status-pill {
+  width: 100%;
+  max-width: 340px;
+  height: var(--hit-desktop);
+  padding: 0 12px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+  cursor: default;
+}
+@media (max-width: 767px) {
+  .panel-search.dj-topbar-status-pill { display: none; }
+}

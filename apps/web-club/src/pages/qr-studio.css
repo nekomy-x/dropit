@@ -1,0 +1,530 @@
+/* ============================================================================
+   QR generator — src/pages/qr-studio.css
+   Loaded by pages/QrStudioPage.tsx only.
+
+   All product colours, radii and type sizes come from the token layer; the one
+   exception is the QR artwork, which the operator colours and which carries its
+   colours as SVG attributes so it never changes with the theme.
+
+   Layout: one sticky stage (the code) beside one scrolling column of controls.
+   It collapses to a single column below 1080px, where the stage is no longer
+   sticky — a sticky element taller than the viewport hides its own controls.
+   ========================================================================== */
+
+.qr-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+}
+
+.qr-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(340px, 420px);
+  gap: var(--sp-5);
+  align-items: start;
+  min-width: 0;
+}
+
+@media (max-width: 1080px) {
+  .qr-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- stage --------------------------------------------------------------- */
+.qr-stage {
+  position: sticky;
+  top: calc(var(--h-topbar) + var(--sp-4));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+@media (max-width: 1080px) {
+  .qr-stage {
+    position: static;
+  }
+}
+
+.qr-frame {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+  border-radius: var(--r-surface);
+  background: var(--c-inset);
+  /* The whole code must fit above the fold: a preview you have to scroll to
+     judge is a preview you stop looking at. */
+  min-height: 300px;
+}
+
+.qr-frame .qr-sign-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+/* A square code, capped so a tall viewport does not push the controls away and
+   a short one does not crop it. */
+.qr-frame .qr-sign-preview svg {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(52vh, 520px);
+  border-radius: var(--r-control);
+}
+
+.qr-empty {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--c-error);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.qr-stage-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* The scan verdict is a state, so it carries a word and a tint, never colour
+   alone. */
+.qr-scan {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  padding: 3px var(--sp-3);
+  border-radius: var(--r-control);
+  font-size: var(--fs-12);
+  line-height: 1.4;
+}
+
+.qr-scan.is-ok {
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+.qr-scan.is-failed {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+.qr-scan.is-checking,
+.qr-scan.is-unknown {
+  background: var(--c-raised);
+  color: var(--c-text-2);
+}
+
+/* --- controls ------------------------------------------------------------ */
+.qr-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.qr-side .club-panel {
+  /* Each control group is a short, scannable block; none of them is a hero. */
+  padding: var(--sp-4);
+}
+
+.qr-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.qr-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  margin-top: var(--sp-3);
+}
+
+@media (max-width: 520px) {
+  .qr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.qr-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qr-meta {
+  margin: var(--sp-2) 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
+
+.qr-meta.is-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* --- choice tiles (module shape) ----------------------------------------- */
+/* This is ChoiceTile from components/qr/QrControls.tsx. It is a button that
+   carries a pressed state, so it needs the selected tint and the accent blade
+   the panel already uses for a chosen option. */
+.qr-choice {
+  display: flex;
+  min-height: var(--hit-desktop);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  color: var(--c-text);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.qr-choice:hover {
+  background: var(--c-hover-strong);
+}
+
+.qr-choice.is-selected {
+  position: relative;
+  background: var(--c-accent-tint);
+}
+
+.qr-choice.is-selected::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+  content: '';
+}
+
+.qr-choice-label {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.qr-choice-hint {
+  font-size: var(--fs-11);
+  line-height: 1.35;
+  color: var(--c-text-muted-sm);
+}
+
+@media (max-width: 640px) {
+  .qr-choice {
+    min-height: var(--hit-mobile);
+  }
+}
+
+/* --- range (RangeField from the same file) ------------------------------- */
+/* A native range is drawn by the OS: without these rules the thumb is Chrome
+   blue, which is not a colour this product uses anywhere. */
+.qr-range {
+  width: 100%;
+  height: var(--hit-mobile);
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.qr-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+}
+
+.qr-range::-moz-range-track {
+  height: 4px;
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+}
+
+.qr-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  appearance: none;
+  border: 0;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+}
+
+.qr-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+}
+
+.qr-range:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-control);
+}
+
+/* --- field head (label + value on one line) ------------------------------ */
+.qr-field-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.qr-field-head .field-label {
+  margin-bottom: 0;
+  line-height: 1.3;
+}
+
+.qr-field-head {
+  min-height: 18px;
+  align-items: center;
+}
+
+.qr-field-value {
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- colour field -------------------------------------------------------- */
+.qr-color-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.qr-color-swatch {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: var(--r-control);
+  box-shadow: inset 0 0 0 1px var(--c-hairline-strong);
+}
+
+.qr-color-swatch[data-invalid='true']::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-linear-gradient(45deg, transparent 0 4px, var(--c-error-tint) 4px 8px);
+  content: '';
+}
+
+.qr-color-native {
+  position: absolute;
+  left: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.qr-color-native:focus-visible + .qr-color-hex {
+  border-bottom-color: var(--c-accent);
+}
+
+.qr-color-hex {
+  flex: 1;
+  min-width: 0;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+/* --- preset swatches ----------------------------------------------------- */
+.qr-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--sp-2);
+}
+
+/* A preset is a picture of the code, not a word: the tile paints the preset's
+   paper and its two inks so the choice can be made without applying it. */
+.qr-swatch {
+  display: flex;
+  min-height: var(--hit-desktop);
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.qr-swatch:hover {
+  background: var(--c-hover-strong);
+}
+
+.qr-swatch.is-active {
+  position: relative;
+  background: var(--c-accent-tint);
+}
+
+.qr-swatch.is-active::before {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  border-radius: var(--r-chip);
+  background: var(--c-accent);
+  content: '';
+}
+
+.qr-swatch-dots {
+  display: flex;
+  width: 100%;
+  aspect-ratio: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: var(--r-control);
+  overflow: hidden;
+}
+
+.qr-swatch-dots > span {
+  display: block;
+  width: 34%;
+  height: 34%;
+  /* Artwork inside a preview, not a control surface: a dot and a square are the
+     two shapes it is illustrating, so the radius is the shape itself. */
+  border-radius: var(--r-chip);
+}
+
+.qr-swatch-dots > span:first-child {
+  border-radius: 0;
+}
+
+.qr-swatch-name {
+  font-size: var(--fs-11);
+  line-height: 1.2;
+  color: var(--c-text-2);
+  text-align: center;
+}
+
+/* --- shape tiles --------------------------------------------------------- */
+.qr-shapes {
+  display: grid;
+  /* Three per row at the narrowest side panel, five on a wide one. Fixed tracks
+     rather than 1fr, so a five-item row does not stretch each tile to 20% of the
+     column and turn two words into a banner. */
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+@media (min-width: 1080px) {
+  .qr-shapes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* --- contrast chip ------------------------------------------------------- */
+.qr-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-control);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.qr-chip.is-ok {
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+.qr-chip.is-warn {
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+}
+
+.qr-chip.is-bad {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+/* --- notes --------------------------------------------------------------- */
+.qr-note {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-tile);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+}
+
+.qr-note.is-ok {
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+.qr-note.is-warn {
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+}
+
+.qr-note.is-error {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+/* --- downloads ----------------------------------------------------------- */
+.qr-downloads {
+  display: grid;
+  /* Two-up at every width: the labels are 3–4 characters, and a column of four
+     full-width buttons reads as four equal actions when PNG is the main one. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.qr-mode {
+  width: 160px;
+}
+
+/* The upload input is driven by the visible button above it: hidden, never
+   focusable, never a 1px ghost target. */
+.qr-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qr-swatch {
+    transition: none;
+  }
+}
