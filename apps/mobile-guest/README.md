@@ -1,69 +1,116 @@
 # DROP IT — приложение гостя (Flutter)
 
-Home → QR-скан → поиск трека → условия → оплата → «запрос отправлен» → мои запросы.
+Полный перенос макета pen.dev **1:1**: все 24 кадра гостевого приложения
+(`Guest · 01…15` + шторки 04b/04c/04d + neon-ticket). Сеть нужна для реальных
+запросов и оплаты; без сети приложение остаётся рабочим на встроенных данных
+(демо-режим), поэтому APK запускается и показывает весь флоу в любом окружении.
 
-## Статус
-
-Экраны 01–05 приложения гостя перенесены **по макету** (pen.dev):
-`docs/ui/reference/dropit-design.pen`, спецификация — `docs/ui/guest-flow-spec.md`.
-Токены, шрифты и фирменный знак взяты из макета и брендбука, а не подобраны
-на глаз.
+## Экраны и файлы
 
 | Кадр макета | Файл |
 |---|---|
-| Guest · 01 · Home | `lib/screens/home_screen.dart` |
-| Guest · 02 · Scan QR (+ 04c Manual entry) | `lib/screens/scan_screen.dart` |
+| Guest · 01 · Home (Listen) | `lib/screens/home_screen.dart` |
+| Guest · 02 · Scan QR | `lib/screens/scan_screen.dart` |
 | Guest · 03 · Search | `lib/screens/search_screen.dart` |
 | Guest · 04a · Terms before payment | `lib/screens/terms_screen.dart` |
 | Guest · 04 · Payment (+ 04b, 04d) | `lib/screens/payment_screen.dart` |
-| Guest · 05 · Request sent | `lib/screens/request_sent_screen.dart` |
-| Guest · 06 · My requests | `lib/screens/requests_screen.dart` |
+| Guest · 05 · Request sent (+ neon-ticket) | `lib/screens/request_sent_screen.dart` |
+| Guest · 06 · My requests (All/Upcoming/Played/Declined) | `lib/screens/requests_screen.dart` |
+| Guest · 07 · Profile / 07b · Profile · Guest | `lib/screens/profile_screen.dart` |
+| Guest · 08 · Sign in / 09 · Create account / 10 · Reset | `lib/screens/auth_screens.dart` |
+| Guest · 11 · Explore | `lib/screens/explore_screen.dart` |
+| Guest · 12 · Room · Now playing | `lib/screens/room_screen.dart` |
+| Guest · 13 · Request detail | `lib/screens/request_detail_screen.dart` |
+| Guest · 14 · Help & support | `lib/screens/help_screen.dart` |
+| Guest · 15 · Identity | `lib/screens/identity_screen.dart` |
+
+Описание каждой кнопки (вид + действие) — **`docs/ui/guest-buttons.md`**.
+
+## Архитектура
+
+- `lib/main.dart` — `AppStateScope` над `MaterialApp` (состояние доступно всем
+  маршрутам), корневой таб-бар (Listen · Explore · Requests · Profile) и
+  маршруты флоу (`ScanRoute` → `SearchRoute` → `TermsRoute` → `PaymentRoute` →
+  `RequestSentRoute`, `RoomRoute`, `RequestDetailRoute`, auth/help/identity).
+- `lib/state/app_state.dart` — `ChangeNotifier`: сессия комнаты, выбранный
+  трек, запросы, авторизация, способы оплаты; `probeBackend()` проверяет
+  API и включает демо-режим при недоступности.
+- `lib/data/` — модели (`models.dart`) и демо-данные 1:1 из макета
+  (`demo_data.dart`: Kater Blau, DJ Markus, Move, 5 запросов со статусами, FAQ…).
+- `lib/api/api_client.dart` — контракты бэкенда (`docs/openapi.yaml`):
+  device-token, join, create request, my requests.
 
 ## Дизайн-система
 
-- `lib/theme/tokens.dart` — **единственное** место с цветами, радиусами и
-  размерами (`$drop-*` из макета: фон `#0A0C0B`, акцент `#00FF87`,
-  поверхности `#141815` / `#1B211D`, текст `#F2F5F3`, muted `#A5AEA9`).
+- `lib/theme/tokens.dart` — **единственное** место цветов/радиусов/размеров
+  (`$drop-*` из макета + статусы, шторки, формы).
 - `lib/theme/app_theme.dart` — `ThemeData` из токенов.
-- `lib/widgets/` — общие компоненты: кнопки со всеми состояниями, поля и
-  строка комнаты, чипы и фильтры, строки треков и сводки, шапки, шторки,
-  обложки, праздничный блок.
-- `assets/fonts/` — Anton, Inter (400/500/600/700), Geist Mono (400/500).
-- `shaders/brand_wave_mint.frag` — фирменный знак «пиксельная волна»
-  (22 полосы, уровень 0,49, амплитуды 0,20/0,12, множители 3,4/−2,1,
-  смягчение ±0,025, градиент `#00FF87 → #66FFC2`). Рисуется в
-  `lib/widgets/brand_wave_logo.dart` через `ShaderMask`; при
-  «уменьшить движение» и в тестах — статичный кадр.
+- `lib/widgets/ui.dart` — общие компоненты: таб-бар, бренд-локуп, карточка
+  комнаты, кнопки, чипсы, поля и строки настроек.
+- `lib/widgets/receipt_ticket.dart` — перфорированный neon-чек.
+- `assets/fonts/` — Inter (400/500/600/700), Geist Mono, plus legacy display assets.
+- `assets/images/` — изображения макета (hero, фото заведений, обложки,
+  карта, сцена сканера) — встроены, работают без сети.
+- `shaders/brand_wave_mint.frag` — фирменный знак «пиксельная волна» в синей палитре.
 
-## Запуск
+## Запуск и сборка
 
 ```bash
 cd apps/mobile-guest
 flutter pub get
-flutter test          # виджет-тесты (сеть не нужна)
-flutter run           # эмулятор/устройство; API по умолчанию 10.0.2.2:8081
+flutter test                 # 7 виджет-тестов (без сети)
+flutter run                  # эмулятор/устройство
+
+# APK для телефона:
+flutter build apk --release
+# (если путь SDK содержит не-ASCII — см. раздел ниже)
 ```
 
-Сборка под Android требует ASCII-путей: gradle читает `local.properties` как
-ISO-8859-1 и коверкает кириллицу в пути SDK. Обход — ASCII-симлинки на SDK и
-каталог сборки (см. `IMPLEMENTATION_STATUS.md`, журнал проверок).
+### Обход не-ASCII путей (этот репозиторий)
 
-## WS-live (gateway-ws 0.7.0)
+Gradle читает `local.properties` как ISO-8859-1 и коверкает кириллицу
+(`/Volumes/Хранилище/...`). Обход: ASCII-симлинк на Flutter SDK и сборка через
+gradlew с ASCII-путём в `android/local.properties`:
 
-`lib/api/ws_client.dart` — guest-канал: подписка
-`{"subscribe":"guest","id":"<device>"}`; статусы запросов
-(accepted / rejected с причиной DJ / played) приходят без обновления экрана.
-Транспорт — web_socket_channel в прод-сборке; каркас деградирует на ручной
-refresh, контракт покрыт мок-тестами.
+```bash
+ln -sf "/Volumes/Хранилище/Dev/mobile-sdk/flutter" ~/flutter-sdk
+export PATH=~/flutter-sdk/bin:$PATH
+flutter build apk --release        # перезапишет local.properties
+printf 'sdk.dir=%s\nflutter.sdk=/Users/nekomy/flutter-sdk\nflutter.buildMode=release\n' \
+  "/Volumes/Хранилище/Dev/mobile-sdk/android-sdk" > android/local.properties
+(cd android && ./gradlew assembleRelease)
+# → build/app/outputs/flutter-apk/app-release.apk
+```
 
-## Заглушки (правило 5 — помечены в коде)
+## Режимы данных
 
-- поиск: демо-каталог до интеграции (B5 — лицензии);
-- QR-скан: экран камеры нарисован, поток камеры не подключён — вход через
-  шторку ручного кода;
-- оплата: карта не уходит провайдеру (hosted-форма Stripe после ADR-004);
-  серверный `POST /v1/requests` при этом настоящий;
-- «My requests»: демо-список, если API не передан.
+- **Сеть доступна:** `probeBackend()` получает device-token, запросы и оплата
+  уходят в бэкенд (`POST /v1/requests` и т.д.).
+- **Сети нет / бэкенд недоступен:** приложение использует демо-данные;
+  отправка демо-запроса не выполняет оплату и явно помечается «Not charged · demo».
 
-Прод-задачи: secure storage вместо SharedPreferences, camera-сканер,
-push-уведомления (макеты Guest/DJ уже есть в `.pen`).
+## Демо-поведение (что работает в APK)
+
+- QR-скан: камера-сцена из макета; «From photos» эмулирует распознавание QR,
+  ручной ввод кода — шторка 04c.
+- Поиск: фильтр по названию/исполнителю, жанровые чипы, превью с прогрессом.
+- Оплата: Stripe PaymentSheet для выбора метода и ввода карты; состояние
+  request/payment показывается отдельно по ответу backend.
+- Запросы: создание нового запроса, фильтры All/Upcoming/Played/Declined,
+  карточка причины отказа, детальный таймлайн статусов.
+- Профиль: статистика, разделы, вход/регистрация/сброс пароля (валидация),
+  редактирование деталей, любимые жанры, help с FAQ и чатом поддержки.
+
+## Известные ограничения
+
+- Поток камеры и image-picker не подключены (нет пакетов) — «From photos»
+  эмулирует успешное распознавание.
+- Для реальной оплаты нужны Stripe publishable key и backend с настроенным
+  Stripe provider. Без ключа checkout отклоняется до создания request.
+- При закрытии PaymentSheet или сетевой ошибке после создания PaymentIntent
+  backend не предоставляет отмену intent или выдачу исходного `client_secret`;
+  может остаться pending request/payment, который требует серверного recovery.
+- Android настроен для Stripe redirect. В текущем репозитории нет iOS
+  `Info.plist`/`Podfile`, поэтому iOS URL scheme, Apple Pay merchant ID и
+  capabilities не проверены/не заданы.
+- Push-уведомления и WS-live статусы — прод-задача (каркас API готов).

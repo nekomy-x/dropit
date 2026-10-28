@@ -1,120 +1,139 @@
+/// Guest · 04a · Terms before payment.
+///
+/// Макет pen.dev: шапка «назад + заголовок», правила запроса и оплаты,
+/// кнопка принятия условий и ссылка на полные условия.
+library;
+
 import 'package:flutter/material.dart';
 
-import '../api/api_client.dart';
+import '../data/models.dart';
+import '../state/app_state.dart';
 import '../theme/tokens.dart';
-import '../widgets/artwork.dart';
-import '../widgets/app_button.dart';
-import '../widgets/nav.dart';
+import '../widgets/ui.dart';
 
-/// Guest · 04a · Terms before payment — «Know the rules.»
-///
-/// Обязательный экран условий (ТЗ, §0.2): три правила, цена сессии и кнопка
-/// подтверждения. По макету подтверждение — сама кнопка «I understand —
-/// Continue» (чекбокса в макете нет), и в флоу экран стоит между выбором
-/// трека и оплатой, то есть пропустить его нельзя.
 class TermsScreen extends StatelessWidget {
   const TermsScreen({
     super.key,
     required this.session,
-    required this.track,
-    required this.onConfirmed,
-    this.onReadFullTerms,
+    required this.onBack,
+    required this.onAccept,
   });
 
-  final JoinResponse session;
-  final CatalogTrack track;
-  final VoidCallback onConfirmed;
-  final VoidCallback? onReadFullTerms;
+  final JoinSession session;
+  final VoidCallback onBack;
+  final VoidCallback onAccept;
 
   @override
   Widget build(BuildContext context) {
-    final price = session.priceLabel;
-    final rules = <String>[
+    final state = AppState.of(context);
+    final track = state.selectedTrack ?? _fallbackTrack;
+    final price =
+        session.priceLabel == '—' ? track.priceLabel : session.priceLabel;
+    final rules = [
       'You pay $price to send this request. The DJ decides if and when it gets played.',
       'If several people request the same song, each request is paid separately.',
       'A song can only be played once per night.',
     ];
-
-    return Scaffold(
-      backgroundColor: DropTokens.bg,
+    return DropScaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const NavRow(title: 'Before you pay'),
-              const SizedBox(height: 24),
-              const Text('Know the rules.', style: DropType.screenTitle),
-              const SizedBox(height: 24),
-              Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 24),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
                 children: [
-                  const Artwork(url: null),
+                  IconButton(
+                    onPressed: onBack,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: const Icon(Icons.arrow_back,
+                        size: 22, color: DropTokens.text),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  const Text('Before you pay', style: DropType.navTitle),
+                ],
+              ),
+            ),
+            const SizedBox(height: 26),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                children: [
+                  const Text('Know the rules.', style: DropType.screenTitle),
+                  const SizedBox(height: 24),
+
+                  // ── Заказ: трек + цена ──
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: DropTokens.surface,
+                      borderRadius: BorderRadius.circular(DropTokens.rMd),
+                      border: Border.all(color: DropTokens.border),
+                    ),
+                    child: Row(
                       children: [
-                        Text(track.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: DropType.trackTitle),
-                        const SizedBox(height: 5),
+                        ArtTile(path: track.art, size: 50),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(track.title, style: DropType.trackTitle),
+                              const SizedBox(height: 2),
+                              Text('${track.artist} · Original mix',
+                                  style: DropType.caption),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Text(
-                          '${track.artist} · Original mix',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: DropType.meta,
+                          price,
+                          style: DropType.labelTight.copyWith(
+                            color: DropTokens.accent,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Text(price,
-                      style: DropType.caption.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: DropTokens.accent,
-                      )),
+                  const SizedBox(height: 28),
+
+                  // ── Праила ─
+                  for (final rule in rules) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.check_circle_outline,
+                            size: 18, color: DropTokens.accent),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            rule,
+                            style: DropType.body.copyWith(height: 1.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                  ],
                 ],
               ),
-              const SizedBox(height: 20),
-              Container(
-                decoration: const BoxDecoration(
-                  border: Border(
-                    top: BorderSide(color: DropTokens.divider),
-                    bottom: BorderSide(color: DropTokens.divider),
-                  ),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Column(
-                  children: [
-                    for (var i = 0; i < rules.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 20),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Icon(Icons.check_circle_outline,
-                                size: 18, color: DropTokens.accent),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Text(rules[i], style: DropType.body),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
+            ),
+
+            // ── Принять и продолжить ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: PrimaryButton(
+                label: 'I understand — Continue',
+                onPressed: onAccept,
               ),
-              const Spacer(),
-              AppButton(label: 'I understand — Continue', onPressed: onConfirmed),
-              const SizedBox(height: 14),
-              Center(
-                child: GestureDetector(
-                  onTap: onReadFullTerms,
-                  behavior: HitTestBehavior.opaque,
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Center(
+                child: InkWell(
+                  onTap: () => _showFullTerms(context),
                   child: Text(
                     'Read the full terms',
                     style: DropType.caption.copyWith(
@@ -124,9 +143,74 @@ class TermsScreen extends StatelessWidget {
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  void _showFullTerms(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: DropTokens.sheet,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => const _FullTermsSheet(),
+    );
+  }
+
+  static const _fallbackTrack = Track(
+    id: 'move',
+    title: 'Move',
+    artist: 'Adam Port',
+    genre: 'Afro house',
+    art: 'assets/images/art_move.jpg',
+    priceLabel: '3,00 €',
+  );
+}
+
+class _FullTermsSheet extends StatelessWidget {
+  const _FullTermsSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: DropTokens.handle,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const Text('Full terms', style: DropType.sheetTitle),
+          const SizedBox(height: 12),
+          Text(
+            'A track request is a paid ask to the DJ. Payment is charged when '
+            'the request is sent. The DJ may decline a request at their '
+            'discretion; declined requests are refunded to the original '
+            'payment method within 5–10 business days. A track can be '
+            'played once per night. Prices are set by the venue and shown '
+            'before payment.',
+            style: DropType.body.copyWith(color: DropTokens.muted),
+          ),
+          const SizedBox(height: 20),
+          PrimaryButton(
+            label: 'Close',
+            trailingArrow: false,
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ],
       ),
     );
   }

@@ -50,6 +50,32 @@ class DjTheme {
         foregroundColor: white,
         elevation: 0,
       ),
+      // A field is a line under the value, not a box: the same treatment the
+      // guest app and the web panels use. `UnderlineInputBorder` is a straight
+      // 1px rule at the bottom edge; the accent colour marks focus.
+      inputDecorationTheme: const InputDecorationTheme(
+        filled: false,
+        border: UnderlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: grey),
+        ),
+        enabledBorder: UnderlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: grey),
+        ),
+        focusedBorder: UnderlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: neon),
+        ),
+        errorBorder: UnderlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: red),
+        ),
+        focusedErrorBorder: UnderlineInputBorder(
+          borderRadius: BorderRadius.zero,
+          borderSide: BorderSide(color: red),
+        ),
+      ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: neon,

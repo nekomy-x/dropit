@@ -1,39 +1,44 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 
 /// API-клиент гостя. Контракты — docs/openapi.yaml (F1–F5).
 ///
 /// Аутентификация гостя: device-token (UUIDv7) в Bearer — НЕ JWT
 /// (техкарта Часть I §3). Токен выдаётся сервером при первом входе
-/// и сохраняется в platform keystore через SharedPreferences
-/// (прод: flutter_secure_storage — TODO F9).
+/// и сохраняется в platform keystore через flutter_secure_storage.
 class ApiClient {
-  ApiClient(this._prefs);
+  ApiClient(this._secureStorage);
 
-  final SharedPreferences _prefs;
+  final FlutterSecureStorage _secureStorage;
   static const _deviceTokenKey = 'dropit_device_token';
 
-  /// Base URL: прод — CDN; dev — локальный API.
-  /// 10.0.2.2 = хост-localhost из Android-эмулятора.
-  String baseUrl = 'http://10.0.2.2:8081';
-
-  String? get deviceToken => _prefs.getString(_deviceTokenKey);
+  /// Base URL: задаётся через `--dart-define=DROPIT_API_URL=...`.
+  /// 10.0.2.2 = хост-localhost из Android-эмулятора. API слушает 8080.
+  String get baseUrl => const String.fromEnvironment(
+        'DROPIT_API_URL',
+        defaultValue: 'http://10.0.2.2:8080',
+      );
 
   /// Выдаёт device-token, если ещё нет.
   Future<String> ensureDeviceToken() async {
-    final existing = deviceToken;
+    final existing = await _secureStorage.read(key: _deviceTokenKey);
     if (existing != null) return existing;
     final token = await _issueDeviceToken();
-    await _prefs.setString(_deviceTokenKey, token);
+    await _secureStorage.write(key: _deviceTokenKey, value: token);
     return token;
   }
 
   Future<String> _issueDeviceToken() async {
     final resp = await _post(
       '/v1/guest/device',
-      {'platform': 'ios', 'app_version': '0.1.0'},
+      {
+        'platform':
+            defaultTargetPlatform == TargetPlatform.android ? 'android' : 'ios',
+        'app_version': '0.1.0',
+      },
     );
     if (resp.statusCode != 200) {
       throw ApiException(_parseError(resp));
@@ -51,6 +56,21 @@ class ApiClient {
     return JoinResponse.fromJson(jsonDecode(resp.body));
   }
 
+  /// GET /v1/catalog/search: живой поиск каталога для экрана Search.
+  Future<List<CatalogTrack>> searchCatalog(String query,
+      {int limit = 10}) async {
+    final encoded = Uri.encodeQueryComponent(query.trim());
+    final resp = await _get('/v1/catalog/search?q=$encoded&limit=$limit');
+    if (resp.statusCode != 200) {
+      throw ApiException(_parseError(resp));
+    }
+    final body = jsonDecode(resp.body) as Map<String, dynamic>;
+    final items = (body['items'] as List<dynamic>? ?? const <dynamic>[]);
+    return items
+        .map((item) => CatalogTrack.fromJson(item as Map<String, dynamic>))
+        .toList();
+  }
+
   /// POST /v1/requests: запрос трека. Idempotency-Key обязателен.
   Future<RequestCreated> createRequest({
     required String trackId,
@@ -66,6 +86,39 @@ class ApiClient {
       throw ApiException(_parseError(resp));
     }
     return RequestCreated.fromJson(jsonDecode(resp.body));
+  }
+
+  /// POST /v1/requests/:id/payment: создаёт PaymentIntent.
+  Future<PaymentIntent> createPaymentIntent({
+    required String requestId,
+    required String idempotencyKey,
+  }) async {
+    final resp = await _post(
+      '/v1/requests/$requestId/payment',
+      const {},
+      idempotencyKey: idempotencyKey,
+    );
+    if (resp.statusCode != 200 && resp.statusCode != 201) {
+      throw ApiException(_parseError(resp));
+    }
+    return PaymentIntent.fromJson(jsonDecode(resp.body));
+  }
+
+  /// POST /v1/payments/:id/confirm: подтверждает оплату.
+  Future<PaymentConfirmation> confirmPayment({
+    required String paymentId,
+    required String idempotencyKey,
+    String? paymentMethod,
+  }) async {
+    final resp = await _post(
+      '/v1/payments/$paymentId/confirm',
+      {if (paymentMethod != null) 'payment_method': paymentMethod},
+      idempotencyKey: idempotencyKey,
+    );
+    if (resp.statusCode != 200) {
+      throw ApiException(_parseError(resp));
+    }
+    return PaymentConfirmation.fromJson(jsonDecode(resp.body));
   }
 
   /// GET /v1/my/requests: история + статусы.
@@ -101,7 +154,7 @@ class ApiClient {
     String? idempotencyKey,
   }) async {
     final headers = {'Content-Type': 'application/json'};
-    final token = deviceToken;
+    final token = await _secureStorage.read(key: _deviceTokenKey);
     if (token != null) headers['Authorization'] = 'Bearer $token';
     if (idempotencyKey != null) headers['Idempotency-Key'] = idempotencyKey;
     return http.post(
@@ -113,7 +166,7 @@ class ApiClient {
 
   Future<http.Response> _get(String path) async {
     final headers = <String, String>{};
-    final token = deviceToken;
+    final token = await _secureStorage.read(key: _deviceTokenKey);
     if (token != null) headers['Authorization'] = 'Bearer $token';
     return http.get(Uri.parse('$baseUrl$path'), headers: headers);
   }
@@ -214,6 +267,15 @@ class CatalogTrack {
   final String? isrc;
   final String? coverUrl;
   final String? previewUrl;
+
+  factory CatalogTrack.fromJson(Map<String, dynamic> json) => CatalogTrack(
+        id: json['id']?.toString() ?? '',
+        title: json['title'] as String? ?? 'Unknown track',
+        artist: json['artist'] as String? ?? 'Unknown artist',
+        isrc: json['isrc'] as String?,
+        coverUrl: json['artwork_url'] as String?,
+        previewUrl: json['preview_url'] as String?,
+      );
 }
 
 /// Ответ POST /v1/requests.
@@ -228,11 +290,50 @@ class RequestCreated {
   final String status;
   final String sessionId;
 
-  factory RequestCreated.fromJson(Map<String, dynamic> json) =>
-      RequestCreated(
+  factory RequestCreated.fromJson(Map<String, dynamic> json) => RequestCreated(
         requestId: json['request_id'] as String,
         status: json['status'] as String,
         sessionId: json['session_id'] as String,
+      );
+}
+
+class PaymentIntent {
+  PaymentIntent({
+    required this.paymentId,
+    required this.requestId,
+    required this.amountMinor,
+    required this.currency,
+    required this.clientSecret,
+    required this.status,
+  });
+
+  final String paymentId;
+  final String requestId;
+  final int amountMinor;
+  final String currency;
+  final String clientSecret;
+  final String status;
+
+  factory PaymentIntent.fromJson(Map<String, dynamic> json) => PaymentIntent(
+        paymentId: json['payment_id'] as String,
+        requestId: json['request_id'] as String,
+        amountMinor: json['amount_minor'] as int,
+        currency: json['currency'] as String,
+        clientSecret: json['client_secret'] as String? ?? '',
+        status: json['status'] as String,
+      );
+}
+
+class PaymentConfirmation {
+  PaymentConfirmation({required this.paymentId, required this.status});
+
+  final String paymentId;
+  final String status;
+
+  factory PaymentConfirmation.fromJson(Map<String, dynamic> json) =>
+      PaymentConfirmation(
+        paymentId: json['payment_id'] as String,
+        status: json['status'] as String,
       );
 }
 

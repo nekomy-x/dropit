@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- DROP IT: фон «ночь» (брендбук, стр. 04) -->
+    <color name="drop_bg">#FF0A0C0B</color>
+</resources>

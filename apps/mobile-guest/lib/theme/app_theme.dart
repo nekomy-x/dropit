@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
-/// Тема приложения гостя, собранная из токенов макета.
+/// Guest app theme using the shared graphite surfaces and blue action accent.
 ///
 /// Здесь нет ни одного «магического» цвета: всё приходит из [DropTokens],
-/// а шрифты — Anton / Inter / Geist Mono, подключённые в `pubspec.yaml`.
+/// а шрифты — Inter / Geist Mono, подключённые в `pubspec.yaml`.
 class DropTheme {
   DropTheme._();
 
@@ -55,11 +55,13 @@ class DropTheme {
         thickness: 1,
         space: 1,
       ),
+      // A field is a line under the value, not a box — the same treatment as
+      // the web panels (`.field-input` in packages/ui/panel.css). No fill, no
+      // radius, no side or top border; the 1px rule alone says "type here".
       inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: DropTokens.input,
+        filled: false,
         hintStyle: DropType.bodySm.copyWith(color: DropTokens.muted),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
         border: _fieldBorder(DropTokens.border),
         enabledBorder: _fieldBorder(DropTokens.border),
         focusedBorder: _fieldBorder(DropTokens.accent),
@@ -89,8 +91,11 @@ class DropTheme {
     );
   }
 
-  static OutlineInputBorder _fieldBorder(Color color) => OutlineInputBorder(
-        borderRadius: BorderRadius.circular(DropTokens.rMd),
+  /// The one field border of this product: a 1px rule under the value.
+  /// `UnderlineInputBorder` is a straight rule at the bottom edge — the
+  /// Material equivalent of the web panels' `border-bottom`.
+  static UnderlineInputBorder _fieldBorder(Color color) => UnderlineInputBorder(
+        borderRadius: BorderRadius.zero,
         borderSide: BorderSide(color: color),
       );
 }

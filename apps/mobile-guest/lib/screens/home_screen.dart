@@ -1,150 +1,253 @@
+/// Guest · 01 · Home — экран «Listen».
+///
+/// Макет pen.dev, фрейм `Guest · 01 · Home`:
+/// шапка «бренд + город», hero-фотография с контрастным слоем и живым
+/// заголовком, парный блок действий (карта + QR), строка ближайшего клуба,
+/// рекомендации треков и таб-бар.
+library;
+
 import 'package:flutter/material.dart';
 
+import '../data/demo_data.dart';
+import '../data/models.dart';
 import '../theme/tokens.dart';
-import '../widgets/artwork.dart';
-import '../widgets/app_button.dart';
-import '../widgets/nav.dart';
-import '../widgets/track_row.dart';
+import '../widgets/ui.dart';
 
-/// Guest · 01 · Home
-///
-/// Макет: `docs/ui/reference/dropit-design.pen`, кадр «Guest · 01 · Home».
-/// Порядок и размеры из макета: бренд-строка 36, герой-блок 184 с плитками
-/// действий 136, лейбл «YOUR NIGHT STARTS HERE», строка заведения 72,
-/// блок «Set the mood» с рекомендациями и парящий таб-бар 64 (радиус 22).
 class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
     required this.onScan,
-    required this.onNearby,
-    this.onExplore,
-    this.onRequests,
-    this.onProfile,
-    this.onTrackTap,
-    this.city = 'Berlin',
-    this.liveRooms,
-    this.roomName,
-    this.roomMeta,
+    required this.onExplore,
+    required this.onOpenRoom,
+    required this.onRequestTrack,
   });
 
   final VoidCallback onScan;
-  final VoidCallback onNearby;
-  final VoidCallback? onExplore;
-  final VoidCallback? onRequests;
-  final VoidCallback? onProfile;
-  final ValueChanged<String>? onTrackTap;
-  final String city;
-  final String? liveRooms;
-  final String? roomName;
-  final String? roomMeta;
+  final VoidCallback onExplore;
+  final ValueChanged<Room> onOpenRoom;
+  final ValueChanged<Track> onRequestTrack;
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: DropTokens.bg,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 110),
-                children: [
-                  BrandBar(city: city),
-                  const SizedBox(height: 18),
-                  const _HeaderBlock(),
-                  const SizedBox(height: 16),
-                  _ActionTiles(onScan: onScan, onNearby: onNearby),
-                  const SizedBox(height: 60),
-                  const SectionLabel('YOUR NIGHT STARTS HERE'),
-                  const SizedBox(height: 10),
-                  _VenueRow(
-                    roomName: roomName,
-                    roomMeta: roomMeta,
-                    onJoin: onNearby,
-                  ),
-                  const SizedBox(height: 36),
-                  _SetTheMood(onTrackTap: onTrackTap),
-                ],
+    return DropScaffold(
+      body: ListView(
+        padding: EdgeInsets.zero,
+        physics: const BouncingScrollPhysics(),
+        children: [
+          const SizedBox(height: 24),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: BrandCityRow(),
+          ),
+          const SizedBox(height: 18),
+
+          // ── Hero: фотография + контрастный слой + живой заголовок ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(DropTokens.rSm),
+              child: SizedBox(
+                height: 184,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset('assets/images/hero_night.jpg',
+                        fit: BoxFit.cover),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Color(0xD9090909), Color(0x05090909)],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16, top: 45),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Your track.\nTheir next move.',
+                              style: DropType.screenTitle),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Join a club. Request a track. Own the night.',
+                            style: DropType.caption.copyWith(
+                                fontSize: 12, color: DropTokens.caption),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Живая подпись поверх hero (слой 04 брендбука 11).
+                    Positioned(
+                      left: 16,
+                      bottom: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0x33000000),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          '12 ROOMS LIVE TONIGHT',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _HomeTabBar(
-        onRequests: onRequests,
-        onExplore: onExplore,
-        onProfile: onProfile,
+          ),
+          const SizedBox(height: 16),
+
+          // ── Парный блок действий: карта + QR ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                // Nearby map action [12,278 183x136]
+                Expanded(
+                  child: _MapActionTile(
+                    onTap: onExplore,
+                  ),
+                ),
+                const SizedBox(width: 0),
+                // QR quick action [195,278 183x136]
+                Expanded(
+                  child: _QrActionTile(onTap: onScan),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 26),
+
+          // ── Ближайший клуб: подтверждение ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: _NearbyVenueRow(
+              room: DemoData.katerBlau,
+              onJoin: () => onOpenRoom(DemoData.katerBlau),
+            ),
+          ),
+          const SizedBox(height: 26),
+
+          // ── Рекомендации ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionLabel('YOUR NIGHT STARTS HERE'),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Set the mood',
+                        style: DropType.sectionTitle.copyWith(
+                            fontSize: 18, fontWeight: FontWeight.w700)),
+                    InkWell(
+                      onTap: onScan,
+                      child: Row(
+                        children: [
+                          Text('Browse all',
+                              style: DropType.caption.copyWith(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: DropTokens.accent)),
+                          const SizedBox(width: 4),
+                          const Icon(Icons.arrow_forward,
+                              size: 14, color: DropTokens.accent),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                for (final track in [
+                  DemoData.trackMove,
+                  DemoData.trackOneMoreTime,
+                ]) ...[
+                  _RecommendationRow(
+                    track: track,
+                    onAdd: () => onRequestTrack(track),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 2),
+                const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 12, color: DropTokens.muted),
+                    SizedBox(width: 6),
+                    Text(
+                      'Join a room to send your pick to the DJ.',
+                      style: DropType.caption,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 100),
+        ],
       ),
     );
   }
 }
 
-/// Герой-блок: фон-изображение 184 с контрастным оверлеем, бейдж
-/// «12 ROOMS LIVE TONIGHT» и заголовок Anton 34.
-class _HeaderBlock extends StatelessWidget {
-  const _HeaderBlock({this.liveRooms});
+/// Плитка «Nearby rooms» — карта с затемнением и подписями.
+class _MapActionTile extends StatelessWidget {
+  const _MapActionTile({required this.onTap});
 
-  final String? liveRooms;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: SizedBox(
-        height: 184,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(DropTokens.rHero),
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: const BorderRadius.horizontal(left: Radius.circular(28)),
+        child: SizedBox(
+          height: 136,
           child: Stack(
             fit: StackFit.expand,
             children: [
+              Image.asset('assets/images/map_home.jpg', fit: BoxFit.cover),
               const DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [DropTokens.surface2, DropTokens.surface],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0x00101016), Color(0xE6101016)],
                   ),
                 ),
               ),
-              const DecoratedBox(
-                decoration: BoxDecoration(gradient: DropTokens.heroOverlay),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+              const Padding(
+                padding: EdgeInsets.all(14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(
-                            color: DropTokens.accent,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          liveRooms ?? '12 ROOMS LIVE TONIGHT',
-                          style: DropType.metaSm.copyWith(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const Spacer(),
-                    const Text('Your track.\nTheir next move.',
-                        style: DropType.screenTitle),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Join a club. Request a track. Own the night.',
-                      style: DropType.meta.copyWith(color: DropTokens.caption),
-                    ),
+                    Spacer(),
+                    Text('Nearby rooms',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        )),
+                    SizedBox(height: 2),
+                    Text('12 live  ·  0.2 km',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 12,
+                          color: Colors.white,
+                        )),
                   ],
                 ),
               ),
@@ -156,137 +259,55 @@ class _HeaderBlock extends StatelessWidget {
   }
 }
 
-/// Пара плиток действий: слева «Nearby rooms», справа акцентная «Scan to enter»
-/// (внешние углы 22, внутренние прямые — как в макете).
-class _ActionTiles extends StatelessWidget {
-  const _ActionTiles({required this.onScan, required this.onNearby});
+/// Плитка «Scan to enter» — мятный акцент с QR-бейджем.
+class _QrActionTile extends StatelessWidget {
+  const _QrActionTile({required this.onTap});
 
-  final VoidCallback onScan;
-  final VoidCallback onNearby;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 136,
-      child: Row(
-        children: [
-          Expanded(
-            child: _Tile(
-              title: 'Nearby rooms',
-              hint: '12 live  ·  0.2 km',
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(DropTokens.rTile),
-                bottomLeft: Radius.circular(DropTokens.rTile),
-              ),
-              background: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [DropTokens.surface2, DropTokens.rail],
-              ),
-              titleColor: Colors.white,
-              onTap: onNearby,
-            ),
-          ),
-          Expanded(
-            child: _Tile(
-              title: 'Scan to enter',
-              hint: 'Club QR · instant access',
-              borderRadius: const BorderRadius.only(
-                topRight: Radius.circular(DropTokens.rTile),
-                bottomRight: Radius.circular(DropTokens.rTile),
-              ),
-              background: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [DropTokens.accent, DropTokens.accent],
-              ),
-              titleColor: DropTokens.onAccent,
-              hintColor: const Color(0xFF17452F),
-              icon: _ScanBadge(),
-              onTap: onScan,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Tile extends StatelessWidget {
-  const _Tile({
-    required this.title,
-    required this.hint,
-    required this.borderRadius,
-    required this.background,
-    required this.titleColor,
-    this.hintColor,
-    this.icon,
-    required this.onTap,
-  });
-
-  final String title;
-  final String hint;
-  final BorderRadius borderRadius;
-  final Gradient background;
-  final Color titleColor;
-  final Color? hintColor;
-  final Widget? icon;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: '$title. $hint',
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: Material(
-          color: Colors.transparent,
-          child: Ink(
-            decoration: BoxDecoration(gradient: background),
-            child: InkWell(
-              onTap: onTap,
-              child: Stack(
-                children: [
-                  if (icon != null)
-                    Positioned(top: 16, right: 16, child: icon!),
-                  Positioned(
-                    left: 18,
-                    right: 12,
-                    bottom: 16,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: DropType.bodySm.copyWith(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            height: 1.25,
-                            color: titleColor,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          hint,
-                          style: DropType.metaSm.copyWith(
-                            color: hintColor ?? DropTokens.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 136,
+        decoration: const BoxDecoration(
+          color: DropTokens.accent,
+          borderRadius: BorderRadius.horizontal(right: Radius.circular(28)),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.topRight,
+              child: _QrBadge(),
             ),
-          ),
+            Spacer(),
+            Text('Scan to enter',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: DropTokens.onAccent,
+                )),
+            SizedBox(height: 2),
+            Text('Club QR · instant access',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  color: DropTokens.qrHint,
+                )),
+          ],
         ),
       ),
     );
   }
 }
 
-class _ScanBadge extends StatelessWidget {
+class _QrBadge extends StatelessWidget {
+  const _QrBadge();
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -294,214 +315,121 @@ class _ScanBadge extends StatelessWidget {
       height: 48,
       decoration: BoxDecoration(
         color: DropTokens.onAccent,
-        borderRadius: BorderRadius.circular(DropTokens.rLg),
+        borderRadius: BorderRadius.circular(DropTokens.rXs),
       ),
-      alignment: Alignment.center,
       child: const Icon(Icons.qr_code_2, size: 28, color: DropTokens.accent),
     );
   }
 }
 
-/// Строка ближайшего заведения: фото 40, название, «Join» акцентом.
-class _VenueRow extends StatelessWidget {
-  const _VenueRow({this.roomName, this.roomMeta, required this.onJoin});
+/// Строка ближайшего клуба с кнопкой Join.
+class _NearbyVenueRow extends StatelessWidget {
+  const _NearbyVenueRow({required this.room, required this.onJoin});
 
-  final String? roomName;
-  final String? roomMeta;
+  final Room room;
   final VoidCallback onJoin;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onJoin,
-      child: Container(
-        height: 72,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: DropTokens.borderSoft)),
-        ),
-        child: Row(
-          children: [
-            const Artwork(url: null, size: 40, radius: DropTokens.rXs),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(roomName ?? 'Kater Blau',
-                      style: DropType.bodySm.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        height: 1,
-                        color: DropTokens.textSoft,
-                      )),
-                  const SizedBox(height: 5),
-                  Text(roomMeta ?? 'House · 200 m away',
-                      style: DropType.caption.copyWith(
-                        color: DropTokens.muted2,
-                        height: 1,
-                      )),
-                ],
-              ),
+    return Container(
+      height: 72,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: DropTokens.surface,
+        borderRadius: BorderRadius.circular(DropTokens.rMd),
+        border: Border.all(color: DropTokens.border),
+      ),
+      child: Row(
+        children: [
+          ArtTile(path: room.image, size: 40, radius: DropTokens.rXs),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(room.name,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: DropTokens.textSoft,
+                    )),
+                const SizedBox(height: 2),
+                Text('${room.genre} · ${room.distance} away',
+                    style: DropType.caption),
+              ],
             ),
-            Text('Join',
-                style: DropType.bodySm.copyWith(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  height: 1,
-                  color: DropTokens.accent,
-                )),
-            const SizedBox(width: 6),
-            const Icon(Icons.chevron_right, size: 18, color: DropTokens.muted2),
-          ],
-        ),
+          ),
+          InkWell(
+            onTap: onJoin,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Text('Join',
+                  style: DropType.caption.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: DropTokens.accent,
+                  )),
+            ),
+          ),
+          const Icon(Icons.chevron_right, size: 18, color: DropTokens.muted2),
+        ],
       ),
     );
   }
 }
 
-/// «Set the mood» + «Browse all» + две рекомендации треков.
-class _SetTheMood extends StatelessWidget {
-  const _SetTheMood({this.onTrackTap});
+/// Строка рекомендации трека с круглой кнопкой запроса.
+class _RecommendationRow extends StatelessWidget {
+  const _RecommendationRow({required this.track, required this.onAdd});
 
-  final ValueChanged<String>? onTrackTap;
-
-  static const _tracks = [
-    ('Move', 'Adam Port, Stryv · Afro house'),
-    ('One More Time', 'Daft Punk · Dance classics'),
-  ];
+  final Track track;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Set the mood', style: DropType.sectionTitle),
-            Row(
-              children: [
-                Text('Browse all',
-                    style: DropType.meta.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: DropTokens.accent,
-                    )),
-                const SizedBox(width: 4),
-                const Icon(Icons.arrow_forward,
-                    size: 14, color: DropTokens.accent),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        for (final (title, meta) in _tracks) ...[
-          TrackRow(
-            title: title,
-            subtitle: meta,
-            trailing: AppIconButton(
-              icon: Icons.add,
-              tooltip: 'Request $title',
-              onPressed: () => onTrackTap?.call(title),
-            ),
+        ArtTile(path: track.art, size: 50, radius: DropTokens.rXs),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(track.title,
+                  style: DropType.trackTitle.copyWith(color: DropTokens.text)),
+              const SizedBox(height: 2),
+              Text('${track.artist} · ${track.genre}',
+                  style: DropType.caption, overflow: TextOverflow.ellipsis),
+            ],
           ),
-          const SizedBox(height: 12),
-        ],
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            const Icon(Icons.info_outline, size: 12, color: DropTokens.muted),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Join a room to send your pick to the DJ.',
-                style: DropType.metaSm.copyWith(color: DropTokens.muted),
-              ),
-            ),
-          ],
         ),
+        const SizedBox(width: 10),
+        _AddTrackButton(onTap: onAdd),
       ],
     );
   }
 }
 
-/// Парящий таб-бар 64 с радиусом 22 (Listen · Explore · Requests · Profile).
-class _HomeTabBar extends StatelessWidget {
-  const _HomeTabBar({this.onRequests, this.onExplore, this.onProfile});
+class _AddTrackButton extends StatelessWidget {
+  const _AddTrackButton({required this.onTap});
 
-  final VoidCallback? onRequests;
-  final VoidCallback? onExplore;
-  final VoidCallback? onProfile;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Container(
-        height: DropTokens.tabBarHeight,
-        decoration: BoxDecoration(
-          color: DropTokens.bg,
-          borderRadius: BorderRadius.circular(DropTokens.rTile),
-          border: const Border(top: BorderSide(color: DropTokens.borderSoft)),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Row(
-          children: [
-            const _TabItem(
-                icon: Icons.graphic_eq,
-                label: 'Listen',
-                active: true),
-            _TabItem(
-                icon: Icons.explore_outlined,
-                label: 'Explore',
-                onTap: onExplore),
-            _TabItem(
-                icon: Icons.receipt_long_outlined,
-                label: 'Requests',
-                onTap: onRequests),
-            _TabItem(
-                icon: Icons.person_outline, label: 'Profile', onTap: onProfile),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TabItem extends StatelessWidget {
-  const _TabItem({
-    required this.icon,
-    required this.label,
-    this.active = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool active;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = active ? DropTokens.accent : DropTokens.muted3;
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 21, color: color),
-            const SizedBox(height: 5),
-            Text(
-              label,
-              style: DropType.meta.copyWith(
-                fontSize: 11,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                color: active ? DropTokens.textTabActive : color,
-              ),
-            ),
-          ],
+    return SizedBox(
+      width: 34,
+      height: 34,
+      child: Material(
+        color: DropTokens.accent,
+        borderRadius: BorderRadius.circular(DropTokens.rXs),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(DropTokens.rXs),
+          onTap: onTap,
+          child: const Icon(Icons.add, size: 18, color: DropTokens.onAccent),
         ),
       ),
     );

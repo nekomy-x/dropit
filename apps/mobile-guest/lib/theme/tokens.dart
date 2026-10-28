@@ -11,40 +11,32 @@ class DropTokens {
   DropTokens._();
 
   // ─── Палитра ───────────────────────────────────────────────────────────
-  // $drop-bg — «ночь», основной фон.
-  static const bg = Color(0xFF0A0C0B);
-  // $drop-rail — полоса навигации/рельс.
-  static const rail = Color(0xFF101413);
-  // $drop-surface — карточки и панели.
-  static const surface = Color(0xFF141815);
-  // $drop-surface-2 — приподнятые поверхности (шторки, строки).
-  static const surface2 = Color(0xFF1B211D);
-  // $drop-input — поля ввода.
-  static const input = Color(0xFF1B211D);
+  // Graphite surfaces shared with the web panels.
+  static const bg = Color(0xFF000000);
+  static const rail = Color(0xFF080808);
+  static const surface = Color(0xFF191919);
+  static const surface2 = Color(0xFF242424);
+  static const input = Color(0xFF242424);
   // $drop-border — 1px hairline вокруг поверхностей.
   static const border = Color(0x17FFFFFF);
   // Мягкий разделитель внутри списков.
   static const borderSoft = Color(0x14FFFFFF);
   // Разделитель строк «комната/сессия».
   static const divider = Color(0x20FFFFFF);
-  // $drop-tint — 8 % зелёного (бейджи, выбранные строки).
-  static const tint = Color(0x1400FF87);
-  // Заливка выбранного чипа (15 %).
-  static const tintStrong = Color(0x2600FF87);
-  // Заливка выбранной карты в шторке (5 %).
-  static const tintFaint = Color(0x0D00FF87);
+  // Blue tint for active controls and selected rows.
+  static const tint = Color(0x148AB4F8);
+  static const tintStrong = Color(0x268AB4F8);
+  static const tintFaint = Color(0x0D8AB4F8);
 
-  // $drop-accent — главное действие («Signal»).
-  static const accent = Color(0xFF00FF87);
+  // Primary action accent.
+  static const accent = Color(0xFF8AB4F8);
   // Нажатое состояние кнопки (DS · 02, pressed).
-  static const accentPressed = Color(0xFF00CC6A);
-  // Мятный конец фирменного градиента.
-  static const accentMint = Color(0xFF66FFC2);
+  static const accentPressed = Color(0xFF7AA7E8);
+  static const accentMint = Color(0xFFAECBFA);
 
   // Текст на акценте — в экранах макета используется этот тёмный тон.
-  static const onAccent = Color(0xFF101813);
-  // $drop-ink — токен тёмного текста на акценте (тот же смысл, шире охват).
-  static const ink = Color(0xFF06130C);
+  static const onAccent = Color(0xFF07111F);
+  static const ink = Color(0xFF07111F);
 
   // $drop-text — основной текст.
   static const text = Color(0xFFF2F5F3);
@@ -68,17 +60,59 @@ class DropTokens {
   // $dj-red / ошибки и отклонения.
   static const red = Color(0xFFFF3B30);
   static const redSoft = Color(0x14FF3B30);
+  static const live = Color(0xFF34D399);
+  static const liveTint = Color(0x1A34D399);
   // Предупреждение (брендбук, стр. 04).
   static const amber = Color(0xFFFFD166);
 
   // Служебные поверхности шторок (guest 04b/04d).
-  static const sheet = Color(0xFF1C1E1D);
-  static const sheetRow = Color(0xFF252826);
-  static const handle = Color(0xFF606762);
+  static const sheet = Color(0xFF191919);
+  static const sheetRow = Color(0xFF242424);
+  static const handle = Color(0xFF606060);
+  // Карточка причины отказа (guest 06d).
+  static const declineCard = Color(0xFF251C1E);
+  static const declineTitle = Color(0xFFFFB1B5);
+  static const declineBody = Color(0xFFE3CCCF);
+  // Логотип Visa в бейджах оплаты (guest 04/04b/04d).
+  static const visaBlue = Color(0xFF1434CB);
+  // Невыбранная галочка в шторке способов оплаты.
+  static const inactiveCheck = Color(0xFF777F79);
   // Конфетти и искры на экране «запрос отправлен» (guest 05).
   static const sparkle = Color(0xFFBC9AFF);
   static const sparkleSoft = Color(0xFFD8C5FF);
   static const sparklePale = Color(0xFFE6FFF1);
+
+  // ─── Статусы запросов (guest 06·06b·06c·06d, 13) ─────────────────────
+  static const statusQueue = Color(0xFF8AB4F8); // в очереди
+  static const statusAwait = Color(0xFFF4CD7A); // ожидает DJ
+  static const statusDeclined = Color(0xFFFF969B); // отклонено
+  static const statusPlayed = Color(0xFFA5AEA9); // сыграно (muted)
+
+  // ─── Чипы фильтров ───────────────────────────────────────────────────
+  static const chipIdleBg = Color(0xFF242424);
+  static const chipIdleText = Color(0xFFBDC5BF);
+
+  // ─── Тёмные tint-варианты акцента (бейджи, выбранные строки) ─────────
+  static const tint14 = Color(0x148AB4F8); // active badge
+  static const tint1A = Color(0x1A8AB4F8); // active room
+  static const tint1F = Color(0x1F8AB4F8); // progress rail
+  static const tintStrong2 = Color(0x268AB4F8);
+
+  // ─── Прочее из макета ────────────────────────────────────────────────
+  static const railTrack = Color(0xFF343434); // рельс аудио-прогресса
+  static const eqBarIdle = Color(0x2FFFFFFF); // спящие полосы эквалайзера
+  static const ghostFill12 = Color(0x12FFFFFF); // круглые кнопки поверх камеры
+  static const scanHint = Color(0xFFD8E3DC); // подсказки на камере
+  static const scanHintBright = Color(0xFFE4EBE7);
+  static const scanHintDim = Color(0xFFBAC5BF);
+  static const scanHintFaint = Color(0xFFBECAC3);
+  static const qrHint = Color(0xFF1E3558); // подпись на синей плитке QR
+  static const featuredMeta = Color(0xFFCDD5D0); // мета featured-карточки
+  static const statLabel = Color(0xFFD2DAD5); // подписи статистики профиля
+  static const divider26 = Color(0x26FFFFFF); // разделитель «or with email»
+  static const dropLine = Color(0x1FFFFFFF); // тонкие линии (шаги, перфорация)
+  static const tabInactive = Color(0xFF929A95);
+  static const tabInactiveSoft = Color(0xFF919994);
 
   // ─── Радиусы ───────────────────────────────────────────────────────────
   static const rXs = 6.0; // фото заведения, мелкие значки
@@ -115,10 +149,10 @@ class DropTokens {
     colors: [Color(0x00101016), Color(0xE6101016)],
   );
   static const celebrationGlow = RadialGradient(
-    colors: [Color(0x3800FF87), Color(0x0000FF87)],
+    colors: [Color(0x388AB4F8), Color(0x008AB4F8)],
   );
 
-  // Фирменный градиент знака: #00FF87 → #66FFC2 слева направо.
+  // Brand gradient: #8AB4F8 → #AECBFA слева направо.
   static const brandGradient = LinearGradient(
     begin: Alignment.centerLeft,
     end: Alignment.centerRight,
@@ -127,16 +161,16 @@ class DropTokens {
 }
 
 /// Шкала типографики. Источник — брендбук, стр. 05: базовые уровни
-/// 40 / 28 / 20 / 16 / 14 и правило «Anton — заголовки», «Inter — текст и
-/// кнопки», «Geist Mono — данные».
+/// 40 / 28 / 20 / 16 / 14 и правило «Inter — заголовки и текст,
+/// Geist Mono — данные».
 class DropType {
   DropType._();
 
-  static const _head = 'Anton';
+  static const _head = 'Inter';
   static const _body = 'Inter';
   static const mono = 'GeistMono';
 
-  /// Крупный заголовок экрана (Anton 34, интерлиньяж 1.08) — так он задан
+  /// Крупный заголовок экрана (Inter 34, интерлиньяж 1.08).
   /// во всех экранах приложения гостя.
   static const screenTitle = TextStyle(
     fontFamily: _head,
@@ -146,7 +180,7 @@ class DropType {
     color: DropTokens.text,
   );
 
-  /// Заголовок шторки (Anton 28).
+  /// Заголовок шторки (Inter 28).
   static const sheetTitle = TextStyle(
     fontFamily: _head,
     fontSize: 28,
@@ -154,13 +188,64 @@ class DropType {
     color: DropTokens.text,
   );
 
-  /// H1 брендбука (Anton 40) — витринные заголовки.
+  /// H1 (Inter 40) — витринные заголовки.
   static const hero = TextStyle(
     fontFamily: _head,
     fontSize: 40,
     height: 1.08,
     fontWeight: FontWeight.w400,
     color: DropTokens.text,
+  );
+
+  /// Крупнейший заголовок экрана «Now playing» (Inter 44, lh 0.95).
+  static const nowPlayingTitle = TextStyle(
+    fontFamily: _head,
+    fontSize: 44,
+    height: 0.95,
+    fontWeight: FontWeight.w400,
+    color: DropTokens.text,
+  );
+
+  /// Название featured-комнаты на карточке Explore (Inter 24).
+  static const featuredRoom = TextStyle(
+    fontFamily: _head,
+    fontSize: 24,
+    height: 1.0,
+    fontWeight: FontWeight.w400,
+    color: DropTokens.text,
+  );
+
+  /// Название трека в «Request detail» (Inter 22).
+  static const requestTitle = TextStyle(
+    fontFamily: _head,
+    fontSize: 22,
+    height: 1.08,
+    fontWeight: FontWeight.w400,
+    color: DropTokens.text,
+  );
+
+  /// Значения статистики профиля (Inter 30 SemiBold).
+  static const statValue = TextStyle(
+    fontFamily: _body,
+    fontSize: 30,
+    fontWeight: FontWeight.w600,
+    color: DropTokens.text,
+  );
+
+  /// Название комнаты в шапке Room (Inter 17 SemiBold).
+  static const roomName = TextStyle(
+    fontFamily: _body,
+    fontSize: 17,
+    fontWeight: FontWeight.w600,
+    color: DropTokens.text,
+  );
+
+  /// Номер позиции в очереди (Inter 12 SemiBold).
+  static const stepPosition = TextStyle(
+    fontFamily: _head,
+    fontSize: 12,
+    fontWeight: FontWeight.w600,
+    color: DropTokens.muted,
   );
 
   /// H3 (Inter 18 Bold) — заголовки блоков («Set the mood»).

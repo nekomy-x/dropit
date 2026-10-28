@@ -1,86 +1,111 @@
+/// Guest · 02 · Scan QR + 04c · Manual entry.
+///
+/// Макет pen.dev: полноэкранная камера, затемнение, «рамочка» сканера,
+/// инструменты (вспышка/галерея), ручной ввод кода комнаты (шторка).
+library;
+
 import 'package:flutter/material.dart';
 
-import '../api/api_client.dart';
+import '../data/models.dart';
 import '../theme/tokens.dart';
-import '../widgets/app_button.dart';
-import '../widgets/brand_wave_logo.dart';
-import '../widgets/sheet.dart';
+import '../widgets/ui.dart';
 
-/// Guest · 02 · Scan QR (+ Guest · 04c · Manual entry)
-///
-/// Макет: кадры «Guest · 02 · Scan QR» и «Guest · 04c · Manual entry».
-/// Рамка сканирования 310×300 с рамкой акцента, стеклянные кнопки-таблетки,
-/// шторка ручного ввода кода с полем 48 и кнопкой «Join room».
-///
-/// ЗАГЛУШКА (правило 5): сам поток камеры подключается вместе с
-/// mobile_scanner под устройство (B5). Здесь — экран и ручной ввод кода,
-/// который реально вызывает `POST /v1/sessions/join`.
 class ScanScreen extends StatefulWidget {
   const ScanScreen({
     super.key,
-    required this.api,
+    required this.onClose,
     required this.onJoined,
-    this.onClose,
+    this.onCode,
   });
 
-  final ApiClient api;
-  final void Function(JoinResponse) onJoined;
-  final VoidCallback? onClose;
+  final VoidCallback onClose;
+  final ValueChanged<Room> onJoined;
+  final ValueChanged<String>? onCode;
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
 }
 
-class _ScanScreenState extends State<ScanScreen> {
-  bool _busy = false;
-  String? _error;
+class _ScanScreenState extends State<ScanScreen>
+    with SingleTickerProviderStateMixin {
+  bool _flash = false;
+  late final AnimationController _scanLine;
 
-  Future<void> _joinWithCode(String rawCode) async {
-    final token = rawCode.trim();
-    if (token.isEmpty) {
-      setState(() => _error = 'Enter the code from the club QR');
-      return;
-    }
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final session = await widget.api.joinByQr(token);
-      if (mounted) Navigator.of(context).maybePop();
-      widget.onJoined(session);
-    } on ApiException catch (e) {
-      setState(() {
-        _error = switch (e.envelope.code) {
-          'not_found' => 'QR not found or expired — ask staff to regenerate',
-          'session_closed' => 'This session is closed',
-          'unauthorized' => 'Device not recognized — restart the app',
-          _ => e.envelope.message,
-        };
-      });
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+  @override
+  void initState() {
+    super.initState();
+    _scanLine = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
   }
 
-  Future<void> _openManualEntry() async {
-    final code = await showModalBottomSheet<String>(
+  @override
+  void dispose() {
+    _scanLine.dispose();
+    super.dispose();
+  }
+
+  void _openManualEntry() {
+    showModalBottomSheet(
       context: context,
+      backgroundColor: DropTokens.sheet,
       isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
       builder: (_) => const _RoomCodeSheet(),
+    ).then((code) {
+      if (code is String && code.trim().isNotEmpty) {
+        if (widget.onCode != null) {
+          widget.onCode!(code.trim());
+        } else {
+          widget.onJoined(_roomForCode(code.trim()));
+        }
+      }
+    });
+  }
+
+  Room _roomForCode(String code) {
+    // Демо: любой непустой код ведёт в ближайшую живую комнату.
+    return const Room(
+      id: 'kater-blau',
+      name: 'Kater Blau',
+      session: 'Main floor',
+      dj: 'DJ Markus',
+      genre: 'House',
+      distance: '200 m',
+      image: 'assets/images/venue_kater_blau.jpg',
+      liveCount: 12,
     );
-    if (code != null) await _joinWithCode(code);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: DropTokens.bg,
+    return DropScaffold(
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          // «Камера»: заглушка вместо потока (B5).
-          const Positioned.fill(child: _CameraBackdrop()),
+          // Камера (снимок сцены из макета).
+          Image.asset('assets/images/camera_scan.jpg', fit: BoxFit.cover),
+          // Затемнение.
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xEF000000),
+                  Color(0x99000000),
+                  Color(0x00000000),
+                  Color(0x22000000),
+                  Color(0xEE000000),
+                  Color(0xEE000000),
+                ],
+                stops: [0.0, 0.2, 0.42, 0.62, 0.85, 1.0],
+              ),
+            ),
+          ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -88,56 +113,172 @@ class _ScanScreenState extends State<ScanScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      const BrandWaveLogo(),
-                      const Spacer(),
-                      _GlassCircle(
-                        icon: Icons.close,
-                        size: 44,
-                        onTap: widget.onClose ??
-                            () => Navigator.of(context).maybePop(),
-                      ),
-                    ],
+
+                  // ── Навигация сканера ──
+                  SizedBox(
+                    height: 44,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const BrandLockup(markColor: DropTokens.text),
+                        GhostCircleButton(
+                          icon: Icons.close,
+                          size: 44,
+                          fill: const Color(0x80121212),
+                          bordered: false,
+                          onPressed: widget.onClose,
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 42),
-                  const Text('Scan in. Tune in.',
-                      style: DropType.screenTitle),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 38),
+
+                  // ── Вводная часть ──
+                  const Text('Scan in. Tune in.', style: DropType.screenTitle),
+                  const SizedBox(height: 8),
                   Text(
                     'Point your camera at the club’s QR code.',
-                    style: DropType.bodySm.copyWith(color: DropTokens.muted4),
+                    style: DropType.bodySm.copyWith(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: DropTokens.scanHint,
+                    ),
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 14),
-                    _ErrorNote(message: _error!),
-                  ],
-                  const Spacer(),
-                  Text('Scanning automatically',
+
+                  // ── Рамка сканера (масштабируется на маленьких экранах) ──
+                  Expanded(
+                    child: Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(
+                          width: 310,
+                          height: 300,
+                          child: Stack(
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(32),
+                                  border: Border.all(
+                                    color: const Color(0xB3FFFFFF),
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                              // Бегущая линия сканирования.
+                              AnimatedBuilder(
+                                animation: _scanLine,
+                                builder: (context, _) {
+                                  return Align(
+                                    alignment: Alignment(
+                                        0, -0.85 + _scanLine.value * 1.7),
+                                    child: Container(
+                                      height: 2,
+                                      margin: const EdgeInsets.symmetric(
+                                          horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            DropTokens.accent
+                                                .withValues(alpha: 0),
+                                            DropTokens.accent,
+                                            DropTokens.accent
+                                                .withValues(alpha: 0),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── Подсказка видоискателя ──
+                  Center(
+                    child: Text(
+                      'Scanning automatically',
                       style: DropType.bodySm.copyWith(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
-                      )),
-                  const SizedBox(height: 8),
+                        color: DropTokens.text,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.door_front_door_outlined,
+                            size: 13, color: DropTokens.muted),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Just hold steady. No photo needed.',
+                          style: DropType.caption
+                              .copyWith(color: DropTokens.scanHintDim),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+
+                  // ── Инструменты камеры ──
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.door_front_door_outlined,
-                          size: 13, color: DropTokens.hint),
-                      const SizedBox(width: 6),
-                      Text('Just hold steady. No photo needed.',
-                          style: DropType.metaSm
-                              .copyWith(color: DropTokens.hint)),
+                      _CameraTool(
+                        icon: _flash ? Icons.flash_on : Icons.flash_off,
+                        label: _flash ? 'Flash on' : 'Flash',
+                        onTap: () => setState(() => _flash = !_flash),
+                      ),
+                      const SizedBox(width: 32),
+                      _CameraTool(
+                        icon: Icons.photo_library_outlined,
+                        label: 'From photos',
+                        onTap: () {
+                          if (widget.onCode != null) {
+                            widget.onCode!('gallery');
+                          } else {
+                            widget.onJoined(_roomForCode('gallery'));
+                          }
+                        },
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 28),
-                  const _CameraTools(),
-                  const SizedBox(height: 28),
-                  Text('Can’t scan the code?',
-                      style: DropType.caption.copyWith(
-                        color: DropTokens.muted,
-                      )),
-                  const SizedBox(height: 8),
-                  _EnterCodeButton(onTap: _openManualEntry, busy: _busy),
+                  const SizedBox(height: 44),
+
+                  // ── Ручной ввод ──
+                  const Text(
+                    'Can’t scan the code?',
+                    style: DropType.caption,
+                  ),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: _openManualEntry,
+                    borderRadius: BorderRadius.circular(999),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.keyboard_outlined,
+                              size: 18, color: DropTokens.scanHintDim),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Type room code manually',
+                            style: DropType.bodySm.copyWith(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: DropTokens.scanHint,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 24),
                 ],
               ),
@@ -149,210 +290,28 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 }
 
-/// Тёмный фон «камеры» с затемнением по краям и рамкой сканирования.
-class _CameraBackdrop extends StatelessWidget {
-  const _CameraBackdrop();
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF191D1B), DropTokens.rail],
-            ),
-          ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                DropTokens.bg.withValues(alpha: 0.94),
-                DropTokens.bg.withValues(alpha: 0.13),
-                DropTokens.bg.withValues(alpha: 0.07),
-                DropTokens.bg.withValues(alpha: 0.93),
-              ],
-              stops: const [0, 0.32, 0.58, 1],
-            ),
-          ),
-        ),
-        Align(
-          alignment: const Alignment(0, -0.22),
-          child: Container(
-            width: 310,
-            height: 300,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(DropTokens.rSheet),
-              border: Border.all(color: DropTokens.accent, width: 3),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Стеклянные кнопки «Flash» и «From photos» (таблетки 52 с подписью).
-class _CameraTools extends StatelessWidget {
-  const _CameraTools();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Row(
-      children: [
-        Expanded(child: _ToolPill(icon: Icons.flash_off, label: 'Flash')),
-        SizedBox(width: 12),
-        Expanded(
-            child: _ToolPill(icon: Icons.photo_library_outlined,
-                label: 'From photos')),
-      ],
-    );
-  }
-}
-
-class _ToolPill extends StatelessWidget {
-  const _ToolPill({required this.icon, required this.label});
+class _CameraTool extends StatelessWidget {
+  const _CameraTool({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
   final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 52,
-      decoration: BoxDecoration(
-        color: const Color(0xCC161C19),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: const Color(0x30FFFFFF)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 18, color: DropTokens.text),
-          const SizedBox(width: 9),
-          Text(label,
-              style: DropType.caption.copyWith(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: DropTokens.text,
-              )),
-        ],
-      ),
-    );
-  }
-}
-
-class _EnterCodeButton extends StatelessWidget {
-  const _EnterCodeButton({required this.onTap, this.busy = false});
-
   final VoidCallback onTap;
-  final bool busy;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 52,
-      width: double.infinity,
-      child: Material(
-        color: const Color(0xFF1B3025),
-        borderRadius: BorderRadius.circular(26),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(26),
-          onTap: busy ? null : onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: DropTokens.accent),
-            ),
-            alignment: Alignment.center,
-            child: busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: DropTokens.accent),
-                  )
-                : Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.keyboard,
-                          size: 18, color: DropTokens.accent),
-                      const SizedBox(width: 10),
-                      Text('Enter room code',
-                          style: DropType.bodySm.copyWith(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: DropTokens.accent,
-                          )),
-                    ],
-                  ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GlassCircle extends StatelessWidget {
-  const _GlassCircle({required this.icon, this.onTap, this.size = 52});
-
-  final IconData icon;
-  final VoidCallback? onTap;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Material(
-        color: const Color(0x80121212),
-        shape: const CircleBorder(
-          side: BorderSide(color: DropTokens.ghostStroke),
-        ),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onTap,
-          child: Icon(icon, size: size * 0.45, color: DropTokens.text),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorNote extends StatelessWidget {
-  const _ErrorNote({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: DropTokens.redSoft,
-        borderRadius: BorderRadius.circular(DropTokens.rMd),
-        border: Border.all(color: DropTokens.red),
-      ),
-      child: Row(
+      width: 80,
+      child: Column(
         children: [
-          const Icon(Icons.error_outline, size: 24, color: DropTokens.red),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: DropType.caption.copyWith(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: DropTokens.red,
-              ),
-            ),
+          GhostCircleButton(icon: icon, onPressed: onTap),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: DropType.caption.copyWith(color: DropTokens.text),
           ),
         ],
       ),
@@ -360,7 +319,7 @@ class _ErrorNote extends StatelessWidget {
   }
 }
 
-/// Guest · 04c: шторка «Enter room code».
+/// Guest · 04c · Room code bottom sheet.
 class _RoomCodeSheet extends StatefulWidget {
   const _RoomCodeSheet();
 
@@ -377,35 +336,68 @@ class _RoomCodeSheetState extends State<_RoomCodeSheet> {
     super.dispose();
   }
 
-  void _submit() => Navigator.of(context).pop(_controller.text);
+  void _submit() {
+    final code = _controller.text.trim();
+    if (code.isEmpty) return;
+    Navigator.of(context).pop(code);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AppSheet(
-      title: 'Enter room code',
-      trailing: IconButton(
-        icon: const Icon(Icons.close, size: 22, color: DropTokens.muted),
-        onPressed: () => Navigator.of(context).pop(),
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 44,
+        right: 44,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
-      children: [
-        Text(
-          'Enter the code displayed next to the club’s QR.',
-          style: DropType.caption.copyWith(height: 1.5),
-        ),
-        const SizedBox(height: 20),
-        SheetField(
-          label: 'Room code',
-          placeholder: 'Enter code',
-          icon: Icons.tag,
-          controller: _controller,
-          keyboardType: TextInputType.text,
-        ),
-        const SizedBox(height: 24),
-        AppButton(
-          label: 'Join room',
-          onPressed: _submit,
-        ),
-      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 12),
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: DropTokens.handle,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Enter room code', style: DropType.sheetTitle),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon:
+                    const Icon(Icons.close, size: 22, color: DropTokens.muted),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Enter the code displayed next to the club’s QR.',
+            style: DropType.caption.copyWith(height: 1.5),
+          ),
+          const SizedBox(height: 20),
+          const FieldLabel('Room code'),
+          DropField(
+            controller: _controller,
+            hint: 'Enter code',
+            prefixIcon: Icons.tag,
+            height: 48,
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 20),
+          PrimaryButton(
+            label: 'Join room',
+            onPressed: _submit,
+          ),
+        ],
+      ),
     );
   }
 }
