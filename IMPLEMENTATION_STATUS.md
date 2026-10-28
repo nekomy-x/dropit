@@ -115,6 +115,17 @@ djs, reconciliation-runs; DJ — shift, stats/today, **`PATCH /v1/dj/styles`**.
 Каркасы панелей: `apps/web-club/`, `apps/web-admin/` (React+TS+Vite+Tailwind) —
 живые API-клиенты на контрактах openapi.
 
+**Публичный Connect-флоу (лендинг + онбординг клуба)** — `apps/web-club`,
+роуты `/connect` → `/connect/club` → `/connect/venue` → `/connect/qr` →
+`/connect/connected`. Лендинг с калькулятором доходности, демо панели, FAQ;
+визард с валидацией по шагам, автосохранением черновика в localStorage и
+анимациями (reveal, marquee, count-up, step-переходы, success-чек) с
+уважением к `prefers-reduced-motion`. Отправка заявки идёт на
+`POST /v1/club/onboarding/apply` — эндпоинта на бэкенде пока нет (есть только
+админский `POST /v1/admin/clubs`), поэтому вызов деградирует в 501-заглушку и
+экран успеха честно сообщает, что черновик остался в браузере
+(`TODO(club-onboarding-endpoint)` в `src/api/connect.ts`).
+
 ### F8 — hardening ✅
 
 `crates/domain/src/fraud.rs`: лимит 20 запросов/устройство/сессию → deny;
@@ -139,14 +150,27 @@ TTL-интенты, антифрод-счётчики, GDPR (`anonymize_guest_de
 - `crates/infra-push` — `PushSender`, `FcmSender` (FCM v1, OAuth2 JWT),
   `ApnsSender` (ES256 JWT), `RoutingPush`, `NoopPush`. Включается
   `FCM_*`/`APNS_*`.
+- `crates/infra-mail` — транзакционная почта через Resend HTTP API (ADR-008):
+  `MailSender` (`ResendSender`/`NoopMail`), Svix-подтверждение вебхуков
+  доставки, шаблоны `dj_invite`/`guest_verify`/`payout_paid`/`mail_test`.
+  Включается `RESEND_API_KEY` + `MAIL_FROM`.
 - `crates/workers` (`dropit-workers`) — супервизор `run` и `--once <job>`:
-  `outbox`, `payouts`, `reconcile`, `retention`, `close-sessions`, `push`.
+  `outbox`, `payouts`, `reconcile`, `retention`, `close-sessions`, `push`,
+  `mail` (очередь писем, backoff, подавления).
 - WS multi-node: `crates/gateway-api/src/ws.rs` берёт тикеты из Redis
   (`RedisTicketStore`) и релеит live-события между узлами через
   `RedisEventBus`; без Redis — in-memory (один узел). См. ADR-004/005.
 - Новые миграции: `0008_panel_tails.sql`, `0009_push_tokens.sql`,
   `0010_guest_account.sql`. Роут: **`POST /v1/guest/upgrade`** (bind email),
   **`POST /v1/guest/push-token`** (регистрация push-токена гостя).
+- Волна 6 (почта): `0013_mail.sql` (`mail_message` — очередь писем с
+  идемпотентностью и историей доставки, `mail_event`, `mail_suppression`) и
+  `0014_guest_verify.sql` (одноразовые коды подтверждения e-mail, хранятся
+  хешем). Роуты: **`POST /webhooks/resend`** (Svix-подпись, дедуп по
+  `svix-id`), **`GET /v1/admin/mail`**, **`/stats`**, **`/suppressions`**,
+  **`/v1/admin/mail/{id}`**, **`/{id}/resend`**, **`/test`**,
+  **`POST /v1/guest/verify`**. Письма ставятся в очередь автоматически при
+  инвайте DJ, апгрейде гостя и создании выплаты.
 
 ### Волна 5 — hardening и закрытие критических дефектов ✅
 
@@ -162,6 +186,9 @@ TTL-интенты, антифрод-счётчики, GDPR (`anonymize_guest_de
 | Двойной платёж на request | повторный confirm на тот же request создавал второй payment | `confirm_payment` идемпотентен: повторный успешный confirm → 200 `processing` без нового платежа | `payments_routes.rs:352-413`, e2e `e2e_payments` |
 
 ## 2. Что осталось (честный список)
+
+- Mobile Stripe checkout: publishable key проверяется до создания request; отмена PaymentSheet или ошибка после создания PaymentIntent может оставить pending записи. Backend не предоставляет cancel/retrieve recovery для intent.
+- Stripe Android redirect настроен; iOS `Info.plist`/`Podfile` отсутствуют, URL scheme и Apple Pay capabilities не подтверждены.
 
 | # | Что | Почему | Блокер |
 |---|---|---|---|
@@ -287,6 +314,8 @@ infra-push 44, infra-redis 12 (unit + Redis-integration), infra-stripe 75
 | NATS JetStream | outbox-реле (ADR-002) | NoopBus: outbox копится в БД, не публикуется; push и остальные задачи работают |
 | Stripe | реальные платежи/выплаты/онбординг | MockStripe: флоу платежей имитируется вебхуком с мок-подписью |
 | FCM/APNs | push-уведомления | NoopPush: уведомления никуда не уходят, остальное работает |
+| Resend | транзакционные письма (ADR-008) | NoopMail: письма копятся в `mail_message`, в сеть не уходят; журнал `/admin/mail` работает |
+| `RESEND_WEBHOOK_SECRET` | подпись событий доставки | `POST /webhooks/resend` → 503: неподписанные события не принимаются (иначе «доставлено» можно подделать) |
 | iTunes/Deezer | каталог треков | `HttpCatalog` делает реальные запросы; в тестах — `MockCatalog` на фикстурах |
 
 Правило деградации: отсутствие сервиса не валит процесс — поднимается
@@ -329,6 +358,7 @@ SDK Flutter/Android установлен на носителе
 | 2026-10-19 | W6: синхронизация OpenAPI + ре-ревью (3 гонки найдены) | ✅ контракт-тест 65 путей = 65 |
 | 2026-10-19 | W7: гонки confirm-платежа, cross-request ON CONFLICT, двойная выплата, IP-антифрод | ✅ e2e-тесты гонок зелёные |
 | 2026-10-19 | `./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1` | ✅ 415 passed / 0 failed / 0 ignored |
+| 2026-10-27 | Управление DJ в клубной панели (миграция 0012, `club_dj_remove`/`restore`, `dj_presence`, PATCH заметки) | ✅ `cargo test -p dropit-gateway-api --bin dropit-api e2e_panels` — 9 passed, включая новый `e2e_club_dj_management`; контракт OpenAPI — 6 passed |
 
 ## Приложение C. Документы
 

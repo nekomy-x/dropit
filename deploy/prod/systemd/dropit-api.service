@@ -1,0 +1,64 @@
+# DROP IT API — PROD unit (Test Mode stand).
+#
+# Installed by deploy/prod/host/apply-config.sh as
+#   /etc/systemd/system/dropit-api.service
+#
+# Runtime env comes from /srv/dropit/etc/dropit.env (chmod 600 dropit:dropit),
+# rendered from deploy/prod/systemd/dropit.env.example by provision.sh.
+# That file is the source of truth on the host: deploy.sh does not overwrite
+# it unless called with --sync-env.
+#
+# Memory: the box has 956 MB and also runs Postgres + nginx + workers.
+# MemoryMax is a hard cap (OOM-kill), MemoryHigh is the throttle threshold.
+# Typical RSS of this axum binary is 40–80 MB, so 256 MB is generous headroom
+# while still bounding a runaway.
+
+[Unit]
+Description=DROP IT API (PROD, Test Mode)
+Documentation=file:///srv/dropit/README.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+# Postgres is the only hard dependency: without Redis/NATS the API degrades
+# gracefully (in-memory tickets, noop bus), so they are not Requires=.
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=dropit
+Group=dropit
+WorkingDirectory=/srv/dropit
+EnvironmentFile=/srv/dropit/etc/dropit.env
+ExecStart=/srv/dropit/bin/dropit-api
+Restart=always
+RestartSec=3s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+
+# Journald logging; `journalctl -u dropit-api -f` to follow.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dropit-api
+
+# --- resource budget -------------------------------------------------------
+MemoryAccounting=yes
+MemoryHigh=208M
+MemoryMax=256M
+TasksMax=256
+LimitNOFILE=8192
+
+# --- hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

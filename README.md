@@ -11,12 +11,39 @@ mock/noop (Test Mode). Полный статус — `IMPLEMENTATION_STATUS.md`;
 
 ---
 
+## Прод-стенд (Test Mode)
+
+Объявленный прод-сервер: **http://150.241.68.57** (Ubuntu 26.04, systemd +
+nginx + Postgres 18, без Docker; бинарники — статические `x86_64-musl`).
+Что где лежит, как деплоить, откатывать и что осталось за рамками —
+[`deploy/servers/prod.md`](deploy/servers/prod.md); скрипты —
+[`deploy/prod/README.md`](deploy/prod/README.md).
+
+```sh
+./scripts/build-linux.sh     # кросс-сборка бинарников и веб-бандлов -> build/
+./deploy/prod/deploy.sh      # раскатка на 150.241.68.57 (идемпотентно)
+```
+
+Открытая регистрация «в один клик» (клуб/DJ, без подтверждения e-mail)
+включается `DROPIT_OPEN_SIGNUP=1`; контракт — `docs/signup-contract.md`.
+Панели: `/` и `/login` (клуб), `/register` (регистрация), `/dj` (консоль DJ),
+`/admin/` (админка), `/dj-mock/` (статичный прототип для дизайн-ревью).
+
+---
+
 ## Бэкенд
 
 Rust workspace: `common`, `domain`, `infra-db`, `infra-redis`, `infra-nats`,
-`infra-stripe`, `infra-catalog`, `infra-push`, `workers` (бинарник
-`dropit-workers`), `gateway-api` (бинарник `dropit-api`, axum 0.7). 65
-HTTP-путей, 10 миграций, 403 теста.
+`infra-stripe`, `infra-catalog`, `infra-push`, `infra-mail`, `workers`
+(бинарник `dropit-workers`), `gateway-api` (бинарник `dropit-api`, axum 0.7).
+76 HTTP-путей, 14 миграций, 537 тестов.
+
+Почта (ADR-008): транзакционные письма уходят через Resend HTTP API из
+воркера, а не из обработчика запроса. Очередь — таблица `mail_message`
+(идемпотентность по `idempotency_key`, backoff, история доставки),
+доставка подтверждается Svix-подписанными вебхуками, отклонённые адреса
+попадают в `mail_suppression`. Журнал — экран `/admin/mail`. Подробности:
+`docs/mail-infra-contract.md`, `docs/adr/ADR-008-email-resend.md`.
 
 ### Запуск
 
@@ -41,6 +68,7 @@ cargo run -p dropit-gateway-api --bin seed_demo     # демо-данные (к�
 cargo run -p dropit-gateway-api --bin dropit-api    # API: 0.0.0.0:8080
 cargo run -p dropit-workers -- run                  # супервизор фоновых задач
 cargo run -p dropit-workers -- --once outbox        # один прогон задачи (CI/крон)
+cargo run -p dropit-workers -- --once mail          # отправить очередь писем
 ```
 
 ### Тесты
@@ -48,6 +76,7 @@ cargo run -p dropit-workers -- --once outbox        # один прогон за
 ```sh
 # unit-тесты крейта (без БД):
 cargo test -p dropit-infra-stripe
+cargo test -p dropit-infra-mail
 
 # БД-зависимые e2e — ТОЛЬКО через лок-скрипт (общая БД, параллельные агенты):
 ./scripts/db-test.sh cargo test -p dropit-gateway-api e2e_payments -- --test-threads=1
@@ -66,6 +95,10 @@ cargo fmt --all -- --check
 | `NATS_URL` | нет → NoopBus, outbox-реле skip |
 | `STRIPE_API_KEY` / `STRIPE_WEBHOOK_SECRET` | пусто → MockStripe |
 | `FCM_*` / `APNS_*` | нет → NoopPush |
+| `RESEND_API_KEY` / `MAIL_FROM` | нет → NoopMail: журнал пишется, в сеть ничего не уходит |
+| `RESEND_WEBHOOK_SECRET` | нет → `POST /webhooks/resend` отвечает 503 (неподписанные события не принимаются) |
+| `MAIL_APP_BASE_URL` | `http://localhost:5173` — база ссылок в письмах |
+| `MAIL_INTERVAL_SECS` / `MAIL_BATCH_SIZE` / `MAIL_MAX_ATTEMPTS` | `2` / `50` / `5` — расписание диспетчера писем |
 | `TRUST_PROXY` | `1` (прод за nginx) — доверять `X-Forwarded-For`/`X-Real-IP` для IP-лимитов; `0` — игнорировать |
 | `DROPIT_JWT_SECRET`, `DROPIT_TOTP_KEY`, `DROPIT_BIND`, `DROPIT_RUN_MIGRATIONS`, `RUST_LOG` | см. `deploy/.env.example` |
 

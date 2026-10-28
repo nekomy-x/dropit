@@ -85,6 +85,11 @@ services:
       APNS_PRIVATE_KEY_P8: ""
       APNS_TOPIC: ""
       APNS_SANDBOX: ""
+      # Mail: ключ нужен только для проверки подписи вебхука (ADR-008).
+      # Пусто → POST /webhooks/resend отвечает 503, письма не отправляются.
+      RESEND_API_KEY: ""
+      RESEND_WEBHOOK_SECRET: ""
+      MAIL_FROM: ""
     ports:
       - "8080:8080"
     healthcheck:
@@ -126,6 +131,15 @@ services:
       APNS_PRIVATE_KEY_P8: ""
       APNS_TOPIC: ""
       APNS_SANDBOX: ""
+      # Mail (ADR-008): пусто → NoopMail; письма копятся в журнале mail_message.
+      RESEND_API_KEY: ""
+      RESEND_WEBHOOK_SECRET: ""
+      MAIL_FROM: ""
+      MAIL_REPLY_TO: ""
+      MAIL_APP_BASE_URL: http://localhost:5173
+      MAIL_INTERVAL_SECS: "2"
+      MAIL_BATCH_SIZE: "50"
+      MAIL_MAX_ATTEMPTS: "5"
     restart: unless-stopped
 
 volumes:

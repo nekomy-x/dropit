@@ -1,0 +1,62 @@
+# DROP IT background workers — PROD unit (Test Mode stand).
+#
+# Installed by deploy/prod/host/apply-config.sh as
+#   /etc/systemd/system/dropit-workers.service
+#
+# Runs the supervisor: outbox relay, push dispatch, GDPR retention,
+# payout/reconciliation ticks, partition management (see
+# IMPLEMENTATION_STATUS.md). One-shot runs (`dropit-workers --once outbox`)
+# are for cron/CI and are not what this unit does.
+#
+# Migrations are NOT run by this unit: DROPIT_RUN_MIGRATIONS stays false in
+# /srv/dropit/etc/dropit.env, because crates/infra-db bakes the migrations
+# directory at compile time (env!("CARGO_MANIFEST_DIR")) and would panic on
+# the host. The deploy step applies migrations with psql instead.
+
+[Unit]
+Description=DROP IT background workers (PROD, Test Mode)
+After=network-online.target postgresql.service dropit-api.service
+Wants=network-online.target
+Requires=postgresql.service dropit-api.service
+
+[Service]
+Type=simple
+User=dropit
+Group=dropit
+WorkingDirectory=/srv/dropit
+EnvironmentFile=/srv/dropit/etc/dropit.env
+ExecStart=/srv/dropit/bin/dropit-workers run
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dropit-workers
+
+# --- resource budget -------------------------------------------------------
+# The supervisor holds timers and short-lived jobs; it should never approach
+# its cap. Kept below the API so a busy worker cannot starve request serving.
+MemoryAccounting=yes
+MemoryHigh=160M
+MemoryMax=192M
+TasksMax=256
+LimitNOFILE=8192
+
+# --- hardening -------------------------------------------------------------
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=full
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
