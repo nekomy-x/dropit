@@ -1,0 +1,1685 @@
+/* ============================================================================
+   DROP IT panel — shared surface layer (shell + primitives)
+   ----------------------------------------------------------------------------
+   Canonical source. Copies are written into both apps by
+       node scripts/sync-ui-tokens.mjs
+   (apps/web-club/src/styles/panel.css, apps/web-admin/src/styles/panel.css).
+
+   Every value here comes from `panel-tokens.css`. Nothing in this file may
+   declare a raw colour, radius or font size, so both themes stay in sync by
+   construction.
+
+   Class prefixes
+   --------------
+   panel-*   shell, navigation, page chrome
+   stat-*    KPI cards
+   data-*    tables
+   list-*    list rows (tables that are not tables)
+   chip      status labels
+   btn-*     actions
+   trash-action  the destructive row control (icon that opens on approach)
+   field-*   form controls
+   field-select*  the anchored dropdown (trigger + menu)
+   seg-*     segmented control
+   chart-*   chart internals (SVG)
+   bar-*     horizontal meters
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   Shell
+   ------------------------------------------------------------------------ */
+.panel-shell {
+  display: flex;
+  min-height: 100dvh;
+  background: var(--c-canvas);
+  color: var(--c-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  line-height: var(--lh-text);
+}
+
+.panel-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  width: var(--w-rail);
+  height: 100dvh;
+  flex: 0 0 auto;
+  flex-direction: column;
+  border-right: 1px solid var(--c-hairline);
+  background: var(--c-rail);
+}
+
+.panel-rail-brand {
+  display: flex;
+  height: var(--h-topbar);
+  align-items: center;
+  gap: 10px;
+  padding: 0 18px;
+}
+
+/* The rail's identity block. It names the workspace and is not a control:
+   there is nothing to switch to, and a button that opens nothing is a dead end.
+   The one interactive account control lives in the rail foot. */
+.panel-rail-workspace-aside {
+  display: flex;
+  width: calc(100% - 24px);
+  align-items: center;
+  gap: 10px;
+  margin: 2px 12px 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+  color: var(--c-text);
+}
+.panel-workspace-copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.panel-topbar-account { display: none; }
+@media (max-width: 1023px) {
+  .panel-topbar-account { display: inline-flex; }
+}
+
+.panel-workspace-avatar {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-chip);
+  background: var(--c-accent-tint-strong);
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-12);
+  font-weight: 650;
+}
+.panel-workspace-name { display: block; font-size: var(--fs-13); font-weight: 600; color: var(--c-text); }
+.panel-workspace-meta { display: block; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+.panel-rail-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px 18px;
+  scrollbar-width: thin;
+}
+.panel-nav-group { margin-bottom: 18px; }
+.panel-nav-label {
+  margin: 0 0 6px;
+  padding: 0 10px;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  color: var(--c-text-muted-sm);
+}
+.panel-nav-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+
+.panel-nav-link {
+  display: flex;
+  /* An <a> fills the rail on its own, but a <button> keeps shrink-to-fit
+     sizing, so the DJ console's active item hugged its own label while the
+     club's spanned the rail. Both shells render this class now. */
+  width: 100%;
+  min-height: var(--hit-desktop);
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-radius: var(--r-control);
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.panel-nav-link:hover { background: var(--c-nav-hover-bg); color: var(--c-text); }
+.panel-nav-link.is-active { background: var(--c-nav-active-bg); color: var(--c-nav-active-text); font-weight: 600; }
+.panel-nav-link.is-active .panel-nav-icon { color: var(--c-accent); }
+.panel-nav-icon { display: inline-flex; color: var(--c-text-muted); }
+.panel-nav-link:hover .panel-nav-icon { color: var(--c-text-2); }
+.panel-nav-trailing { margin-left: auto; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+.panel-rail-foot { padding: 10px 12px 14px; border-top: 1px solid var(--c-hairline); }
+
+.panel-account {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.panel-account:hover { background: var(--c-nav-hover-bg); }
+.panel-account-avatar {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-chip);
+  background: var(--c-accent-tint-strong);
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-11);
+  font-weight: 650;
+}
+/* A translated role name is longer than the English one ("Оператор платформы"),
+   so both lines truncate instead of wrapping the rail foot onto three rows. */
+.panel-account-name,
+.panel-account-meta,
+.panel-menu-item-label,
+.panel-workspace-name,
+.panel-workspace-meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-account-name { font-size: var(--fs-13); font-weight: 600; }
+.panel-account-meta { font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+.panel-main { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+
+/* ---------------------------------------------------------------------------
+   Top bar
+   ------------------------------------------------------------------------ */
+.panel-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  height: var(--h-topbar);
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--c-hairline);
+  background: var(--c-canvas);
+}
+
+/* The command trigger reads as the search field it opens, so it carries the
+   same line as every other field instead of a box: 1px rule under the row,
+   no fill, no radius. The DJ top bar reuses the class for a read-only status
+   pill, which is not a field and keeps its own chip look in dj-console.css. */
+.panel-search {
+  display: flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  width: 100%;
+  max-width: 340px;
+  height: var(--hit-desktop);
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.panel-search:hover { border-bottom-color: var(--c-text-muted); color: var(--c-text-2); }
+.panel-search kbd {
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.panel-topbar-actions { display: flex; min-width: 0; margin-left: auto; align-items: center; gap: 8px; }
+
+/* The status chip is context, not the task: it gives up its space first.
+   The selector is scoped to `.panel-topbar` on purpose. `.chip` (below) also
+   sets `display: inline-flex` at the same 0-1-0 specificity, and it is declared
+   later in this file, so a bare `.panel-topbar-status { display: none }` lost
+   the cascade: the chip stayed visible below 1280px and its text clipped to
+   "All systems oper…" at 390px. Scoping raises this rule to 0-2-0. */
+.panel-topbar-status { flex: 0 1 auto; min-width: 0; }
+@media (max-width: 1279px) {
+  .panel-topbar .panel-topbar-status { display: none; }
+}
+
+.panel-icon-button {
+  display: inline-flex;
+  /* Never let the topbar squeeze an icon control below its target size. */
+  flex: 0 0 auto;
+  width: var(--hit-desktop);
+  height: var(--hit-desktop);
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.panel-icon-button:hover { background: var(--c-raised); color: var(--c-text); }
+
+.panel-account-menu { width: 100%; }
+.panel-account-menu .panel-menu-panel { width: 236px; }
+.panel-account-copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.panel-account-chevron { display: inline-flex; color: var(--c-text-muted); }
+.panel-account-avatar-sm { width: 26px; height: 26px; font-size: var(--fs-11); }
+
+/* ---------------------------------------------------------------------------
+   Menu — one dropdown for every panel (account, and future menus)
+   ------------------------------------------------------------------------ */
+.panel-menu { position: relative; display: inline-flex; }
+/* A menu is a floating layer, same as the Select list: the popover surface and
+   its own shadow, never a border (border belongs to the field, not the layer). */
+.panel-menu-panel {
+  position: absolute;
+  z-index: 60;
+  display: flex;
+  min-width: 200px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-popover);
+  box-shadow: var(--c-popover-shadow);
+}
+.panel-menu-panel--bottom-start { top: calc(100% + 6px); left: 0; }
+.panel-menu-panel--bottom-end { top: calc(100% + 6px); right: 0; }
+.panel-menu-panel--top-start { bottom: calc(100% + 6px); left: 0; }
+.panel-menu-panel--top-end { bottom: calc(100% + 6px); right: 0; }
+.panel-menu-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 6px;
+}
+.panel-menu-group-label {
+  margin: 4px 0 2px;
+  padding: 0 8px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+.panel-menu-separator { height: 1px; margin: 4px 2px; background: var(--c-hairline); }
+.panel-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.panel-menu-item:hover, .panel-menu-item:focus-visible { background: var(--c-nav-hover-bg); }
+.panel-menu-item[data-tone='danger'] { color: var(--c-error); }
+.panel-menu-item[data-tone='danger']:hover { background: var(--c-error-tint); }
+.panel-menu-item-icon { display: inline-flex; width: 16px; flex: 0 0 auto; justify-content: center; color: var(--c-text-muted); }
+.panel-menu-item[data-tone='danger'] .panel-menu-item-icon { color: inherit; }
+.panel-menu-item-copy { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.panel-menu-item-label { font-weight: 500; }
+.panel-menu-item-description { color: var(--c-text-muted-sm); font-size: var(--fs-11); }
+.panel-menu-item-check { display: inline-flex; width: 15px; flex: 0 0 auto; justify-content: flex-end; color: var(--c-accent-quiet); }
+
+/* ---------------------------------------------------------------------------
+   Account settings dialog — account facts, language, theme, sign out
+   ------------------------------------------------------------------------ */
+.panel-modal {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(720px, calc(100dvh - 48px));
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-surface);
+  background: transparent;
+  color: var(--c-text);
+  overflow: visible;
+}
+.panel-modal::backdrop { background: var(--c-scrim); }
+.panel-modal-surface {
+  display: flex;
+  max-height: min(720px, calc(100dvh - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.panel-modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 20px 14px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.panel-modal-heading { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.panel-modal-title { margin: 0; color: var(--c-text); font-size: var(--fs-20); font-weight: 650; letter-spacing: -.01em; }
+.panel-modal-description { margin: 0; color: var(--c-text-2); font-size: var(--fs-12); line-height: 1.45; }
+.panel-modal-body { display: flex; flex-direction: column; gap: 20px; padding: 20px; overflow-y: auto; }
+.panel-modal-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--c-hairline);
+}
+.panel-modal-foot .panel-modal-foot-spacer { margin-right: auto; }
+
+.panel-account-facts { display: grid; gap: 10px; margin: 0; }
+.panel-account-fact { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.panel-account-fact dt { color: var(--c-text-muted-sm); font-size: var(--fs-12); font-weight: 500; }
+.panel-account-fact dd { margin: 0; min-width: 0; color: var(--c-text); font-size: var(--fs-13); overflow-wrap: anywhere; }
+
+.panel-language { margin: 0; padding: 0; border: 0; }
+.panel-language-legend { padding: 0; margin: 0 0 4px; color: var(--c-text); font-size: var(--fs-13); font-weight: 600; }
+.panel-language-hint { margin: 0 0 10px; color: var(--c-text-2); font-size: var(--fs-12); line-height: 1.45; }
+.panel-language-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.panel-language-option {
+  display: flex;
+  min-height: var(--hit-desktop);
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-control);
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.panel-language-option:hover { border-color: var(--c-hairline-strong); color: var(--c-text); }
+.panel-language-option.is-checked { border-color: var(--c-accent); background: var(--c-accent-tint); color: var(--c-text); }
+.panel-language-option.is-checked svg { color: var(--c-accent-quiet); }
+.panel-language-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.panel-language-option:has(.panel-language-input:focus-visible) { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.panel-language-native { font-weight: 500; }
+
+/* Theme choices inside settings reuse the shell's two-state control. */
+.panel-setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-setting-copy { display: grid; gap: 3px; }
+.panel-setting-title { color: var(--c-text); font-size: var(--fs-13); font-weight: 600; }
+.panel-setting-hint { margin: 0; color: var(--c-text-2); font-size: var(--fs-12); line-height: 1.45; }
+
+/* theme switch: two states, both labelled, keyboard operable */
+.theme-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+}
+.theme-toggle button {
+  display: inline-flex;
+  width: 30px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.theme-toggle button:hover { color: var(--c-text); }
+.theme-toggle button[aria-pressed='true'] { background: var(--c-seg-active); color: var(--c-text); box-shadow: var(--c-panel-shadow); }
+
+/* Touch targets: a 30px icon button is fine with a mouse and not with a thumb. */
+@media (max-width: 640px) {
+  .theme-toggle button { width: var(--hit-mobile); height: var(--hit-mobile); }
+}
+
+/* ---------------------------------------------------------------------------
+   Content + page head
+   ------------------------------------------------------------------------ */
+.panel-content { width: 100%; max-width: var(--w-content); margin: 0 auto; padding: 24px; }
+
+.panel-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.panel-page-title {
+  margin: 0;
+  font-size: var(--fs-28);
+  font-weight: 650;
+  letter-spacing: -.022em;
+  line-height: 1.15;
+  color: var(--c-text);
+}
+.panel-page-sub { margin: 6px 0 0; font-size: var(--fs-13); color: var(--c-text-2); }
+.panel-page-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.panel-section { margin-top: 20px; }
+.panel-grid { display: grid; gap: 16px; }
+.panel-grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.panel-grid-hero { display: grid; gap: 16px; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.panel-grid-split { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+
+/* Two panels sharing one grid column. They stack without a gap of their own, so
+   a narrow secondary reading (a ring, a summary) joins an existing column
+   instead of opening a new row and pushing the page taller. */
+.board-aside-stack { display: grid; gap: 16px; min-width: 0; align-content: start; }
+
+/* ---------------------------------------------------------------------------
+   Card
+   ------------------------------------------------------------------------ */
+.panel-card {
+  position: relative;
+  min-width: 0;
+  padding: var(--pad-panel);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.panel-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.panel-card-title { margin: 0; font-size: var(--fs-15); font-weight: 600; letter-spacing: -.01em; color: var(--c-text); }
+.panel-card-sub { margin: 3px 0 0; font-size: var(--fs-12); color: var(--c-text-muted); }
+.panel-card-tools { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.panel-card-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.panel-card-link:hover { color: var(--c-accent-quiet); }
+.panel-card-note { margin: 12px 0 0; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+/* ---------------------------------------------------------------------------
+   KPI cards
+   ------------------------------------------------------------------------ */
+.stat-grid { display: grid; gap: 16px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.stat-card {
+  min-width: 0;
+  padding: 18px var(--pad-panel);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+.stat-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.stat-label { margin: 0; font-size: var(--fs-13); color: var(--c-text-2); font-weight: 500; }
+.stat-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-control);
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+.stat-value {
+  margin: 10px 0 0;
+  font-size: var(--fs-28);
+  font-weight: 650;
+  letter-spacing: -.025em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-text);
+}
+.stat-value.is-muted { color: var(--c-text-muted); font-size: var(--fs-20); font-weight: 600; }
+.stat-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.stat-delta { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-12); font-weight: 600; }
+.stat-delta.is-up { color: var(--c-ok); }
+.stat-delta.is-down { color: var(--c-error); }
+.stat-delta.is-flat { color: var(--c-text-muted); }
+.stat-foot { margin: 0; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+/* ---------------------------------------------------------------------------
+   Chips
+   ------------------------------------------------------------------------ */
+.chip {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: var(--r-chip);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chip-neutral { background: var(--c-raised); color: var(--c-text-2); }
+.chip-accent { background: var(--c-accent-tint); color: var(--c-accent-quiet); }
+.chip-warn { background: var(--c-warn-tint); color: var(--c-warn); }
+.chip-error { background: var(--c-error-tint); color: var(--c-error); }
+
+/* ---------------------------------------------------------------------------
+   Buttons
+   ------------------------------------------------------------------------ */
+/* The class names .btn-primary / .btn-secondary are the product-wide action
+   API: existing pages use them directly, so they are defined here once and the
+   legacy per-app declarations were removed. */
+.btn,
+.btn-primary,
+.btn-secondary,
+.btn-quiet,
+.btn-outline,
+.btn-danger {
+  display: inline-flex;
+  height: var(--hit-desktop);
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.btn:disabled, .btn-primary:disabled, .btn-secondary:disabled, .btn-quiet:disabled, .btn-outline:disabled, .btn-danger:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+/* A disabled primary is a state, not a faded brand colour: it drops to the
+   neutral surface so it never reads as a low-contrast green button. */
+.btn-primary:disabled {
+  background: var(--c-raised);
+  color: var(--c-text-muted);
+  opacity: 1;
+}
+.btn-primary { background: var(--c-accent); color: var(--c-ink-on-accent); }
+.btn-primary:hover:not(:disabled) { background: var(--c-accent-hover); }
+.btn-secondary { background: var(--c-raised); color: var(--c-text); }
+.btn-secondary:hover:not(:disabled) { background: var(--c-hover-strong); }
+.btn-quiet { background: transparent; color: var(--c-text-2); }
+.btn-quiet:hover:not(:disabled) { background: var(--c-nav-hover-bg); color: var(--c-text); }
+.btn-outline { background: transparent; color: var(--c-text); box-shadow: inset 0 0 0 1px var(--c-hairline-strong); }
+.btn-outline:hover:not(:disabled) { background: var(--c-raised); }
+.btn-danger { background: var(--c-error-tint); color: var(--c-error); }
+.btn-sm { height: 30px; padding: 0 10px; font-size: var(--fs-12); }
+
+/* ---------------------------------------------------------------------------
+   Trash action — the destructive row control (packages/ui/TrashAction.tsx)
+
+   A row has at most one destructive action, and it is never the thing staff
+   came to the screen for. So it holds a shut bin with the word beside it, and
+   on approach the lid lifts and the control takes the error tone: the row says
+   one thing is about to be destroyed without shouting it at rest.
+
+   The word is visible in both states — it is the accessible name, and a label
+   that only a pointer can reveal is no label at all on touch. Only the drawing
+   moves.
+
+   Motion (DESIGN.md §Motion): transform and colour only, `--dur-base` with the
+   token ease-out. The lid rotates about the hinge at the left end of the rim,
+   which is why the component splits lucide's flat `trash` paths into a lid
+   group and a can group. All of it sits inside `no-preference`, so under
+   reduced motion the shut bin is simply the finished state: nothing runs and
+   nothing has to be undone.
+   ------------------------------------------------------------------------ */
+.trash-action {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.trash-action:disabled { cursor: not-allowed; opacity: .55; }
+/* Blocked by state, not by permission: the control still names itself, it just
+   cannot act. No error tone — nothing is about to be destroyed. */
+.trash-action:disabled:hover { background: transparent; color: var(--c-text-2); }
+
+.trash-action-glyph { display: inline-flex; flex: 0 0 auto; }
+.trash-action-glyph > svg { display: block; }
+/* The two halves of the bin are separate boxes so each owns its own origin. */
+.trash-action-lid,
+.trash-action-can { transform-box: fill-box; }
+.trash-action-lid { transform-origin: 0% 100%; }
+.trash-action-can { transform-origin: 50% 100%; }
+
+/* Approach: the row's own error tint, so it reads as "this, and only this". */
+.trash-action:not(:disabled):hover,
+.trash-action:not(:disabled):focus-visible,
+.trash-action[aria-expanded='true']:not(:disabled) {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .trash-action-lid,
+  .trash-action-can { transition: transform var(--dur-base) var(--ease-out); }
+
+  /* The lid swings up at its hinge and clears the rim by ~2px while the can
+     leans 2° after it: one 180ms ease-out, no bounce, no idle motion.
+
+     The lift is not decoration. At 16px a pure rotation leaves the lid's right
+     end sitting on the rim, and the shape then reads as a torn bin rather than
+     an open one — the 2px gap is what makes the opening legible at this size,
+     and it is the reason the travel is a translate on top of the rotation. */
+  .trash-action:hover:not(:disabled) .trash-action-lid,
+  .trash-action:focus-visible:not(:disabled) .trash-action-lid,
+  .trash-action[aria-expanded='true']:not(:disabled) .trash-action-lid {
+    transform: translateY(-2px) rotate(-12deg);
+  }
+  .trash-action:hover:not(:disabled) .trash-action-can,
+  .trash-action:focus-visible:not(:disabled) .trash-action-can,
+  .trash-action[aria-expanded='true']:not(:disabled) .trash-action-can { transform: rotate(-2deg); }
+
+  /* Press: the lid comes back down most of the way. Feedback for the click
+     itself, not a second animation to watch. */
+  .trash-action:active:not(:disabled) .trash-action-lid { transform: translateY(-.5px) rotate(-6deg); }
+  .trash-action:active:not(:disabled) .trash-action-can { transform: rotate(-1deg); }
+}
+
+/* Legacy container name used by older page markup. */
+.card {
+  padding: var(--pad-panel);
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+
+/* ---------------------------------------------------------------------------
+   Fields
+
+   A field is a line, not a box. Every text control in the product — input,
+   textarea, select trigger, OTP cell, auth and admin variants — is the same
+   1px rule under the value: no fill, no radius, no side or top border. The
+   value sits on the page surface and the line alone says "type here".
+
+   The line is the state: hairline at rest, muted on hover, accent on focus,
+   error on invalid. Focus still draws no frame and no halo (see the caret
+   block at the end of this file); the accent rule and the caret say it once.
+   ------------------------------------------------------------------------ */
+.field { display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.field-label { display: block; margin-bottom: 6px; font-size: var(--fs-12); font-weight: 500; color: var(--c-text-2); }
+.field-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.field-input::placeholder { color: var(--c-text-muted); }
+.field-input:hover { border-bottom-color: var(--c-text-muted); }
+/* Focus is the caret plus the accent rule, never a frame around the field. */
+.field-input:focus { outline: none; border-bottom-color: var(--c-accent); }
+.field-input:disabled { border-bottom-color: var(--c-hairline); color: var(--c-text-muted); cursor: not-allowed; }
+.field-input[aria-invalid='true'] { border-bottom-color: var(--c-error); }
+textarea.field-input { height: auto; padding: 8px 2px; line-height: 1.45; resize: vertical; }
+/* A native <select> is never used on a product surface: its OS popup cannot be
+   themed and its height is not controllable. Select.tsx renders the combobox
+   below instead. This rule stays only so an unstyled fallback keeps a chevron. */
+select.field-input { appearance: none; padding-right: 24px; cursor: pointer; }
+.field-hint { font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+.field-error { font-size: var(--fs-12); color: var(--c-error); }
+
+/* ---------------------------------------------------------------------------
+   Checkbox
+   Painted here instead of by the OS. A native `input[type='checkbox']` exposes
+   no border-radius, so the 2px focus ring was drawn as a square around a
+   rounded box — the one control where the ring did not follow the shape. With
+   `appearance: none` the ring follows the radius of the box, and the tick is
+   identical in both themes and on every platform.
+
+   Size stays with the surface, not with this block: `.data-table` and
+   `.dj-rule-row` set their own width/height (16px dense, 20px console, the
+   touch size at ≤640px) and win on specificity. The tick is a share of the
+   box, so it scales with them.
+   ------------------------------------------------------------------------ */
+.panel-shell input[type='checkbox'] {
+  appearance: none;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--c-hairline-strong);
+  /* `--r-mark` (4px): the dense 16px mark stays a rounded square, not a
+     circle. The 44px touch box overrides it below. */
+  border-radius: var(--r-mark);
+  background-color: var(--c-inset);
+  background-repeat: no-repeat;
+  background-position: center;
+  /* Both axes are explicit percentages: `background-size: 70%` resolves to
+     `70% auto`, and an `auto` axis cannot be interpolated — the tick would snap
+     instead of growing. */
+  background-size: 70% 70%;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+.panel-shell input[type='checkbox']:hover { border-color: var(--c-text-muted); }
+.panel-shell input[type='checkbox']:checked,
+.panel-shell input[type='checkbox']:indeterminate {
+  border-color: var(--c-accent);
+  background-color: var(--c-accent);
+}
+/* The tick ink is `--c-ink-on-accent`, but an SVG data URI cannot read a CSS
+   variable, so the two inks are inlined: #06130C (dark theme) and #FFFFFF
+   (light theme), the same pair the token defines. */
+.panel-shell input[type='checkbox']:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M2.4 6.3 4.9 8.8 9.7 3.5' fill='none' stroke='%2306130C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.panel-shell input[type='checkbox']:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%2306130C' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+:root[data-theme='light'] .panel-shell input[type='checkbox']:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M2.4 6.3 4.9 8.8 9.7 3.5' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:root[data-theme='light'] .panel-shell input[type='checkbox']:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+.panel-shell input[type='checkbox']:disabled { opacity: .45; cursor: not-allowed; }
+
+/* The tick settles instead of appearing. A data-URI background cannot be
+   transformed on its own (it is the element's background, not a child box), so
+   the check mark is drawn as a second layer that scales in from the centre of
+   the box. `background-size` is the animating property here, which the motion
+   contract normally excludes — the exception is deliberate and narrow: it is a
+   paint-only background image inside a 16–20px box, not a layout box, so it
+   does not reflow anything around it. Under `no-preference` only, so with
+   reduced motion the tick is simply there. */
+@media (prefers-reduced-motion: no-preference) {
+  .panel-shell input[type='checkbox'] {
+    transition: border-color var(--dur-fast) var(--ease-out),
+      background-color var(--dur-fast) var(--ease-out),
+      background-size var(--dur-fast) var(--ease-out);
+  }
+  /* Unchecked and indeterminate keep the tick's canvas at zero so the checked
+     state grows into place. */
+  .panel-shell input[type='checkbox'] { background-size: 0% 0%; }
+  .panel-shell input[type='checkbox']:checked,
+  .panel-shell input[type='checkbox']:indeterminate { background-size: 70% 70%; }
+}
+
+/* The touch box is a thumb target, not a mark: at 44px a 4px corner reads as a
+   square, so it takes the control radius and its ring stays in proportion. */
+@media (max-width: 640px) {
+  .panel-shell input[type='checkbox'] { border-radius: var(--r-control); }
+}
+
+/* ---------------------------------------------------------------------------
+   Select (combobox + anchored listbox) — components/ui/Select.tsx
+
+   The trigger is the field itself: same line, height and type as .field-input,
+   so a select and an input sit on one baseline in a form grid or a toolbar.
+   It shares the underline treatment: no box, no fill, no radius — only the
+   1px rule under the value, which turns accent while the list is open.
+   The list is a floating layer, positioned by the component in
+   viewport coordinates (`position: fixed`) so it is never clipped by a
+   scrolling table or overflow container, and it opens directly under the
+   trigger — or above it when there is no room below.
+   ------------------------------------------------------------------------ */
+.field-select { position: relative; display: flex; min-width: 0; flex-direction: column; gap: 6px; }
+.field-select__trigger {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.field-select__trigger:hover { border-bottom-color: var(--c-text-muted); }
+/* The open state is the accent rule plus the rotated chevron. It deliberately
+   adds no tint ring: keyboard focus already draws the 2px focus ring, and
+   stacking both produced a double outline on the same box. */
+.field-select__trigger[aria-expanded='true'] { border-bottom-color: var(--c-accent); }
+.field-select__trigger:disabled { cursor: not-allowed; color: var(--c-text-muted); opacity: .72; }
+.field-select__trigger:disabled:hover { border-bottom-color: var(--c-hairline-strong); }
+.field-select--invalid .field-select__trigger { border-bottom-color: var(--c-error); }
+
+.field-select__value {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.field-select__value.is-placeholder { color: var(--c-text-muted); }
+.field-select__chevron {
+  flex: 0 0 auto;
+  color: var(--c-text-muted);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.field-select__trigger[aria-expanded='true'] .field-select__chevron { color: var(--c-accent); transform: rotate(180deg); }
+
+.field-select--sm .field-select__trigger { height: 30px; padding: 0 2px; font-size: var(--fs-12); }
+
+/* The menu is the one layer that floats above the page ramp, so it carries the
+   popover surface and its shadow instead of a border. */
+.field-select__menu {
+  position: fixed;
+  z-index: 90;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-popover);
+  color: var(--c-text);
+  box-shadow: var(--c-popover-shadow);
+  animation: field-select-in var(--dur-fast) var(--ease-out);
+}
+@keyframes field-select-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+/* The list is portaled to `<body>`, so it sits outside `.panel-shell` and the
+   base interaction-motion block does not reach it. Its own rules cover the
+   option rows; the resting rows below cover the selected/active states that
+   arrive without a hover. */
+.field-select__menu :where([role='option'], li) {
+  transition-property: color, background-color, border-color;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+.field-select__option {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.field-select__option-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 1px; }
+.field-select__option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-select__option-desc { overflow: hidden; color: var(--c-text-muted-sm); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.field-select__option:hover,
+.field-select__option.is-active { background: var(--c-nav-hover-bg); color: var(--c-text); }
+.field-select__option.is-selected { background: var(--c-accent-tint); color: var(--c-text); font-weight: 550; }
+.field-select__option.is-selected .field-select__option-desc { color: var(--c-text-2); }
+.field-select__option:disabled { cursor: not-allowed; opacity: .45; }
+.field-select__option-check { display: grid; width: 16px; flex: 0 0 auto; place-items: center; color: var(--c-accent-quiet); }
+.field-select__empty { padding: 12px 8px; color: var(--c-text-muted-sm); font-size: var(--fs-12); }
+
+@media (max-width: 640px) {
+  .field-select__trigger,
+  .field-select--sm .field-select__trigger { height: auto; min-height: var(--hit-mobile); }
+  .field-select__option { min-height: var(--hit-mobile); }
+  /* The action menu uses the same row height as the dropdown list on touch. */
+  .panel-menu-item { min-height: var(--hit-mobile); }
+}
+
+/* ---------------------------------------------------------------------------
+   Segmented control
+   ------------------------------------------------------------------------ */
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-control); background: var(--c-raised); }
+.seg-item {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.seg-item:hover { color: var(--c-text); }
+/* Selection is a state change, not a jump: the chosen option fades its surface
+   in over `--dur-base` (180ms) while the other three let theirs go. It is the
+   only control in the set that moves on a slower beat, because it is the only
+   one where the change is the result rather than the feedback — and the
+   `box-shadow` transition is what keeps the lifted option from popping. */
+.seg-item.is-active { background: var(--c-seg-active); color: var(--c-text); box-shadow: var(--c-panel-shadow); }
+
+/* ---------------------------------------------------------------------------
+   Tables
+   ------------------------------------------------------------------------ */
+.table-wrap { width: 100%; overflow-x: auto; }
+/* Chromium makes a scroll container keyboard-focusable on its own; without a
+   ring that tab stop is invisible. */
+.table-wrap:focus-visible,
+.admin-scroll-x:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
+.data-table th {
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--c-hairline);
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+.data-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--c-hairline-row);
+  color: var(--c-text-2);
+  vertical-align: middle;
+}
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover td { background: var(--c-inset); }
+.data-table th:first-child, .data-table td:first-child { padding-left: 0; }
+.data-table th:last-child, .data-table td:last-child { padding-right: 0; }
+/* A checkbox sits flush against the cell edge (the first column has no left
+   padding), so its 2px focus ring lands 2px outside the table and the scroll
+   container clips the left half of it. The cell keeps the row rhythm and gives
+   the ring its 4px: the box itself moves in by the ring's offset + width. */
+.data-table th:first-child > input[type='checkbox'],
+.data-table td:first-child > input[type='checkbox'] { margin-left: 4px; }
+.data-table .is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table .is-strong { color: var(--c-text); font-weight: 500; }
+.data-table .is-mono { font-family: var(--font-mono); font-size: var(--fs-12); }
+.data-table .is-muted { color: var(--c-text-muted); }
+
+/* A sortable column header is a control inside the header row: it keeps a real
+   target without turning the header into a button-shaped blob. */
+.table-sort {
+  display: inline-flex;
+  min-height: var(--hit-desktop);
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.table-sort:hover { color: var(--c-text); }
+.table-sort-mark { font-size: var(--fs-11); line-height: 1; }
+
+/* Checkboxes in a table row are dense by design; the cell is the target. */
+.data-table input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--c-accent); cursor: pointer; }
+
+/* ---------------------------------------------------------------------------
+   List rows
+   ------------------------------------------------------------------------ */
+.list { display: flex; flex-direction: column; }
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  text-decoration: none;
+}
+.list-row:last-child { border-bottom: 0; }
+.list-row:hover { color: var(--c-text); }
+.list-thumb {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+.list-main { min-width: 0; flex: 1; }
+.list-title { display: block; color: var(--c-text); font-size: var(--fs-13); font-weight: 500; }
+.list-sub { display: block; margin-top: 1px; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+.list-metric { font-variant-numeric: tabular-nums; color: var(--c-text); font-weight: 500; }
+.list-metric-sub { display: block; font-size: var(--fs-11); color: var(--c-text-muted-sm); text-align: right; }
+
+/* ---------------------------------------------------------------------------
+   Charts (SVG internals; the components own the geometry)
+   ------------------------------------------------------------------------ */
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart-grid-line { stroke: var(--c-chart-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.chart-axis-label { fill: var(--c-chart-axis); font-family: var(--font-sans); font-size: 11px; }
+.chart-line { fill: none; stroke: var(--c-chart-line); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.chart-area { stroke: none; fill: var(--c-chart-fill); }
+.chart-dot { fill: var(--c-chart-line); stroke: var(--c-surface); stroke-width: 2; }
+.chart-dot.is-last { stroke-width: 2.5; }
+.chart-dot.is-active { stroke-width: 2.5; }
+
+/* The reading for the hovered interval. Positioned inside the plot and clamped
+   by the component, so it never crosses the frame edge; `pointer-events: none`
+   keeps it from stealing the hover it describes. */
+.chart-tooltip {
+  position: absolute;
+  top: 4px;
+  display: grid;
+  gap: 2px;
+  min-width: 88px;
+  padding: 6px 9px;
+  border-radius: var(--r-control);
+  background: var(--c-popover);
+  box-shadow: var(--c-popover-shadow);
+  pointer-events: none;
+  z-index: 2;
+}
+.chart-tooltip-label { color: var(--c-text-muted); font-size: var(--fs-11); line-height: 1.2; }
+.chart-tooltip-value { color: var(--c-text); font-size: var(--fs-13); font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.chart-bar { fill: var(--c-series-2); }
+.chart-bar.is-peak { fill: var(--c-series-1); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 12px 16px; margin: 14px 0 0; padding: 0; list-style: none; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--c-text-2); }
+.legend-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: var(--r-chip); background: var(--c-series-1); }
+.legend-value { margin-left: auto; color: var(--c-text); font-variant-numeric: tabular-nums; font-weight: 500; }
+
+.donut-wrap { position: relative; display: grid; place-items: center; }
+.donut-wrap svg { display: block; }
+.donut-track { stroke: var(--c-inset); }
+.donut-arc { transition: opacity 140ms ease-out; }
+
+/*
+   The ring and its reading list: the legend is a column of full-width rows, so
+   each percentage sits on the same right edge as the card title instead of
+   wrapping into a strip of chips.
+*/
+.chart-donut-block { display: grid; justify-items: center; gap: 14px; }
+
+/* Ring beside its legend instead of above it. A secondary panel already sits
+   under another card, so a stacked ring plus three legend rows spends ~200px of
+   page height on a reading that fits in half of that. */
+.chart-donut-block.is-inline {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-items: stretch;
+  gap: 18px;
+}
+.chart-donut-block .chart-legend { display: flex; flex-direction: column; gap: 10px; width: 100%; margin: 0; }
+.chart-donut-block .legend-item { width: 100%; }
+.donut-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.donut-value { font-size: var(--fs-20); font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--c-text); }
+.donut-label { margin-top: 2px; font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+/*
+   The one-shot draw.
+
+   Two rules hold this block together:
+
+   1. It lives inside `no-preference`, so with reduced motion the base rules
+      above are the finished chart and nothing is left running.
+   2. The *start* state lives in the keyframes, never in the base rule. A base
+      rule of `stroke-dashoffset: 1` would make the line invisible on its own,
+      so any browser that skips the animation (a paused document, a print
+      stylesheet, an engine that drops the declaration) would lose the data
+      instead of losing the movement. With `both` fill the first frame is still
+      the blank state while the animation runs, and the finished chart is what
+      remains when it does not.
+*/
+@media (prefers-reduced-motion: no-preference) {
+  .chart-line {
+    animation: chart-draw 620ms cubic-bezier(.22, .61, .36, 1) both;
+  }
+  .chart-area {
+    animation: chart-fade 460ms ease-out 120ms both;
+  }
+  .chart-dot {
+    transform-origin: center;
+    transform-box: fill-box;
+    animation: chart-dot-in 260ms cubic-bezier(.22, .61, .36, 1) both;
+    animation-delay: calc(180ms + var(--dot-index, 0) * 45ms);
+  }
+  .donut-arc {
+    animation: chart-fade 320ms ease-out both;
+    animation-delay: calc(var(--arc-index, 0) * 90ms);
+  }
+  .bar-fill.is-animated {
+    transform-origin: left center;
+    animation: chart-bar-grow 520ms cubic-bezier(.22, .61, .36, 1) both;
+    animation-delay: calc(var(--bar-index, 0) * 70ms);
+  }
+}
+
+@keyframes chart-draw {
+  from { stroke-dasharray: 1; stroke-dashoffset: 1; }
+  to { stroke-dasharray: 1; stroke-dashoffset: 0; }
+}
+@keyframes chart-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes chart-dot-in {
+  from { opacity: 0; transform: scale(.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes chart-bar-grow {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* ---------------------------------------------------------------------------
+   Bars
+   ------------------------------------------------------------------------ */
+.bar-list { display: flex; flex-direction: column; gap: 14px; }
+.bar-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.bar-row-label { font-size: var(--fs-12); color: var(--c-text-2); }
+.bar-row-value { font-size: var(--fs-12); color: var(--c-text); font-variant-numeric: tabular-nums; }
+.bar-track { height: 8px; border-radius: var(--r-chip); background: var(--c-inset); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: var(--r-chip); background: var(--c-accent); }
+.bar-fill.is-preview { background: var(--c-series-3); }
+.bar-fill.is-warn { background: var(--c-warn); }
+
+/* ---------------------------------------------------------------------------
+   Empty / error / loading
+   ------------------------------------------------------------------------ */
+.panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 22px 0 18px;
+  color: var(--c-text-muted);
+  font-size: var(--fs-13);
+}
+.panel-empty strong { color: var(--c-text-2); font-weight: 600; }
+
+.panel-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: var(--r-tile);
+  background: var(--c-error-tint);
+  color: var(--c-error);
+  font-size: var(--fs-13);
+}
+.panel-error strong { display: block; font-weight: 600; }
+.panel-error small { display: block; margin-top: 2px; color: var(--c-text-2); font-family: var(--font-mono); font-size: var(--fs-11); }
+
+.panel-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--r-tile);
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+  font-size: var(--fs-12);
+}
+
+.skeleton {
+  border-radius: var(--r-tile);
+  background: var(--c-raised);
+  animation: skeleton-pulse 1.6s var(--ease-std) infinite;
+}
+@keyframes skeleton-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ---------------------------------------------------------------------------
+   Mobile shell — burger + edge drawer
+   ------------------------------------------------------------------------
+   Below 1024px the rail is replaced by a drawer, not a bottom bar.
+
+   The bar this replaces was a permanent 52px strip on the bottom edge that
+   could hold five destinations. The club panel has seven and the admin panel
+   seventeen, so half the product was unreachable on a phone and the rest had
+   to be abbreviated to "Room", "Price", "Income". The drawer carries the rail's
+   own groups, with the rail's own labels and the rail's own classes, so there
+   is one navigation vocabulary at every width and the bottom edge stays free
+   for the deployment strip.
+
+   The trigger lives in the top bar (`.panel-nav-trigger`); the panel itself is
+   `packages/ui/nav-drawer.tsx`, a native `<dialog>` so focus containment,
+   Escape and focus return are the browser's job.
+   ------------------------------------------------------------------------ */
+.panel-nav-trigger { display: none; }
+
+.panel-nav-drawer {
+  position: fixed;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: min(320px, 88vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  overflow: visible;
+}
+.panel-nav-drawer::backdrop { background: var(--c-scrim); }
+
+.panel-nav-sheet {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  border-right: 1px solid var(--c-hairline);
+  background: var(--c-rail);
+}
+.panel-nav-sheet-head {
+  display: flex;
+  min-height: var(--h-topbar);
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.panel-nav-sheet-heading { display: grid; min-width: 0; flex: 1; gap: 1px; }
+.panel-nav-sheet-title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+.panel-nav-sheet-subtitle {
+  margin: 0;
+  overflow: hidden;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.panel-nav-sheet-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.panel-nav-sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 12px calc(18px + env(safe-area-inset-bottom));
+  scrollbar-width: thin;
+}
+/* A drawer is a thumb surface at every width below the rail breakpoint, so
+   every destination keeps the 44px target even on a 768px tablet. */
+.panel-nav-sheet .panel-nav-link { min-height: var(--hit-mobile); }
+.panel-nav-sheet .panel-nav-group:last-child { margin-bottom: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .panel-nav-drawer[open] .panel-nav-sheet {
+    animation: panel-nav-sheet-in var(--dur-base) var(--ease-out) both;
+  }
+  .panel-nav-drawer[open]::backdrop {
+    animation: panel-nav-scrim-in var(--dur-base) var(--ease-std) both;
+  }
+}
+@keyframes panel-nav-sheet-in {
+  from { transform: translateX(-12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes panel-nav-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---------------------------------------------------------------------------
+   Interaction motion — one transition for every control that changes colour
+
+   A colour that flips in one frame is the difference between "I touched this"
+   and "the screen blinked". Nearly every control in these panels answers a
+   pointer with a colour change, and before this block they all answered
+   instantly: only 24 of ~90 interactive rules declared a transition, so a
+   segmented option, a nav item, a menu row, a table row and an icon button
+   each snapped while their neighbours glided.
+
+   The fix is not a transition per rule — that is the thing that drifts. It is
+   one base rule over the small set of properties a state change is allowed to
+   touch, applied to every interactive control on every panel surface. A later,
+   more specific rule that wants a different duration still wins normally;
+   `trash-action` overrides this with its own timing without a fight.
+
+   Why these properties only: colour, background, border, shadow, opacity and
+   transform are the compositor-friendly half of CSS. Width, height, top, left
+   and margin are excluded on purpose — animating those reflows the page on
+   every frame, and DESIGN.md §Motion forbids it. Nothing here animates layout.
+
+   `--dur-fast` (120ms) is the state-change duration from the token layer, and
+   it collapses to 1ms under `prefers-reduced-motion` (tokens.css), so this
+   block adds no motion for a reader who asked for none. It is a transition,
+   not an animation: nothing runs on load, and `document.getAnimations()`
+   stays empty.
+   ------------------------------------------------------------------------ */
+.panel-shell :where(a, button, summary, label, [role='button'], [role='radio'], [role='tab'], [role='option']),
+.auth-screen :where(a, button, summary, label, [role='button'], [role='radio']),
+.auth-wizard :where(a, button, summary, label, [role='button'], [role='radio']),
+.connect-root :where(a, button, summary, label, [role='button'], [role='radio']) {
+  transition-property: color, background-color, border-color, outline-color, box-shadow, opacity, transform;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* Table rows answer the pointer the same way. The row's own `background` is
+   transparent; the hover tint is painted on its cells, so the transition has
+   to sit on the cell rather than on the row. Selection (`is-selected`) goes
+   through the same property, which is what keeps a selected row from snapping
+   while every other row glides. */
+.panel-shell .data-table tbody td,
+.panel-shell .data-table tbody th {
+  transition-property: color, background-color, border-color;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* Press — the one motion DESIGN.md §Motion already promised ("press scales to
+   .99") and the panel action family did not have. It stays on the shared
+   `btn-*` action classes only: a nav link or a whole table row that shrinks
+   under the pointer reads as a layout bug, and a segmented option that shrank
+   would fight the runner sliding behind it. `scale` is a transform, so it
+   composites; nothing reflows.
+
+   The 1% squeeze is deliberately below the notice threshold — it is felt as the
+   click landing, not seen as an effect. `club-button` (the club panel's other
+   button family, in club-primitives.css) already carries the same squeeze with
+   its own transition, so it is not repeated here. `trash-action` is absent on
+   purpose: it answers a press with its lid, and scaling the box would move the
+   hinge the lid rotates around. */
+.btn:active:not(:disabled),
+.btn-primary:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
+.btn-quiet:active:not(:disabled),
+.btn-outline:active:not(:disabled),
+.btn-danger:active:not(:disabled) {
+  transform: scale(.99);
+}
+
+/* Focus + selection (both themes, no layout cost)
+   ------------------------------------------------------------------------ */
+.panel-shell :where(a, button, input, select, textarea, [tabindex], [role='button'], [role='radio']):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+.panel-shell ::selection { background: var(--c-accent-tint-strong); color: var(--c-text); }
+
+/* Text entry is marked by the caret and its own accent rule, not by a frame.
+   A field used to answer focus three ways at once: a 2px outline from the ring
+   rule above, an accent border, and a 3px tint halo. Stacked, they drew a green
+   box around the whole field, which reads as a text selection rather than as
+   focus — the same thing the caret already says, louder.
+
+   So every text control gets one frame-free marker: the accent caret plus the
+   already-accent 1px rule under the value (see the Fields block). No outline,
+   no box, no halo. Checkboxes, radios, ranges, file pickers and selects are
+   controls rather than text entry, and keep the ring.
+
+   The rule below is the single place that decides it. `:not()` carries the
+   attribute selectors, so the specificity (0,2,1) beats the ring rule above and
+   the per-app copies (`:where(...)` in index.css, club-primitives.css,
+   admin-theme.css, the `.connect-root` rule), which can keep listing `input`
+   without re-drawing the box. `!important` is deliberately not used. */
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']),
+textarea {
+  caret-color: var(--c-accent);
+}
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']),
+textarea,
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']):focus,
+input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']):focus-visible,
+textarea:focus,
+textarea:focus-visible,
+.field-input:focus,
+.field-input:focus-visible,
+.auth-input:focus,
+.auth-input:focus-visible,
+.auth-otp-input:focus,
+.auth-otp-input:focus-visible,
+.club-field:focus,
+.club-field:focus-visible,
+.connect-field:focus,
+.connect-field:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Selection — a control is chrome, body text is copy
+   ------------------------------------------------------------------------
+   Dragging across a button used to paint a text selection over its label: the
+   browser treats a `<button>`'s text as selectable, so a slightly sloppy press
+   on "Mark played", a nav row or the account switcher left the label
+   highlighted after the action had already run. Nothing on a control is meant
+   to be copied, so controls are unselectable; paragraphs, table cells and every
+   text field stay selectable, because that text is what people copy.
+
+   Selection colour stays the accent tint on the content that can be selected.
+
+   Deliberately NOT in the list:
+   - a bare `a[href]` — an inline link inside a sentence ("see Live room") is
+     prose with an action attached, and the sentence must stay copyable,
+     including the link's own words. Links used as controls (buttons, nav rows,
+     cards, list rows) are covered by their class or role below;
+   - a bare `label` — `.field` wraps a whole control (label text + input), and
+     `.field-label` is the caption people read. Only the label of a tile-style
+     choice (`.role-option`, `.auth-choice`, `.panel-language-option`,
+     `.qr-switch-copy`) is chrome; those are listed by class. */
+:where(
+  .panel-shell,
+  .auth-screen,
+  .auth-wizard,
+  .connect-root
+) :where(
+  button,
+  summary,
+  select,
+  [role='button'],
+  [role='menuitem'],
+  [role='menuitemradio'],
+  [role='option'],
+  [role='tab'],
+  [role='radio'],
+  [role='switch'],
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .btn-outline,
+  .btn-danger,
+  .club-button,
+  .connect-btn-primary,
+  .connect-btn-ghost,
+  .panel-nav-link,
+  .panel-account,
+  .panel-menu-item,
+  .panel-card-link,
+  .seg-item,
+  .chip,
+  .list-row,
+  .action-row,
+  .auth-link,
+  .role-option,
+  .auth-choice,
+  .panel-language-option,
+  .qr-switch-copy,
+  .data-table th
+) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Text entry is the opposite: selecting the value is how people fix it. */
+:where(
+  .panel-shell,
+  .auth-screen,
+  .auth-wizard,
+  .connect-root
+) :where(input, textarea, [contenteditable='true'], .data-table td, .panel-card p, .field-hint, .panel-note) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   ------------------------------------------------------------------------ */
+@media (max-width: 1279px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel-grid-hero, .panel-grid-split { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 1023px) {
+  .panel-rail { display: none; }
+  /* The burger is the only way into navigation below the rail breakpoint, and
+     it is visible for exactly as long as the rail is not. It is a touch
+     target across that whole range, so it takes the 44px hit area here rather
+     than at ≤640px where `.panel-icon-button` promotes: at 641–1023px the
+     single control that opens the drawer was 36px. */
+  .panel-nav-trigger { display: inline-flex; width: var(--hit-mobile); height: var(--hit-mobile); }
+  /* The drawer and the button that closes it are only ever reachable in this
+     same range, so the close target takes the touch size here too. */
+  .panel-nav-drawer .panel-icon-button { width: var(--hit-mobile); height: var(--hit-mobile); }
+  /* No bottom bar to clear: the content runs to the safe-area edge. */
+  .panel-content { padding: 18px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .panel-topbar { padding: 0 16px; }
+  .panel-page-title { font-size: var(--fs-20); }
+  .stat-grid { gap: 12px; }
+}
+
+/* The wide search field collapses to an icon button. `.club-topbar-search-compact`
+   is the same control under the club shell's older class name — kept as an alias
+   so the two names cannot drift into "both visible" or "neither". */
+.panel-search-compact,
+.club-topbar-search-compact { display: none; }
+
+@media (max-width: 640px) {
+  .panel-search-compact,
+  .club-topbar-search-compact { display: inline-flex; }
+  .panel-search { display: none; }
+  .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .panel-grid-2 { grid-template-columns: minmax(0, 1fr); }
+  /* At 320px the search field plus the theme switch plus the account button do
+     not fit on one row: the row scrolled the whole page by 34px. The search
+     field is the one element that can give up its width. */
+  .panel-search { max-width: none; min-width: 0; flex: 1 1 auto; }
+  .panel-topbar-actions { min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
+  .btn, .btn-primary, .btn-secondary, .btn-quiet, .btn-outline, .btn-danger { height: var(--hit-mobile); }
+  .field-input { height: var(--hit-mobile); }
+  select.field-input { height: var(--hit-mobile); }
+  .panel-icon-button { width: var(--hit-mobile); height: var(--hit-mobile); }
+  .panel-topbar-actions { gap: 4px; }
+  .panel-nav-link { min-height: var(--hit-mobile); }
+  .seg-item { height: var(--hit-mobile); min-width: var(--hit-mobile); }
+  .table-sort { min-height: var(--hit-mobile); min-width: var(--hit-mobile); }
+  .data-table select, .data-table input[type='text'], .data-table input[type='search'] { min-height: var(--hit-mobile); }
+  .field-input, select.field-input, .admin-control { height: auto; min-height: var(--hit-mobile); }
+  .data-table input[type='checkbox'], .table-check { width: var(--hit-mobile); height: var(--hit-mobile); }
+  .panel-card .toolbar-select { min-height: var(--hit-mobile); }
+  .panel-card-link { min-height: var(--hit-mobile); }
+  .panel-card-tools { align-items: stretch; }
+  /* Touch gets the word and the target, not a hover that cannot happen. */
+  .trash-action { height: var(--hit-mobile); padding: 0 12px; font-size: var(--fs-13); }
+}
+
+/* Below the rail breakpoint the account trigger moves into the top bar, and
+   the menu would otherwise open off the right edge of the viewport. */
+@media (max-width: 1023px) {
+  .panel-account-menu-compact .panel-menu-panel { width: 236px; }
+  .panel-modal-body { padding: 16px; }
+  .panel-modal-head { padding: 16px 16px 12px; }
+  .panel-modal-foot { padding: 12px 16px; }
+}
+
+@media (max-width: 480px) {
+  .panel-language-options { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; opacity: .7; }
+  .field-select__menu { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Login (standalone, no shell)
+   A single centred card: identity, one form, one action. No hero.
+   ------------------------------------------------------------------------ */
+.login-shell {
+  position: relative;
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 32px 16px;
+  background: var(--c-canvas);
+  color: var(--c-text);
+  font-family: var(--font-sans);
+}
+.login-theme { position: absolute; top: 20px; right: 20px; }
+.login-card-wrap { width: min(380px, 100%); }
+
+.login-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 24px; }
+.login-brand-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--r-control);
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+.login-brand-copy { display: grid; gap: 1px; }
+.login-brand-name { font-size: var(--fs-15); font-weight: 700; letter-spacing: -.01em; color: var(--c-text); }
+.login-brand-role { font-size: var(--fs-11); color: var(--c-text-muted-sm); }
+
+.login-form { display: grid; gap: 14px; }
+.login-submit { width: 100%; }
+.login-back { width: 100%; font-weight: 500; }
+.login-note { text-align: center; }
+.login-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-control);
+  background: var(--c-error-tint);
+  color: var(--c-error);
+  font-size: var(--fs-12);
+}
+.login-error-code { margin-left: 6px; font-family: var(--font-mono); font-size: var(--fs-11); opacity: .8; }
+.field-input.is-mono { font-family: var(--font-mono); letter-spacing: .24em; }

@@ -1,0 +1,211 @@
+/* ============================================================================
+   DROP IT panel — canonical token layer (light + dark)
+   ----------------------------------------------------------------------------
+   THIS IS THE SOURCE OF TRUTH. Do not edit the copies inside the apps; edit
+   this file and run:
+
+       node scripts/sync-ui-tokens.mjs
+
+   which writes identical copies to
+
+       apps/web-club/src/styles/club-tokens.css
+       apps/web-admin/src/styles/panel-tokens.css
+
+   (The copies exist because each app is its own Vite build with its own CSS
+   pipeline; a cross-app @import would make both builds depend on files outside
+   their root. `node scripts/sync-ui-tokens.mjs --check` fails if they drift.)
+
+   Theme contract
+   --------------
+   Exactly one attribute selects a theme: `<html data-theme="dark|light">`.
+   The attribute is written before first paint by the boot script in each
+   app's index.html, from `localStorage['dropit-theme']` (default: dark).
+   Nothing else in the product decides a colour: every surface, text ramp and
+   control reads a token from here.
+
+   Two greens, one hue family
+   --------------------------
+   `#00FF87` measures ~1.4:1 on white, so the light theme uses a darker member
+   of the same hue (`#087A4C`, 5.4:1 on white) for anything that must carry
+   text or read as an action. Both themes keep exactly one accent: no second
+   green for "success" (DESIGN.md §Tokens).
+   ========================================================================== */
+
+/* Inter is self-hosted per app, because the URL depends on the Vite base path
+   (the club panel is served from `/`, the admin panel from `/admin/`). Each
+   app declares the same @font-face in its own index.css. */
+
+/* --- shared: geometry, type, motion (identical in both themes) ------------- */
+:root {
+  /* radii: five values for the whole product */
+  --r-surface: 16px;   /* panels, dialogs, large containers */
+  --r-tile: 12px;      /* nested tiles, input groups, QR frame */
+  --r-control: 10px;   /* buttons, fields, segment track, icon buttons */
+  --r-mark: 4px;       /* checkbox — a mark, not a container: at 16px the
+                          control radius would read as a circle */
+  --r-chip: 999px;     /* status chip, avatar, dot — nothing else */
+
+  /* type: six sizes, nothing below 11px */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --fs-28: 28px;  /* page title, primary metric value */
+  --fs-20: 20px;  /* secondary metric value, dialog title */
+  --fs-15: 15px;  /* card title */
+  --fs-13: 13px;  /* body */
+  --fs-12: 12px;  /* label, caption */
+  --fs-11: 11px;  /* micro status */
+
+  --lh-tight: 1.2;
+  --lh-text: 1.5;
+
+  /* motion: state changes and direct feedback only */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-std: cubic-bezier(.4, 0, .2, 1);
+
+  /* layout */
+  --w-rail: 248px;
+  --w-content: 1320px;
+  --h-topbar: 64px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --pad-panel: 20px;
+  --pad-panel-lg: 24px;
+  --hit-desktop: 36px;
+  --hit-mobile: 44px;
+
+  /* one background element per screen, switchable by a single token */
+  --abstract-opacity: 1;
+}
+
+/* --- dark (default) -------------------------------------------------------- */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --c-canvas: #0A0C11;
+  --c-rail: #0B0E14;
+  --c-surface: #12151C;
+  --c-raised: #171B23;
+  --c-inset: #0E1118;
+  --c-hairline: rgba(235, 240, 250, .08);
+  --c-hairline-row: rgba(235, 240, 250, .06);
+  --c-hairline-strong: rgba(235, 240, 250, .14);
+  --c-scrim: rgba(3, 5, 9, .72);
+  --c-panel-shadow: none;
+  /* Floating layers only — an anchored menu is the one surface that leaves the
+     page ramp, so it gets its own step and shadow. Never used by a panel. */
+  --c-popover: #1A1F28;
+  --c-popover-shadow: 0 18px 44px -14px rgba(2, 4, 8, .78), 0 2px 8px rgba(2, 4, 8, .38);
+
+  --c-accent: #00FF87;
+  --c-accent-hover: #00D873;
+  --c-accent-tint: rgba(0, 255, 135, .08);
+  --c-accent-tint-strong: rgba(0, 255, 135, .14);
+  --c-ink-on-accent: #06130C;
+  --c-accent-quiet: #7CFFC0;   /* accent text on a tint, ≥ 4.5:1 */
+
+  --c-text: #F1F4F7;
+  --c-text-2: #B0B8C3;
+  --c-text-muted: #858E9C;     /* only at >= 12px */
+  --c-text-muted-sm: #9AA3B0;  /* 11–12px */
+
+  --c-nav-active-bg: rgba(0, 255, 135, .10);
+  --c-nav-active-text: #F1F4F7;
+  --c-nav-hover-bg: rgba(235, 240, 250, .05);
+  --c-hover-strong: #1E232C;
+  --c-seg-active: #232935;
+
+  --c-warn: #FFC65B;
+  --c-warn-tint: rgba(255, 198, 91, .10);
+  --c-error: #FF6B6B;
+  --c-error-tint: rgba(255, 107, 107, .10);
+  --c-ok: #00FF87;
+
+  --c-chart-line: #00FF87;
+  --c-chart-fill: rgba(0, 255, 135, .18);
+  --c-chart-fill-end: rgba(0, 255, 135, 0);
+  --c-chart-grid: rgba(235, 240, 250, .07);
+  --c-chart-axis: #858E9C;
+  --c-series-1: #00FF87;
+  --c-series-2: rgba(0, 255, 135, .68);
+  --c-series-3: rgba(0, 255, 135, .44);
+  --c-series-4: rgba(0, 255, 135, .26);
+  --c-series-5: rgba(235, 240, 250, .16);
+
+  --c-focus-ring: 0 0 0 2px var(--c-canvas), 0 0 0 4px var(--c-accent);
+}
+
+/* --- light ---------------------------------------------------------------- */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --c-canvas: #F4F6F9;
+  --c-rail: #FFFFFF;
+  --c-surface: #FFFFFF;
+  --c-raised: #F3F5F8;
+  --c-inset: #F7F9FB;
+  --c-hairline: #E6EAF0;
+  --c-hairline-row: #EFF2F6;
+  --c-hairline-strong: #D8DEE7;
+  --c-scrim: rgba(15, 23, 42, .38);
+  /* A white card on a near-white canvas needs a shadow to read as a surface;
+     it replaces the dark theme's surface ramp. No border is added with it. */
+  --c-panel-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 6px 16px -10px rgba(15, 23, 42, .10);
+  --c-popover: #FFFFFF;
+  --c-popover-shadow: 0 20px 44px -18px rgba(15, 23, 42, .22), 0 2px 6px rgba(15, 23, 42, .06);
+
+  --c-accent: #087A4C;
+  --c-accent-hover: #066B42;
+  --c-accent-tint: rgba(8, 122, 76, .08);
+  --c-accent-tint-strong: rgba(8, 122, 76, .14);
+  --c-ink-on-accent: #FFFFFF;
+  --c-accent-quiet: #05543A;   /* >= 5.4:1 on its own 14% tint, not 4.5 */
+
+  --c-text: #0F141B;
+  --c-text-2: #4A5563;
+  --c-text-muted: #67717F;
+  --c-text-muted-sm: #5A6472;
+
+  --c-nav-active-bg: rgba(8, 122, 76, .09);
+  --c-nav-active-text: #06663F;
+  --c-nav-hover-bg: #F1F4F8;
+  --c-hover-strong: #E9EDF3;
+  --c-seg-active: #FFFFFF;
+
+  --c-warn: #8A5A00;
+  --c-warn-tint: rgba(138, 90, 0, .10);
+  --c-error: #B4322C;
+  --c-error-tint: rgba(180, 50, 44, .08);
+  --c-ok: #087A4C;
+
+  --c-chart-line: #087A4C;
+  --c-chart-fill: rgba(8, 122, 76, .16);
+  --c-chart-fill-end: rgba(8, 122, 76, 0);
+  --c-chart-grid: #E9EDF3;
+  --c-chart-axis: #67717F;
+  --c-series-1: #087A4C;
+  --c-series-2: rgba(8, 122, 76, .66);
+  --c-series-3: rgba(8, 122, 76, .42);
+  --c-series-4: rgba(8, 122, 76, .24);
+  --c-series-5: #DCE2EA;
+
+  --c-focus-ring: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+    --dur-slow: 1ms;
+    --abstract-opacity: 0;
+  }
+}
