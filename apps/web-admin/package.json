@@ -5,14 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev:demo": "vite --mode demo",
+    "build": "tsc --noEmit && vite build --mode production",
+    "build:demo": "tsc --noEmit && vite build --mode demo",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "i18n:check": "node ../../scripts/i18n-check.mjs",
+    "select:check": "node ../../scripts/select-audit.mjs --app admin",
+    "nav:check": "node ../../scripts/mobile-nav-check.mjs --app admin"
   },
   "dependencies": {
+    "lucide-react": "^1.61.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2"
+    "react-router-dom": "^7.18.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.8",

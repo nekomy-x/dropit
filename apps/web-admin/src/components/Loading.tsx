@@ -1,42 +1,53 @@
+/**
+ * Loading and skeleton states, in the shared panel language.
+ *
+ * `skeleton` (panel.css) is the only loading surface: a neutral raised block
+ * that pulses, collapses under `prefers-reduced-motion`, and reads correctly in
+ * both themes. Nothing here invents data — the shapes only hold the layout.
+ */
+
+import { useLocale } from '../locale';
+
 /** Full-width loading indicator for pages awaiting their first API response. */
-export default function Loading({ label = 'Loading…' }: { label?: string }) {
+export default function Loading({ label }: { label?: string }) {
+  const { t } = useLocale();
   return (
     <div
-      className="flex items-center justify-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900 p-10 text-sm text-neutral-400"
+      className="panel-card"
       role="status"
       aria-live="polite"
+      style={{ display: 'flex', alignItems: 'center', gap: 12, color: 'var(--c-text-2)', fontSize: 'var(--fs-13)' }}
     >
-      <span
-        className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-600 border-t-brand-500"
-        aria-hidden="true"
-      />
-      {label}
+      <span className="skeleton" style={{ width: 16, height: 16, borderRadius: 'var(--r-chip)', flex: '0 0 auto' }} aria-hidden="true" />
+      {label ?? t('common.loading')}
     </div>
   );
 }
 
 /**
- * Skeleton rows (dizayn-zadanie §5: «состояния — загрузка
- * (скелетоны)»): серые пульсирующие заглушки в форме таблиц/карточек
- * вместо пустоты — структура видна до прихода данных.
+ * Skeleton rows (dizayn-zadanie §5: «состояния — загрузка (скелетоны)»):
+ * the shape of the table that is about to arrive, instead of an empty box.
  */
 export function SkeletonRows({ rows = 5, cols = 3 }: { rows?: number; cols?: number }) {
+  const { t } = useLocale();
   return (
-    <div
-      className="rounded-xl border border-neutral-800 bg-neutral-900 p-4"
-      role="status"
-      aria-label="Loading table"
-    >
+    <div className="panel-card" role="status" aria-label={t('shared.loadingTable')}>
       {Array.from({ length: rows }).map((_, r) => (
         <div
           key={r}
-          className="flex items-center gap-4 border-b border-neutral-800 py-3 last:border-0"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            padding: '14px 0',
+            borderBottom: r === rows - 1 ? 0 : '1px solid var(--c-hairline-row)',
+          }}
         >
           {Array.from({ length: cols }).map((_, c) => (
-            <div
+            <span
               key={c}
-              className="h-4 animate-pulse rounded bg-neutral-700"
-              style={{ width: `${[60, 25, 15][c % 3]}%` }}
+              className="skeleton"
+              style={{ height: 12, width: `${[60, 25, 15][c % 3]}%` }}
             />
           ))}
         </div>
@@ -45,14 +56,16 @@ export function SkeletonRows({ rows = 5, cols = 3 }: { rows?: number; cols?: num
   );
 }
 
-/** Skeleton для плиток дашборда (большие числа). */
+/** Skeletons for the KPI row (large numbers, no text). */
 export function SkeletonTiles({ tiles = 4 }: { tiles?: number }) {
+  const { t } = useLocale();
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" role="status" aria-label="Loading stats">
+    <div className="stat-grid" role="status" aria-label={t('shared.loadingStats')}>
       {Array.from({ length: tiles }).map((_, i) => (
-        <div key={i} className="rounded-xl border border-neutral-800 bg-neutral-900 p-5">
-          <div className="mb-3 h-3 w-1/2 animate-pulse rounded bg-neutral-700" />
-          <div className="h-8 w-2/3 animate-pulse rounded bg-neutral-700" />
+        <div key={i} className="stat-card">
+          <span className="skeleton" style={{ display: 'block', height: 12, width: '50%' }} />
+          <span className="skeleton" style={{ display: 'block', height: 28, width: '66%', marginTop: 14 }} />
+          <span className="skeleton" style={{ display: 'block', height: 10, width: '42%', marginTop: 12 }} />
         </div>
       ))}
     </div>

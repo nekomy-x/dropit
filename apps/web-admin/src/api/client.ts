@@ -112,17 +112,18 @@ export interface IncidentListResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Reference types — not implemented yet, used by the stub surface below
+// Domain types for panel endpoints and the remaining club detail stub
 // ---------------------------------------------------------------------------
 
-export type ClubStatus = 'active' | 'suspended' | 'blocked';
+export type ClubStatus = 'pending_verification' | 'active' | 'suspended' | 'blocked';
 export type StripeOnboardingStatus = 'pending' | 'verified' | 'restricted';
-export type DjStatus = 'active' | 'suspended' | 'blocked';
+export type DjStatus = 'invited' | 'active' | 'suspended' | 'blocked';
 export type GuestStatus = 'active' | 'blocked';
 
 export interface Club {
   id: string;
   name: string;
+  city?: string;
   slug: string;
   address: string;
   country: string;
@@ -137,11 +138,13 @@ export interface Club {
 
 export interface ClubCreateInput {
   name: string;
-  slug: string;
-  email: string;
+  city: string;
+  timezone: string;
   address: string;
-  country: string;
-  phone: string;
+}
+
+export interface ClubCreateResult extends Club {
+  qrMasterToken: string;
 }
 
 export interface ClubPatchInput {
@@ -164,11 +167,12 @@ export interface AdminDj {
 
 export interface AdminGuest {
   id: string;
-  platform: string;
-  appVersion: string;
-  firstSeen: string;
-  lastSeen: string;
-  status: GuestStatus;
+  displayName: string;
+  email: string;
+  createdAt: string;
+  requestsCount: number;
+  lastSeenAt: string;
+  banned: boolean;
 }
 
 export type PaymentStatus =
@@ -203,14 +207,24 @@ export interface AuditLogEntry {
   at: string;
 }
 
-/** GET /v1/admin/dashboard/now — live platform metrics (not implemented yet). */
+/** GET /v1/admin/dashboard/now — live platform metrics. */
 export interface DashboardNow {
   activeSessions: number;
+  requestsToday: number;
   requestsPerMinute: number;
   turnoverTodayMinor: number;
   currency: string;
   openIncidents: number;
 }
+
+/**
+ * Deployment mode of this installation (`runtime_mode` on platform settings).
+ * Both web panels render a fixed, non-dismissible strip for `test` and
+ * `maintenance`; `normal` renders no strip. `auto` resolves on the service
+ * side from the real stand facts (open signup / mock payments ⇒ `test`,
+ * otherwise `normal`), unless `DROPIT_MAINTENANCE` forces `maintenance`.
+ */
+export type RuntimeMode = 'auto' | 'test' | 'maintenance' | 'normal';
 
 /**
  * platform_settings (id=1). All bp fields are basis points (0..10000);
@@ -224,6 +238,7 @@ export interface PlatformSettings {
   maxPriceMinor: number;
   djShareOfRemainderBp: number;
   currency: string;
+  runtimeMode: RuntimeMode;
   updatedAt: string;
 }
 
@@ -265,6 +280,8 @@ export class NotImplementedStubError extends Error {
 
 let accessToken: string | null = null;
 let refreshToken: string | null = null;
+let refreshPromise: Promise<TokenPair> | null = null;
+let authGeneration = 0;
 
 /** True after a successful 2FA login or token refresh. */
 export function isAuthenticated(): boolean {
@@ -273,11 +290,17 @@ export function isAuthenticated(): boolean {
 
 /** Clears the in-memory tokens ("sign out"). */
 export function clearTokens(): void {
+  authGeneration += 1;
   accessToken = null;
   refreshToken = null;
+  refreshPromise = null;
 }
 
-function storePair(pair: TokenPair): void {
+function storePair(pair: TokenPair, newSession = true): void {
+  if (newSession) {
+    authGeneration += 1;
+    refreshPromise = null;
+  }
   accessToken = pair.access_token;
   refreshToken = pair.refresh_token;
 }
@@ -290,13 +313,15 @@ function storePair(pair: TokenPair): void {
 async function request<T>(
   path: string,
   init: {
-    method?: 'GET' | 'POST' | 'PATCH';
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     body?: unknown;
     auth?: boolean;
     retryOn401?: boolean;
   } = {},
 ): Promise<T> {
   const { method = 'GET', body, auth = true, retryOn401 = true } = init;
+  const generation = authGeneration;
+  const sentToken = accessToken;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -308,12 +333,21 @@ async function request<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
+  if (generation !== authGeneration) {
+    throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session changed' });
+  }
+
+  // Another request may already have rotated this token while this 401 was in flight.
+  if (response.status === 401 && auth && retryOn401 && accessToken && sentToken !== accessToken) {
+    return request<T>(path, { ...init, retryOn401: false });
+  }
+
   if (response.status === 401 && auth && retryOn401 && refreshToken) {
     try {
       await refreshTokens();
       return request<T>(path, { ...init, retryOn401: false });
     } catch {
-      clearTokens();
+      if (generation === authGeneration) clearTokens();
     }
   }
 
@@ -328,12 +362,16 @@ async function request<T>(
     } catch {
       // keep fallback envelope
     }
-    if (response.status === 401) clearTokens();
+    if (response.status === 401 && auth && generation === authGeneration) clearTokens();
     throw new ApiRequestError(response.status, payload);
   }
 
   if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const result = (await response.json()) as T;
+  if (generation !== authGeneration) {
+    throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session changed' });
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,13 +417,24 @@ export async function login2fa(input: {
 /** POST /v1/auth/refresh — rotate the refresh-token family; reuse on the backend revokes it. */
 export async function refreshTokens(): Promise<TokenPair> {
   if (!refreshToken) throw new ApiRequestError(401, { code: 'unauthorized', message: 'No refresh token' });
-  const pair = await request<TokenPair>('/auth/refresh', {
+  if (refreshPromise) return refreshPromise;
+  const generation = authGeneration;
+  const token = refreshToken;
+  const pending = request<TokenPair>('/auth/refresh', {
     method: 'POST',
-    body: { refresh_token: refreshToken },
+    body: { refresh_token: token },
     auth: false,
+  }).then((pair) => {
+    if (generation !== authGeneration) {
+      throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session ended' });
+    }
+    storePair(pair, false);
+    return pair;
+  }).finally(() => {
+    if (refreshPromise === pending) refreshPromise = null;
   });
-  storePair(pair);
-  return pair;
+  refreshPromise = pending;
+  return pending;
 }
 
 // --- Payouts (F6) --------------------------------------------------------------
@@ -423,20 +472,19 @@ export function resolveIncident(id: string): Promise<{ resolved: boolean }> {
 }
 
 // ---------------------------------------------------------------------------
-// LIVE panel endpoints (panel_routes.rs) + remaining 501 stubs
+// LIVE panel endpoints (panel_routes.rs) + remaining unsupported surfaces
 // ---------------------------------------------------------------------------
-// dashboard/now, clubs (list + patch-status), djs, payments, audit-log,
-// platform-settings are LIVE. Guests listing and club creation remain
-// backend TODOs (marked below).
+// Dashboard, clubs, guests, DJs, payments, audit-log and settings are live.
 
 /** GET /v1/admin/dashboard/now — live. */
 export function getDashboardNow(): Promise<DashboardNow> {
   return request<Record<string, unknown>>('/admin/dashboard/now').then((r) => ({
     activeSessions: Number(r.active_sessions ?? 0),
+    requestsToday: Number(r.requests_today ?? 0),
     requestsPerMinute: Number(r.requests_per_minute ?? 0),
     turnoverTodayMinor: Number(r.turnover_today_minor ?? 0),
     currency: String(r.currency ?? 'EUR'),
-    openIncidents: 0,
+    openIncidents: Number(r.open_incidents ?? 0),
   }));
 }
 
@@ -447,6 +495,7 @@ export async function listClubs(): Promise<{ items: Club[] }> {
     items: r.items.map((it) => ({
       id: String(it.id),
       name: String(it.name ?? ''),
+      city: String(it.city ?? ''),
       slug: '',
       address: '',
       country: '',
@@ -461,9 +510,16 @@ export async function listClubs(): Promise<{ items: Club[] }> {
   };
 }
 
-/** backend not implemented yet: создание клуба */
-export function createClub(_input: ClubCreateInput): Promise<Club> {
-  return Promise.reject(new NotImplementedStubError('POST /v1/admin/clubs'));
+export async function createClub(input: ClubCreateInput): Promise<ClubCreateResult> {
+  const r = await request<{ club_id: string; name: string; qr_master_token: string }>('/admin/clubs', {
+    method: 'POST', body: { name: input.name, city: input.city, timezone: input.timezone, address: input.address || null },
+  });
+  return {
+    id: r.club_id, name: r.name, city: input.city, slug: '', address: input.address,
+    country: '', email: '', phone: '', logoUrl: null, stripeAccountId: null,
+    stripeOnboardingStatus: 'pending', status: 'pending_verification', createdAt: new Date().toISOString(),
+    qrMasterToken: r.qr_master_token,
+  };
 }
 
 /** backend not implemented yet: карточка клуба */
@@ -481,6 +537,7 @@ export function patchClub(id: string, patch: ClubPatchInput): Promise<Club> {
   ).then((r) => ({
     id: String(r.id ?? id),
     name: '',
+    city: '',
     slug: '',
     address: '',
     country: '',
@@ -510,9 +567,19 @@ export async function listDjs(): Promise<{ items: AdminDj[] }> {
   };
 }
 
-/** backend not implemented yet: список гостей */
-export function listGuests(): Promise<{ items: AdminGuest[] }> {
-  return Promise.reject(new NotImplementedStubError('GET /v1/admin/guests'));
+export async function listGuests(clubId: string): Promise<{ items: AdminGuest[] }> {
+  const r = await request<{ items: Array<Record<string, unknown>> }>(
+    `/admin/guests?club_id=${encodeURIComponent(clubId)}`,
+  );
+  return { items: r.items.map((it) => ({
+    id: String(it.id),
+    displayName: String(it.display_name ?? ''),
+    email: String(it.email ?? ''),
+    createdAt: String(it.created_at ?? ''),
+    requestsCount: Number(it.requests_count ?? 0),
+    lastSeenAt: String(it.last_seen_at ?? ''),
+    banned: Boolean(it.banned),
+  })) };
 }
 
 export interface PaymentFilters {
@@ -521,11 +588,15 @@ export interface PaymentFilters {
   cursor?: string;
 }
 
-/** GET /v1/admin/payments — live (лимит, фильтры — TODO бэкенда). */
-export async function listPayments(_filters: PaymentFilters = {}): Promise<{
+/** GET /v1/admin/payments — live (status and club filters supported). */
+export async function listPayments(filters: PaymentFilters = {}): Promise<{
   items: AdminPayment[];
 }> {
-  const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/payments');
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.clubId) params.set('club_id', filters.clubId);
+  const query = params.size ? `?${params.toString()}` : '';
+  const r = await request<{ items: Array<Record<string, unknown>> }>(`/admin/payments${query}`);
   return {
     items: r.items.map((it) => ({
       id: String(it.id),
@@ -546,7 +617,7 @@ export async function getAuditLog(): Promise<{ items: AuditLogEntry[] }> {
   const r = await request<{ items: Array<Record<string, unknown>> }>('/admin/audit-log');
   return {
     items: r.items.map((it) => ({
-      id: crypto.randomUUID(),
+      id: String(it.id ?? ''),
       actorType: String(it.actor_type ?? ''),
       actorId: String(it.actor_id ?? ''),
       action: String(it.action ?? ''),
@@ -562,6 +633,10 @@ export function getPlatformSettings(): Promise<PlatformSettings> {
   return request<Record<string, unknown>>('/admin/platform-settings').then(mapSettings);
 }
 
+function mapRuntimeMode(value: unknown): RuntimeMode {
+  return value === 'test' || value === 'maintenance' || value === 'normal' ? value : 'auto';
+}
+
 function mapSettings(r: Record<string, unknown>): PlatformSettings {
   return {
     commissionMode: (r.commission_mode === 'fixed' ? 'fixed' : 'percent'),
@@ -571,6 +646,7 @@ function mapSettings(r: Record<string, unknown>): PlatformSettings {
     maxPriceMinor: Number(r.max_price_minor ?? 0),
     djShareOfRemainderBp: Number(r.dj_share_of_remainder_bp ?? 0),
     currency: String(r.currency ?? 'EUR'),
+    runtimeMode: mapRuntimeMode(r.runtime_mode),
     updatedAt: String(r.updated_at ?? ''),
   };
 }
@@ -587,8 +663,154 @@ export function patchPlatformSettings(
   if (patch.maxPriceMinor !== undefined) body.max_price_minor = patch.maxPriceMinor;
   if (patch.djShareOfRemainderBp !== undefined)
     body.dj_share_of_remainder_bp = patch.djShareOfRemainderBp;
+  if (patch.runtimeMode !== undefined) body.runtime_mode = patch.runtimeMode;
   return request<Record<string, unknown>>('/admin/platform-settings', {
     method: 'PATCH',
     body,
   }).then(mapSettings);
+}
+
+// ---------------------------------------------------------------------------
+// Mail (docs/mail-infra-contract.md §7)
+// ---------------------------------------------------------------------------
+// Admin-only delivery oversight. Rows are returned exactly as the backend
+// stores them (snake_case, money/ids/statuses untouched); the screen only maps
+// `status` onto a chip tone. Nothing here reformats a value.
+
+/**
+ * The complete `mail_message.status` vocabulary (CHECK constraint,
+ * contract §2). These are the only values the backend can store, so the
+ * status filter offers exactly this list.
+ */
+export const MAIL_STATUSES = [
+  'queued',
+  'sending',
+  'sent',
+  'delivered',
+  'delivery_delayed',
+  'bounced',
+  'complained',
+  'failed',
+  'suppressed',
+] as const;
+
+export type MailStatus = (typeof MAIL_STATUSES)[number];
+
+/** `MailItem` — one row of `mail_message` as the admin list returns it. */
+export interface MailItem {
+  id: string;
+  to: string;
+  to_name: string | null;
+  subject: string;
+  template: string;
+  status: MailStatus;
+  attempts: number;
+  max_attempts: number;
+  provider_id: string | null;
+  last_error: string | null;
+  created_at: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  aggregate_type: string | null;
+  aggregate_id: string | null;
+}
+
+/** `GET /v1/admin/mail` envelope — cursor pagination, `next_cursor` null at the end. */
+export interface MailListResponse {
+  items: MailItem[];
+  next_cursor: string | null;
+}
+
+/** `GET /v1/admin/mail/stats` — counters over `window_hours` (24 h). */
+export interface MailStats {
+  window_hours: number;
+  queued: number;
+  sending: number;
+  sent: number;
+  delivered: number;
+  bounced: number;
+  complained: number;
+  failed: number;
+  suppressed: number;
+  total: number;
+}
+
+/** One provider event from `mail_event`, as the detail route returns it. */
+export interface MailEvent {
+  id: string;
+  type: string;
+  received_at: string;
+}
+
+/** `GET /v1/admin/mail/{id}` — the row plus the stored body and its events. */
+export interface MailDetail extends MailItem {
+  html: string;
+  text: string;
+  vars: Record<string, unknown>;
+  events: MailEvent[];
+}
+
+/** One row of `mail_suppression`. */
+export interface MailSuppression {
+  email: string;
+  /** 'bounce' | 'complaint' | 'manual'. */
+  reason: string;
+  detail: string | null;
+  created_at: string;
+}
+
+/** `GET /v1/admin/mail/suppressions` envelope. */
+export interface MailSuppressionListResponse {
+  items: MailSuppression[];
+}
+
+export interface MailListFilters {
+  status?: string;
+  q?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/** GET /v1/admin/mail — newest first, filtered by status and a free-text query. */
+export function listMail(filters: MailListFilters = {}): Promise<MailListResponse> {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.q) params.set('q', filters.q);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.cursor) params.set('cursor', filters.cursor);
+  const query = params.size ? `?${params.toString()}` : '';
+  return request<MailListResponse>(`/admin/mail${query}`);
+}
+
+/** GET /v1/admin/mail/stats — 24 h delivery counters. */
+export function getMailStats(): Promise<MailStats> {
+  return request<MailStats>('/admin/mail/stats');
+}
+
+/** GET /v1/admin/mail/{id} — one message with html, text, vars and events. */
+export function getMailMessage(id: string): Promise<MailDetail> {
+  return request<MailDetail>(`/admin/mail/${encodeURIComponent(id)}`);
+}
+
+/** POST /v1/admin/mail/{id}/resend — enqueues a copy, answers with the new id. */
+export function resendMail(id: string): Promise<{ id: string; status: string }> {
+  return request<{ id: string; status: string }>(
+    `/admin/mail/${encodeURIComponent(id)}/resend`,
+    { method: 'POST' },
+  );
+}
+
+/** GET /v1/admin/mail/suppressions — addresses Resend refuses to deliver to. */
+export function listMailSuppressions(limit = 50): Promise<MailSuppressionListResponse> {
+  return request<MailSuppressionListResponse>(
+    `/admin/mail/suppressions?limit=${encodeURIComponent(String(limit))}`,
+  );
+}
+
+/** DELETE /v1/admin/mail/suppressions/{email} — lifts a suppression. */
+export function removeMailSuppression(email: string): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(
+    `/admin/mail/suppressions/${encodeURIComponent(email)}`,
+    { method: 'DELETE' },
+  );
 }

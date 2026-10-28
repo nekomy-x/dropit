@@ -1,84 +1,91 @@
 import { useCallback } from 'react';
 import { listDjs, type AdminDj } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
+import ErrorState from '../components/ErrorState';
+import Loading from '../components/Loading';
+import StatusBadge from '../components/StatusBadge';
+import PageHeading from '../components/PageHeading';
+import Icon from '../components/Icon';
+import { useLocale } from '../locale';
 
 /**
- * DJs — "backend not implemented yet": GET /v1/admin/djs has no backend
- * route yet, so the client method rejects locally with a 501 stub and
- * the page renders a waiting-for-backend empty state.
+ * DJs from the live admin panel endpoint.
  */
 export default function DjsPage() {
+  const { t, locale } = useLocale();
+  const count = (value: number) => new Intl.NumberFormat(locale).format(value);
   const fetchDjs = useCallback(() => listDjs(), []);
-  const { data, loading, error } = useAsyncData<{ items: AdminDj[] }>(fetchDjs);
+  const { data, loading, error, reload } = useAsyncData<{ items: AdminDj[] }>(fetchDjs);
 
   return (
     <div>
-      <h1 className="page-title">DJs</h1>
-      <p className="page-subtitle">
-        All DJs across clubs. Blocking and suspension actions ship with the
-        anti-fraud phase (F8).
-      </p>
+      <PageHeading
+        title={t('djs.title')}
+        action={(
+          <button type="button" className="btn btn-secondary" onClick={reload} disabled={loading}>
+            <Icon name="lucide:refresh-cw" size={15} />
+            {loading ? t('common.refreshing') : t('common.refresh')}
+          </button>
+        )}
+      />
 
-      <div className="mt-6">
-        {loading ? (
-          <p className="text-sm text-neutral-400">Loading DJs…</p>
-        ) : null}
+      {error?.notImplemented ? (
+        <div className="panel-empty" role="status">
+          <strong>{t('djs.pendingTitle')}</strong>
+          <span>{t('djs.pendingBody')}</span>
+        </div>
+      ) : null}
+      {error && !error.notImplemented ? <ErrorState message={error.message} code={error.code} onRetry={reload} /> : null}
+      {loading && !data ? <Loading label={t('djs.loading')} /> : null}
 
-        {error ? (
-          error.notImplemented ? (
-            <p
-              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
-              role="status"
-            >
-              DJ registry is waiting for the backend —{' '}
-              <code>GET /v1/admin/djs</code> is not implemented yet.
-            </p>
-          ) : (
-            <p className="text-sm text-red-300" role="alert">
-              {error.message}
-              {error.code ? ` (${error.code})` : ''}
-            </p>
-          )
-        ) : null}
+      {data && data.items.length === 0 && !error ? (
+        <div className="panel-empty" role="status">
+          <strong>{t('djs.emptyTitle')}</strong>
+          <span>{t('djs.emptyBody')}</span>
+        </div>
+      ) : null}
 
-        {data && data.items.length > 0 ? (
-          <div className="card overflow-x-auto p-0">
-            <table className="w-full text-sm">
+      {data && data.items.length > 0 ? (
+        <section className="panel-card" aria-label={t('djs.cardLabel')}>
+          <header className="panel-card-head">
+            <div>
+              <h2 className="panel-card-title">{t('djs.allDjs')}</h2>
+              <p className="panel-card-sub">{t('djs.cardSubtitle')}</p>
+            </div>
+            <div className="panel-card-tools">
+              <span className="chip chip-neutral">{t('djs.count', { count: count(data.items.length) })}</span>
+            </div>
+          </header>
+
+          <div className="table-wrap">
+            <table className="data-table" style={{ minWidth: 720 }}>
               <thead>
-                <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="py-3 px-6 font-medium">DJ</th>
-                  <th className="py-3 px-4 font-medium">Club</th>
-                  <th className="py-3 px-4 font-medium">Stripe</th>
-                  <th className="py-3 px-6 font-medium">Status</th>
+                <tr>
+                  <th scope="col">{t('djs.colDj')}</th>
+                  <th scope="col">{t('djs.colClub')}</th>
+                  <th scope="col">{t('djs.colStripe')}</th>
+                  <th scope="col">{t('djs.colStatus')}</th>
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((dj) => (
-                  <tr key={dj.id} className="border-b border-neutral-800/60">
-                    <td className="py-3 px-6">
-                      <p className="font-medium text-neutral-100">
-                        {dj.displayName}
-                      </p>
-                      <p className="text-xs text-neutral-500">{dj.email}</p>
+                  <tr key={dj.id}>
+                    <td className="is-strong">
+                      <span style={{ display: 'block' }}>{dj.displayName}</span>
+                      <span style={{ color: 'var(--c-text-muted-sm)', fontSize: 'var(--fs-11)' }}>{dj.email}</span>
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-neutral-400">
-                      {dj.clubId ?? '— unassigned —'}
+                    <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>
+                      {dj.clubId ?? t('djs.unassigned')}
                     </td>
-                    <td className="py-3 px-4 text-neutral-400">
-                      {dj.stripeOnboardingStatus}
-                    </td>
-                    <td className="py-3 px-6">
-                      <span className="rounded-full bg-neutral-800 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-neutral-300">
-                        {dj.status}
-                      </span>
-                    </td>
+                    <td><StatusBadge status={dj.stripeOnboardingStatus} /></td>
+                    <td><StatusBadge status={dj.status} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : null}
-      </div>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -1,133 +1,128 @@
 import { useCallback, useState } from 'react';
 import { listPayments, type AdminPayment, type PaymentStatus } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
+import ErrorState from '../components/ErrorState';
+import Loading from '../components/Loading';
+import PageHeading from '../components/PageHeading';
+import StatusBadge from '../components/StatusBadge';
+import Icon from '../components/Icon';
+import Select from '../components/ui/Select';
+import { useLocale } from '../locale';
+import { STATUS_MESSAGE_KEY } from '../messages/status';
 
 const STATUS_OPTIONS: ReadonlyArray<PaymentStatus> = [
+  'intent',
+  'processing',
   'captured',
   'failed',
   'refunded',
   'partially_refunded',
+  'cancelling',
   'cancelled',
 ];
 
-/**
- * Payments — "backend not implemented yet": GET /v1/admin/payments has no
- * backend route yet (the payment surface implemented in F5 is the guest
- * confirm flow + Stripe webhooks), so the client method rejects locally
- * with a 501 stub and the page renders a waiting-for-backend empty state.
- * The disabled filter controls below reserve the UI for the real endpoint.
- */
 export default function PaymentsPage() {
-  const [status] = useState<PaymentStatus | ''>('');
-  const [clubId] = useState('');
-
-  void status;
-  void clubId;
-
-  const fetchPayments = useCallback(() => listPayments(), []);
-  const { data, loading, error } = useAsyncData<{ items: AdminPayment[] }>(
-    fetchPayments,
+  const { t, locale } = useLocale();
+  const count = (value: number) => new Intl.NumberFormat(locale).format(value);
+  const money = (minor: number, currency: string) =>
+    new Intl.NumberFormat(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(minor / 100);
+  const [status, setStatus] = useState<PaymentStatus | ''>('');
+  const fetchPayments = useCallback(
+    () => listPayments(status ? { status } : {}),
+    [status],
   );
+  const { data, loading, error, reload } = useAsyncData<{ items: AdminPayment[] }>(fetchPayments);
 
   return (
     <div>
-      <h1 className="page-title">Payments</h1>
-      <p className="page-subtitle">
-        All guest payments with their lifecycle status. Split details per
-        payment arrive with the payments admin endpoint.
-      </p>
+      <PageHeading
+        title={t('payments.title')}
+        action={(
+          <button type="button" className="btn btn-secondary" onClick={reload} disabled={loading}>
+            <Icon name="lucide:refresh-cw" size={15} />
+            {loading ? t('common.refreshing') : t('common.refresh')}
+          </button>
+        )}
+      />
 
-      <div className="mt-6">
-        {loading ? (
-          <p className="text-sm text-neutral-400">Loading payments…</p>
-        ) : null}
+      <section className="panel-card" aria-label={t('payments.cardLabel')}>
+        <header className="panel-card-head">
+          <div>
+            <h2 className="panel-card-title">{t('payments.cardTitle')}</h2>
+            <p className="panel-card-sub">{t('payments.cardSubtitle')}</p>
+          </div>
+          <div className="panel-card-tools">
+            {data ? <span className="chip chip-neutral">{t('payments.count', { count: count(data.items.length) })}</span> : null}
+          </div>
+        </header>
 
-        {error ? (
-          error.notImplemented ? (
-            <p
-              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
-              role="status"
-            >
-              The payments table is waiting for the backend —{' '}
-              <code>GET /v1/admin/payments</code> is not implemented yet
-              (F5 implements the guest confirm flow and webhooks; the admin
-              read endpoint is still pending). The filters below are inert
-              stubs.
-            </p>
-          ) : (
-            <p className="text-sm text-red-300" role="alert">
-              {error.message}
-              {error.code ? ` (${error.code})` : ''}
-            </p>
-          )
-        ) : null}
-      </div>
-
-      {data && data.items.length > 0 ? (
-        <div className="card mt-6 overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                <th className="py-3 px-6 font-medium">Payment</th>
-                <th className="py-3 px-4 font-medium">Amount</th>
-                <th className="py-3 px-4 font-medium">Status</th>
-                <th className="py-3 px-6 font-medium">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((payment) => (
-                <tr key={payment.id} className="border-b border-neutral-800/60">
-                  <td className="py-3 px-6 font-mono text-xs text-neutral-400">
-                    {payment.id}
-                  </td>
-                  <td className="py-3 px-4 font-medium text-neutral-100">
-                    {(payment.amountMinor / 100).toFixed(2)} {payment.currency}
-                  </td>
-                  <td className="py-3 px-4 text-neutral-400">{payment.status}</td>
-                  <td className="py-3 px-6 text-neutral-400">
-                    {new Date(payment.createdAt).toLocaleString()}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      <div className="mt-6 flex flex-wrap items-end gap-4 opacity-50" aria-hidden="true">
-        <div>
-          <label htmlFor="payment-status" className="field-label">
-            Status
-          </label>
-          <select
+        <div style={{ maxWidth: 260, marginBottom: 16 }}>
+          <Select
             id="payment-status"
-            className="field-input"
+            label={t('payments.statusLabel')}
             value={status}
-            disabled
-          >
-            <option value="">All</option>
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="payment-club" className="field-label">
-            Club ID
-          </label>
-          <input
-            id="payment-club"
-            type="text"
-            placeholder="UUID"
-            className="field-input"
-            value={clubId}
-            disabled
-            readOnly
+            onChange={(next) => setStatus(next as PaymentStatus | '')}
+            options={[
+              { value: '', label: t('payments.allPayments') },
+              ...STATUS_OPTIONS.map((option) => {
+                const key = STATUS_MESSAGE_KEY[option];
+                return { value: option, label: key ? t(key) : option.replaceAll('_', ' ') };
+              }),
+            ]}
           />
         </div>
-      </div>
+
+        {error ? <ErrorState message={error.message} code={error.code} onRetry={reload} /> : null}
+        {loading && !data ? <Loading label={t('payments.loading')} /> : null}
+
+        {data && data.items.length === 0 ? (
+          <div className="panel-empty" role="status">
+            <strong>{t('payments.emptyTitle')}</strong>
+            <span>{t('payments.emptyBody')}</span>
+          </div>
+        ) : null}
+
+        {data && data.items.length > 0 ? (
+          <div className="table-wrap">
+            <table className="data-table" style={{ minWidth: 760 }}>
+              <thead>
+                <tr>
+                  <th scope="col">{t('payments.colPayment')}</th>
+                  <th scope="col">{t('payments.colRequest')}</th>
+                  <th scope="col" className="is-num">{t('payments.colAmount')}</th>
+                  <th scope="col">{t('payments.colStatus')}</th>
+                  <th scope="col">{t('payments.colCreated')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((payment) => (
+                  <tr key={payment.id}>
+                    <td className="is-mono is-muted">{payment.id.slice(0, 12)}</td>
+                    <td className="is-mono is-muted">{payment.requestId.slice(0, 12)}</td>
+                    <td className="is-num">
+                      <span className="is-strong">{money(payment.amountMinor, payment.currency)}</span>
+                      {payment.refundedMinor > 0 ? (
+                        <span style={{ display: 'block', color: 'var(--c-text-muted-sm)', fontSize: 'var(--fs-11)' }}>
+                          {t('payments.refunded', { amount: money(payment.refundedMinor, payment.currency) })}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <div style={{ display: 'grid', justifyItems: 'start', gap: 4 }}>
+                        <StatusBadge status={payment.status} />
+                        {payment.failureReason ? (
+                          <p style={{ maxWidth: 240, margin: 0, color: 'var(--c-error)', fontSize: 'var(--fs-11)' }}>{payment.failureReason}</p>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{new Date(payment.createdAt).toLocaleString(locale)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }

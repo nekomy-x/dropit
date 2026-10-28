@@ -1,5 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  AdminAuthAlert,
+  AdminAuthScreen,
+  AdminOtpInput,
+  AdminPasswordField,
+} from '../components/auth/AdminAuth';
+import { useLocale } from '../locale';
 import {
   login,
   login2fa,
@@ -14,7 +21,11 @@ import {
  * step 2 POSTs /v1/auth/admin/2fa {email, totp_code}.
  */
 export default function LoginPage() {
+  const { t } = useLocale();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestedPath = (location.state as { from?: unknown } | null)?.from;
+  const returnTo = typeof requestedPath === 'string' && /^\/(dashboard|clubs|djs|guests|payments|payouts|incidents|audit-log|platform-settings|admin)(?:[/?#]|$)/.test(requestedPath) ? requestedPath : '/payouts';
   const [form, setForm] = useState<AdminLoginRequest>({
     email: '',
     password: '',
@@ -40,7 +51,7 @@ export default function LoginPage() {
       }
       // Defensive: the backend mandates 2FA, but the contract allows a
       // direct TokenPair when no secret is configured.
-      navigate('/payouts', { replace: true });
+      navigate(returnTo, { replace: true });
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message);
@@ -48,7 +59,7 @@ export default function LoginPage() {
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Login failed');
+        setError(t('login.failed'));
       }
     } finally {
       setSubmitting(false);
@@ -62,7 +73,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login2fa({ email: form.email, totp_code: totpCode });
-      navigate('/payouts', { replace: true });
+      navigate(returnTo, { replace: true });
     } catch (err) {
       if (err instanceof ApiRequestError) {
         setError(err.message);
@@ -70,127 +81,90 @@ export default function LoginPage() {
       } else if (err instanceof Error) {
         setError(err.message);
       } else {
-        setError('Verification failed');
+        setError(t('login.verificationFailed'));
       }
     } finally {
       setSubmitting(false);
     }
   };
 
-  const errorMessage = () => (
-    <p className="text-sm text-red-300" role="alert">
-      {error}
-      {code ? (
-        <span className="ml-1 font-mono text-xs text-red-400/60">({code})</span>
-      ) : null}
-    </p>
-  );
+  const errorBox = error ? (
+    <AdminAuthAlert tone="error" title={error} code={code} />
+  ) : null;
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-8 text-center">
-          <p className="text-3xl font-black tracking-tight text-white">DROP IT</p>
-          <p className="mt-2 text-sm text-neutral-400">Admin panel</p>
-        </div>
-
-        {challenge ? (
-          // Step 2 — TOTP code (mfa_required: true from the login response).
-          <form onSubmit={onSubmitTotp} className="card space-y-4" noValidate>
-            <div>
-              <label htmlFor="totp-code" className="field-label">
-                Two-factor code
-              </label>
-              <input
-                id="totp-code"
-                type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                pattern="\d{6}"
-                maxLength={6}
-                required
-                placeholder="000000"
-                className="field-input font-mono tracking-widest"
-                value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-              />
-              <p className="mt-1 text-xs text-neutral-500">
-                Enter the 6-digit code from your authenticator app.
-              </p>
-            </div>
-
-            {error ? errorMessage() : null}
-
-            <button
-              type="submit"
-              className="btn-primary w-full"
-              disabled={submitting || totpCode.length !== 6}
-            >
-              {submitting ? 'Verifying…' : 'Verify code'}
-            </button>
-
-            <button
-              type="button"
-              className="w-full text-xs text-neutral-500 transition-colors hover:text-neutral-300"
-              onClick={() => {
-                setChallenge(null);
-                setTotpCode('');
-                setError(null);
-                setCode(null);
-              }}
-            >
-              Back to email and password
-            </button>
-          </form>
-        ) : (
-          // Step 1 — email + password.
-          <form onSubmit={onSubmitPassword} className="card space-y-4" noValidate>
-            <div>
-              <label htmlFor="email" className="field-label">
-                Email
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="username"
-                required
-                className="field-input"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="field-label">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className="field-input"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-              />
-            </div>
-
-            {error ? errorMessage() : null}
-
-            <button
-              type="submit"
-              className="btn-primary w-full"
-              disabled={submitting || form.email === '' || form.password === ''}
-            >
-              {submitting ? 'Signing in…' : 'Sign in'}
-            </button>
-
-            <p className="text-center text-xs text-neutral-500">
-              Admin accounts are created manually and always require 2FA.
-            </p>
-          </form>
-        )}
-      </div>
-    </div>
+    <AdminAuthScreen
+      title={challenge ? t('login.twoFactor') : t('login.signIn')}
+      subtitle={
+        challenge
+          ? t('login.twoFactorHint')
+          : t('login.note')
+      }
+      footer={
+        <>
+          <a className="auth-link auth-link-muted" href="/login">Club panel sign-in</a>
+          <span className="auth-foot-sep" aria-hidden="true">·</span>
+          <a className="auth-link auth-link-muted" href="mailto:ops@dropit.music">Request access</a>
+        </>
+      }
+    >
+      {challenge ? (
+        <form className="auth-form" onSubmit={onSubmitTotp} noValidate>
+          <div className="auth-field">
+            <span className="field-label">{t('login.twoFactor')}</span>
+            <AdminOtpInput value={totpCode} onChange={setTotpCode} disabled={submitting} />
+          </div>
+          {errorBox}
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={submitting || totpCode.length !== 6}
+          >
+            {submitting ? t('login.verifying') : t('login.verifyCode')}
+          </button>
+          <button
+            type="button"
+            className="btn-quiet"
+            onClick={() => {
+              setChallenge(null);
+              setTotpCode('');
+              setError(null);
+              setCode(null);
+            }}
+          >
+            {t('login.backToPassword')}
+          </button>
+        </form>
+      ) : (
+        <form className="auth-form" onSubmit={onSubmitPassword} noValidate>
+          <div className="auth-field">
+            <label htmlFor="email" className="field-label">{t('login.email')}</label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="username"
+              className="field-input auth-input"
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+            />
+          </div>
+          <AdminPasswordField
+            id="password"
+            label={t('login.password')}
+            autoComplete="current-password"
+            value={form.password}
+            onChange={(value) => setForm({ ...form, password: value })}
+          />
+          {errorBox}
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={submitting || form.email === '' || form.password === ''}
+          >
+            {submitting ? t('login.signingIn') : t('login.signIn')}
+          </button>
+        </form>
+      )}
+    </AdminAuthScreen>
   );
 }

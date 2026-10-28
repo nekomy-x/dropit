@@ -1,0 +1,54 @@
+/* Admin panel — page-level extras for the overview.
+ *
+ * Everything here reads the token layer; the shared kit lives in
+ * styles/panel.css. Only the overview has rules of its own.
+ */
+
+.donut-block {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.donut-block .chart-legend {
+  min-width: 190px;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+.donut-block .legend-item { width: 100%; }
+
+.table-link {
+  color: var(--c-text);
+  text-decoration: none;
+}
+.table-link:hover { color: var(--c-accent-quiet); text-decoration: underline; }
+
+.attention-row { align-items: flex-start; }
+.attention-count {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+}
+.attention-count.is-warn { background: var(--c-warn-tint); color: var(--c-warn); }
+.attention-count.is-error { background: var(--c-error-tint); color: var(--c-error); }
+
+.attention-foot {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-hairline-row);
+}
+
+@media (max-width: 640px) {
+  .donut-block { justify-content: center; }
+  .donut-block .chart-legend { min-width: 0; flex-basis: 100%; }
+}

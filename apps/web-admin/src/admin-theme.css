@@ -1,0 +1,357 @@
+/* Admin panel — compatibility layer for the classes pages already use.
+ *
+ * The admin pages were written against a private dark palette (`--admin-*`,
+ * 24px panels, 14px controls, #10b981 accent). The redesign moved the whole
+ * product onto one token layer (packages/ui/tokens.css) with light and dark
+ * themes, so this file now only maps those legacy names onto it — it declares
+ * no colour, radius or size of its own.
+ *
+ * New work should use the `panel-*` classes in styles/panel.css instead.
+ */
+
+.app-shell,
+.control-center,
+.admin-theme {
+  /* Legacy names → token layer. */
+  --ink: var(--c-canvas);
+  --surface: var(--c-surface);
+  --surface-2: var(--c-raised);
+  --surface-hover: var(--c-hover-strong);
+  --line: var(--c-hairline);
+  --line-strong: var(--c-hairline-strong);
+  --muted: var(--c-text-2);
+  --text: var(--c-text);
+  --accent: var(--c-accent);
+  --accent-hover: var(--c-accent-hover);
+  --ok: var(--c-ok);
+  --warn: var(--c-warn);
+  --bad: var(--c-error);
+
+  --admin-canvas: var(--c-canvas);
+  --admin-navigation: var(--c-rail);
+  --admin-surface: var(--c-surface);
+  --admin-surface-raised: var(--c-raised);
+  --admin-surface-inset: var(--c-inset);
+  --admin-divider: var(--c-hairline);
+  --admin-divider-strong: var(--c-hairline-strong);
+  --admin-text: var(--c-text);
+  --admin-text-secondary: var(--c-text-2);
+  --admin-text-muted: var(--c-text-muted);
+  --admin-accent: var(--c-accent);
+  --admin-accent-hover: var(--c-accent-hover);
+  --admin-danger: var(--c-error);
+  --admin-warning: var(--c-warn);
+  --admin-panel-radius: var(--r-surface);
+  --admin-toolbar-radius: var(--r-surface);
+  --admin-control-radius: var(--r-control);
+  --admin-control-height: 38px;
+  --admin-focus-ring: 0 0 0 3px var(--c-accent-tint);
+
+  min-width: 0;
+  background-color: var(--c-canvas);
+  color: var(--c-text);
+  line-height: var(--lh-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Cards and panels: one surface step, the light-theme shadow, no borders. */
+:where(.app-shell, .control-center, .admin-theme) .card,
+:where(.app-shell, .control-center, .admin-theme) .panel-surface {
+  border: 0;
+  border-radius: var(--r-surface);
+  background-color: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-panel,
+:where(.app-shell, .control-center, .admin-theme) .admin-toolbar {
+  border: 0;
+  border-radius: var(--r-surface);
+  background-color: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-panel-header {
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+
+/* Status badges: one green, always with a word. */
+:where(.app-shell, .control-center, .admin-theme) .status-badge-live {
+  border-color: transparent;
+  background-color: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-content th {
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-content td {
+  color: var(--c-text-2);
+}
+
+/* Shared interaction states stay keyboard visible. Text entry overrides this in
+   styles/panel.css: text entry is marked by the caret and its accent rule,
+   never by a box. */
+:where(.app-shell, .control-center, .admin-theme) :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+:where(.app-shell, .control-center, .admin-theme) :where(a, button, input, select, textarea) {
+  transition-property: color, background-color, border-color, box-shadow, opacity;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+:where(.app-shell, .control-center, .admin-theme) :where(button, [role='button'], a) {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:where(.app-shell, .control-center, .admin-theme) :where(button, input, select, textarea) { font: inherit; }
+
+:where(.app-shell, .control-center, .admin-theme) :where(button, [role='button']):disabled,
+:where(.app-shell, .control-center, .admin-theme) :where(input, select, textarea):disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+/* Page frame */
+:where(.app-shell, .control-center, .admin-theme) .admin-page {
+  width: 100%;
+  max-width: var(--w-content);
+  margin-inline: auto;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-page-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  margin-bottom: 20px;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-page-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-stack { display: flex; flex-direction: column; gap: 16px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-cluster { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-grid { display: grid; gap: 16px; min-width: 0; }
+:where(.app-shell, .control-center, .admin-theme) .admin-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+:where(.app-shell, .control-center, .admin-theme) .admin-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+:where(.app-shell, .control-center, .admin-theme) .admin-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+:where(.app-shell, .control-center, .admin-theme) .admin-panel { min-width: 0; overflow: hidden; }
+:where(.app-shell, .control-center, .admin-theme) .admin-panel--inset { background-color: var(--c-inset); }
+:where(.app-shell, .control-center, .admin-theme) .admin-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 16px 20px;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-panel-body { padding: 20px; }
+
+:where(.app-shell, .control-center, .admin-theme) .admin-scroll-x {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--c-hairline-strong) transparent;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-scroll-x > table { min-width: 680px; }
+
+:where(.app-shell, .control-center, .admin-theme) .admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-form-grid > .admin-form-grid-full { grid-column: 1 / -1; }
+
+/* A field is a line under the value: no box, no fill, no radius — the same
+   treatment as `.field-input` in styles/panel.css. */
+:where(.app-shell, .control-center, .admin-theme) .admin-control {
+  min-height: var(--admin-control-height);
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-strong);
+  border-radius: 0;
+  padding-inline: 2px;
+  background-color: transparent;
+  color: var(--c-text);
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-control::placeholder { color: var(--c-text-muted); }
+:where(.app-shell, .control-center, .admin-theme) .admin-control:hover { border-bottom-color: var(--c-text-muted); }
+/* Focus is the caret plus the accent rule, never a frame (see the caret block
+   in styles/panel.css). */
+:where(.app-shell, .control-center, .admin-theme) .admin-control:focus {
+  outline: none;
+  border-bottom-color: var(--c-accent);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-button {
+  display: inline-flex;
+  min-height: var(--admin-control-height);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  padding: 8px 14px;
+  background-color: var(--c-raised);
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-button:hover:not(:disabled) {
+  background-color: var(--c-hover-strong);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-button--primary {
+  border-color: transparent;
+  background-color: var(--c-accent);
+  color: var(--c-ink-on-accent);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-button--primary:hover:not(:disabled) {
+  background-color: var(--c-accent-hover);
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-button--danger {
+  background-color: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+/* Structural loading blocks: no shimmer, no gradient. */
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton {
+  display: block;
+  border-radius: var(--r-tile);
+  background-color: var(--c-raised);
+  animation: admin-skeleton-pulse 1.4s ease-in-out infinite;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-line { width: 100%; height: 12px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-line--short { width: 36%; }
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-line--medium { width: 64%; }
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-heading { width: min(260px, 70%); height: 22px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-block { width: 100%; min-height: 96px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-skeleton-avatar { width: 36px; height: 36px; }
+
+@keyframes admin-skeleton-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+:where(.app-shell, .control-center, .admin-theme) .admin-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:where(.app-shell, .control-center, .admin-theme) .admin-desktop-only { display: block; }
+:where(.app-shell, .control-center, .admin-theme) .admin-mobile-only { display: none; }
+:where(.app-shell, .control-center, .admin-theme) :where(table, .tabular) { font-variant-numeric: tabular-nums; }
+:where(.app-shell, .control-center, .admin-theme) :where(h1, h2, h3) { text-wrap: balance; }
+
+@media (max-width: 1023px) {
+  :where(.app-shell, .control-center, .admin-theme) .admin-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 767px) {
+  :where(.app-shell, .control-center, .admin-theme) .admin-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 18px;
+  }
+  :where(.app-shell, .control-center, .admin-theme) .admin-page-header-actions { width: 100%; justify-content: flex-start; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-grid--2,
+  :where(.app-shell, .control-center, .admin-theme) .admin-grid--3,
+  :where(.app-shell, .control-center, .admin-theme) .admin-grid--4,
+  :where(.app-shell, .control-center, .admin-theme) .admin-form-grid { grid-template-columns: 1fr; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-grid { gap: 12px; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-panel-header,
+  :where(.app-shell, .control-center, .admin-theme) .admin-panel-body { padding-inline: 16px; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-desktop-only { display: none; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-mobile-only { display: block; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.app-shell, .control-center, .admin-theme) :where(a, button, input, select, textarea) { transition-duration: 1ms; }
+  :where(.app-shell, .control-center, .admin-theme) .admin-skeleton { animation: none; }
+}
+
+/* Dropdowns for operator navigation and compact filters. */
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown { position: relative; min-width: 0; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__trigger {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 7px 12px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+  color: var(--c-text);
+  text-align: left;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__trigger:hover,
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown.is-open .admin-dropdown__trigger {
+  border-color: var(--c-hairline-strong);
+  background: var(--c-raised);
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__trigger-copy { display: grid; min-width: 0; gap: 2px; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__label { color: var(--c-text-muted); font-size: var(--fs-11); font-weight: 500; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__value { display: inline-flex; min-width: 0; align-items: center; gap: 7px; overflow: hidden; color: var(--c-text); font-size: var(--fs-13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__chevron { color: var(--c-text-muted); transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown.is-open .admin-dropdown__chevron { color: var(--c-accent); transform: rotate(180deg); }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__menu {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 7px);
+  min-width: max(100%, 236px);
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: var(--c-panel-shadow);
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__menu--start { left: 0; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__menu--end { right: 0; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--c-text-2);
+  text-align: left;
+}
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option:hover,
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option.is-active { background: var(--c-nav-hover-bg); color: var(--c-text); }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option.is-selected { background: var(--c-accent-tint); color: var(--c-accent-quiet); }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option:disabled { cursor: not-allowed; opacity: .45; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option-icon { display: grid; width: 18px; min-width: 18px; place-items: center; color: var(--c-accent); }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option-copy { display: grid; min-width: 0; gap: 2px; flex: 1; font-size: var(--fs-13); font-weight: 500; }
+:where(.app-shell, .control-center, .admin-theme) .admin-dropdown__option-copy small { overflow: hidden; color: var(--c-text-muted); font-size: var(--fs-11); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 639px) {
+  :where(.app-shell, .control-center, .admin-theme) .admin-dropdown__menu { min-width: 100%; }
+}

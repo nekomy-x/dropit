@@ -1,85 +1,104 @@
-import { useCallback } from 'react';
-import { listGuests, type AdminGuest } from '../api/client';
+import { useCallback, useState } from 'react';
+import { listClubs, listGuests, type AdminGuest, type Club } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
+import ErrorState from '../components/ErrorState';
+import Loading from '../components/Loading';
+import StatusBadge from '../components/StatusBadge';
+import PageHeading from '../components/PageHeading';
+import Select from '../components/ui/Select';
+import { useLocale } from '../locale';
 
 /**
- * Guests — "backend not implemented yet": GET /v1/admin/guests has no
- * backend route yet, so the client method rejects locally with a 501
- * stub and the page renders a waiting-for-backend empty state.
+ * Guest devices are scoped to a club by the backend contract.
  */
 export default function GuestsPage() {
-  const fetchGuests = useCallback(() => listGuests(), []);
-  const { data, loading, error } = useAsyncData<{ items: AdminGuest[] }>(
-    fetchGuests,
-  );
+  const { t, locale } = useLocale();
+  const [clubId, setClubId] = useState('');
+  const fetchClubs = useCallback(() => listClubs(), []);
+  const clubs = useAsyncData<{ items: Club[] }>(fetchClubs);
+  const fetchGuests = useCallback(() => clubId ? listGuests(clubId) : Promise.resolve({ items: [] }), [clubId]);
+  const { data, loading, error, reload } = useAsyncData<{ items: AdminGuest[] }>(fetchGuests);
 
   return (
     <div>
-      <h1 className="page-title">Guests</h1>
-      <p className="page-subtitle">
-        Guest devices (no registration — device tokens only). Blocking a
-        device ships with the anti-fraud phase (F8).
-      </p>
+      <PageHeading
+        title={t('guests.title')}
+      />
 
-      <div className="mt-6">
-        {loading ? (
-          <p className="text-sm text-neutral-400">Loading guests…</p>
-        ) : null}
-
-        {error ? (
-          error.notImplemented ? (
-            <p
-              className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
-              role="status"
-            >
-              Guest registry is waiting for the backend —{' '}
-              <code>GET /v1/admin/guests</code> is not implemented yet.
-            </p>
-          ) : (
-            <p className="text-sm text-red-300" role="alert">
-              {error.message}
-              {error.code ? ` (${error.code})` : ''}
-            </p>
-          )
-        ) : null}
-
-        {data && data.items.length > 0 ? (
-          <div className="card overflow-x-auto p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="py-3 px-6 font-medium">Device</th>
-                  <th className="py-3 px-4 font-medium">Platform</th>
-                  <th className="py-3 px-4 font-medium">App version</th>
-                  <th className="py-3 px-4 font-medium">First seen</th>
-                  <th className="py-3 px-6 font-medium">Last seen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((guest) => (
-                  <tr key={guest.id} className="border-b border-neutral-800/60">
-                    <td className="py-3 px-6 font-mono text-xs text-neutral-400">
-                      {guest.id}
-                    </td>
-                    <td className="py-3 px-4 text-neutral-400">
-                      {guest.platform}
-                    </td>
-                    <td className="py-3 px-4 text-neutral-400">
-                      {guest.appVersion}
-                    </td>
-                    <td className="py-3 px-4 text-neutral-400">
-                      {new Date(guest.firstSeen).toLocaleString()}
-                    </td>
-                    <td className="py-3 px-6 text-neutral-400">
-                      {new Date(guest.lastSeen).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <section className="panel-card" aria-label={t('guests.cardLabel')}>
+        <header className="panel-card-head">
+          <div>
+            <h2 className="panel-card-title">{t('guests.cardTitle')}</h2>
+            <p className="panel-card-sub">{t('guests.cardSubtitle')}</p>
           </div>
-        ) : null}
-      </div>
+        </header>
+
+        <div style={{ maxWidth: 420 }}>
+          <Select
+            id="guest-club"
+            label={t('guests.clubLabel')}
+            value={clubId}
+            onChange={setClubId}
+            placeholder={clubs.loading ? t('guests.loadingClubs') : t('guests.selectClub')}
+            options={[
+              { value: '', label: t('guests.allClubs') },
+              ...(clubs.data?.items ?? []).map((club) => ({ value: club.id, label: club.name })),
+            ]}
+          />
+          {clubs.loading ? <p className="field-hint" style={{ marginTop: 6 }}>{t('guests.loadingClubList')}</p> : null}
+        </div>
+
+        {clubs.error ? <div style={{ marginTop: 16 }}><ErrorState message={clubs.error.message} code={clubs.error.code} onRetry={clubs.reload} /></div> : null}
+
+        <div style={{ marginTop: 16 }}>
+          {!clubId && !clubs.loading && !clubs.error ? (
+            <div className="panel-empty">
+              <strong>{t('guests.noClubTitle')}</strong>
+              <span>{t('guests.noClubBody')}</span>
+            </div>
+          ) : null}
+
+          {loading && clubId ? <Loading label={t('guests.loadingDevices')} /> : null}
+          {error && clubId ? <ErrorState message={error.message} code={error.code} onRetry={reload} /> : null}
+
+          {data && clubId && data.items.length > 0 ? (
+            <div className="table-wrap">
+              <table className="data-table" style={{ minWidth: 820 }}>
+                <thead>
+                  <tr>
+                    <th scope="col">{t('guests.colDevice')}</th>
+                    <th scope="col">{t('guests.colGuest')}</th>
+                    <th scope="col" className="is-num">{t('guests.colRequests')}</th>
+                    <th scope="col">{t('guests.colFirstSeen')}</th>
+                    <th scope="col">{t('guests.colLastSeen')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((guest) => (
+                    <tr key={guest.id}>
+                      <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{guest.id}</td>
+                      <td>{guest.displayName || guest.email || t('guests.guestFallback')}</td>
+                      <td className="is-num">{guest.requestsCount}</td>
+                      <td>{new Date(guest.createdAt).toLocaleString(locale)}</td>
+                      <td>
+                        {new Date(guest.lastSeenAt).toLocaleString(locale)}
+                        {guest.banned ? <span style={{ marginLeft: 8 }}><StatusBadge status="blocked" /></span> : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {data && clubId && data.items.length === 0 && !loading ? (
+            <div className="panel-empty" role="status">
+              <strong>{t('guests.emptyTitle')}</strong>
+              <span>{t('guests.emptyBody')}</span>
+            </div>
+          ) : null}
+        </div>
+      </section>
     </div>
   );
 }

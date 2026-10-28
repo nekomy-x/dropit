@@ -1,0 +1,87 @@
+/* Admin shell — the small set of chrome rules the shell markup needs.
+ *
+ * The shell itself is `.panel-shell` from styles/panel.css (shared with the
+ * club and DJ panels). This file only holds the admin wordmark, because the
+ * admin rail shows a role suffix next to the product name.
+ */
+
+.admin-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--c-text); }
+.admin-brand > span:first-child { color: var(--c-accent); }
+.admin-brand-word { font-size: var(--fs-15); font-weight: 650; letter-spacing: -.01em; }
+.admin-brand-role {
+  margin-left: 2px;
+  padding-left: 8px;
+  border-left: 1px solid var(--c-hairline);
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+.admin-status-chip { flex: 0 0 auto; }
+
+/* The command palette chrome is shared with the club panel but defined in its
+   own stylesheet; the admin app needs the same rules locally. */
+.command-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 96px 16px 24px;
+  background: var(--c-scrim);
+}
+.command-dialog {
+  width: min(560px, 100%);
+  overflow: hidden;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  box-shadow: 0 24px 64px -24px rgba(3, 5, 9, .45);
+}
+.command-search-row {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--c-hairline-row);
+  color: var(--c-text-2);
+}
+.command-search-row input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+}
+.command-search-row input::placeholder { color: var(--c-text-muted); }
+.command-search-row kbd,
+.panel-search kbd { font-family: var(--font-mono); }
+.command-results { max-height: min(420px, 60vh); overflow: auto; padding: 8px; }
+.command-result {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  gap: 11px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: transparent;
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: var(--fs-13);
+  text-align: left;
+}
+.command-result:hover,
+.command-result:focus-visible { background: var(--c-raised); outline: none; }
+.command-result:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.command-result-group { margin-left: auto; color: var(--c-text-muted); font-size: var(--fs-11); }
+.command-empty { padding: 20px 10px; color: var(--c-text-muted); font-size: var(--fs-12); }
+
+@media (max-width: 640px) {
+  .command-backdrop { padding-top: 64px; }
+}

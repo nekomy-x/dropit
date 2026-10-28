@@ -1,0 +1,541 @@
+/* Admin pages — the page-level layer on top of the shared panel kit.
+ *
+ * `styles/panel.css` owns the shell, cards, chips, buttons, fields, tables and
+ * the empty/error/loading states; `styles/panel-tokens.css` owns every colour,
+ * radius, size and duration. This file only holds the compositions that are
+ * specific to the admin pages: the record form, the power-table toolbar, the
+ * feature-flag switch, the entity drawer, the command palette and the dialog.
+ *
+ * Rules:
+ *   - every value is a token (`var(--c-*)`, `var(--fs-*)`, `var(--r-*)`,
+ *     `var(--dur-*)`) — no raw colour, radius or size;
+ *   - no gradients, no glow, no shadow beyond `--c-panel-shadow`;
+ *   - no card inside a card: nested grouping is expressed with hairlines.
+ */
+
+/* ---------------------------------------------------------------------------
+   Page furniture
+   ------------------------------------------------------------------------ */
+
+/* One context line above the page title (same position as the club board's
+ * workspace identity). It names the section, it does not repeat the title. */
+.admin-eyebrow {
+  margin: 0 0 6px;
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+/* The honesty line under a page head: record counts, preview scope, simulated
+ * data. It carries provenance, never a metric of its own. */
+.admin-page-note {
+  max-width: 92ch;
+  margin: 0 0 16px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+.admin-page-note strong { color: var(--c-text-2); font-weight: 600; }
+
+.admin-table-hint {
+  margin: 12px 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* Confirmation of a local write. One per page, never a stack. */
+.admin-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  border-radius: var(--r-tile);
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+/* Inline code: storage keys and endpoint names inside an explanatory note. */
+.admin-code {
+  padding: 1px 5px;
+  border-radius: var(--r-control);
+  background: var(--c-inset);
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+/* Field group used by the create and settings forms. */
+.admin-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.admin-field > span {
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+.admin-field > small {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Feature-flag switch
+   ------------------------------------------------------------------------ */
+
+.admin-flag-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-flag-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+.admin-flag-list li:first-child { padding-top: 0; }
+.admin-flag-list li:last-child { padding-bottom: 0; border-bottom: 0; }
+
+.admin-flag-list strong {
+  display: block;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+.admin-flag-list small {
+  display: block;
+  max-width: 58ch;
+  margin-top: 2px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+.admin-toggle {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--c-hairline-strong);
+  border-radius: var(--r-chip);
+  background: var(--c-inset);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.admin-toggle span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-chip);
+  background: var(--c-text-muted);
+  transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.admin-toggle.is-on {
+  border-color: var(--c-accent);
+  background: var(--c-accent-tint);
+}
+.admin-toggle.is-on span {
+  background: var(--c-accent);
+  transform: translateX(18px);
+}
+
+/* ---------------------------------------------------------------------------
+   Power table (components/admin-table/PowerTable.tsx)
+   ------------------------------------------------------------------------ */
+
+.power-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+
+.power-table-scroll {
+  margin-top: 4px;
+  scrollbar-width: thin;
+}
+
+/* Toolbar filters and the inline row editor are the shared Select. Inside a
+ * table cell it has to hold a readable width next to Save/Cancel, otherwise
+ * the trigger collapses to the chevron. */
+.field-select.power-table-status { flex: 0 0 auto; min-width: 168px; }
+
+/* Inline row editor. The status column is ~118px wide, so the field and the
+ * Save/Cancel pair stack instead of overflowing into the next column: the
+ * select takes the full cell width, the buttons sit under it on one line. */
+.power-table-editor {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.power-table-editor .field-select { flex: 1 1 100%; min-width: 0; }
+.power-table-editor .field-select__trigger { height: 30px; }
+/* Touch widths keep the 44px target even in the dense row editor. */
+@media (max-width: 640px) {
+  .power-table-editor .field-select__trigger { height: auto; min-height: var(--hit-mobile); }
+}
+.power-table-editor .field-input { height: 30px; flex: 1 1 100%; min-width: 0; }
+/* The editor needs two lines in a narrow column, so its row grows while it is
+ * open instead of spilling Save/Cancel into the next cell. */
+.power-table tbody tr.is-editing { height: auto !important; }
+.power-table tbody tr.is-editing td { padding-block: 10px; vertical-align: top; }
+
+/* A sticky head needs its own surface, otherwise the rows scroll visibly
+ * behind the column labels. */
+.power-table-head { background: var(--c-surface); }
+.power-table-head.is-sticky { position: sticky; top: 0; z-index: 1; }
+.power-table-head th {
+  padding-top: 10px;
+  padding-bottom: 10px;
+  background: var(--c-surface);
+}
+
+.power-table-scroll tbody tr.is-selected td,
+.power-table-scroll tbody tr.is-selected:hover td { background: var(--c-accent-tint); }
+.power-table-scroll tbody tr:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+
+/* Inline edit trigger: a row-level affordance, not a column of repeated links.
+ * It stays in the DOM (screen readers and Tab order still reach it) but only
+ * paints when the row is hovered or something inside it has focus. */
+.power-table-edit {
+  height: 26px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-11);
+  opacity: 0;
+}
+.power-table-scroll tr:hover .power-table-edit,
+.power-table-scroll tr:focus-within .power-table-edit,
+.power-table-edit:focus-visible { opacity: 1; }
+
+.power-table-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--c-hairline);
+}
+
+/* ---------------------------------------------------------------------------
+   Dialog (components/AdminDialog.tsx) — native <dialog>, one surface step
+   ------------------------------------------------------------------------ */
+
+.admin-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(80vh, 720px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--c-panel-shadow);
+}
+.admin-dialog-wide { width: min(820px, calc(100vw - 32px)); }
+.admin-dialog::backdrop { background: var(--c-scrim); }
+
+.admin-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+.admin-dialog > header h2 {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.admin-dialog > .admin-dialog-body { padding: 20px; }
+
+/* ---------------------------------------------------------------------------
+   Entity drawer (components/admin-console/EntityDetailDrawer.tsx)
+   ------------------------------------------------------------------------ */
+
+.admin-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: var(--c-scrim);
+}
+
+.admin-drawer {
+  display: flex;
+  width: min(440px, 100%);
+  flex-direction: column;
+  border-left: 1px solid var(--c-hairline);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--c-panel-shadow);
+}
+
+.admin-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--c-hairline);
+}
+
+.admin-drawer-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+.admin-drawer-foot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--c-hairline);
+}
+
+/* Label/value pairs: one hairline per row, no boxes around them. */
+.admin-meta { display: grid; margin: 16px 0 0; padding: 0; }
+.admin-meta > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+.admin-meta > div:last-child { border-bottom: 0; }
+.admin-meta dt { color: var(--c-text-muted-sm); font-size: var(--fs-11); }
+.admin-meta dd { margin: 0; color: var(--c-text); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.admin-meta dd.is-mono { color: var(--c-text-2); font-family: var(--font-mono); font-size: var(--fs-12); }
+
+/* ---------------------------------------------------------------------------
+   Command palette (components/admin-console/QuickActionConsole.tsx)
+   ------------------------------------------------------------------------ */
+
+.admin-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+  background: var(--c-scrim);
+}
+
+.admin-palette {
+  width: 100%;
+  max-width: 560px;
+  overflow: hidden;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-surface);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--c-panel-shadow);
+}
+
+.admin-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--c-hairline);
+  color: var(--c-text-muted);
+}
+.admin-palette-search input {
+  height: 52px;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--fs-13);
+  outline: none;
+}
+.admin-palette-search input::placeholder { color: var(--c-text-muted); }
+.admin-palette-search kbd {
+  padding: 2px 6px;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.admin-palette-list {
+  max-height: 55vh;
+  margin: 0;
+  overflow-y: auto;
+  padding: 6px;
+  list-style: none;
+}
+.admin-palette-option {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+.admin-palette-option.is-active { background: var(--c-nav-hover-bg); }
+.admin-palette-option small {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+.admin-palette-empty {
+  padding: 24px 12px;
+  color: var(--c-text-muted);
+  font-size: var(--fs-13);
+  text-align: center;
+}
+.admin-palette-foot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--c-hairline);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* ---------------------------------------------------------------------------
+   Audit stream (components/admin-console/AuditLogStream.tsx)
+   ------------------------------------------------------------------------ */
+
+.admin-audit-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .85fr);
+}
+
+.admin-audit-list { margin: 0; padding: 0; list-style: none; }
+
+.admin-audit-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  text-align: left;
+  cursor: pointer;
+}
+.admin-audit-row:hover { background: var(--c-nav-hover-bg); }
+.admin-audit-row[aria-pressed='true'] { background: var(--c-accent-tint); color: var(--c-text); }
+.admin-audit-time { color: var(--c-text-muted-sm); font-family: var(--font-mono); font-size: var(--fs-11); }
+.admin-audit-action { color: var(--c-text); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.admin-audit-target {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-json {
+  max-height: 288px;
+  margin: 10px 0 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--c-hairline);
+  border-radius: var(--r-tile);
+  background: var(--c-inset);
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------------------
+   Permission matrix (components/admin-console/RolePermissionMatrix.tsx)
+   ------------------------------------------------------------------------ */
+
+.admin-matrix-scroll { margin-top: 4px; scrollbar-width: thin; }
+.admin-matrix-scroll input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: var(--c-accent);
+}
+.admin-matrix-meaning {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 1023px) {
+  .admin-audit-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .admin-drawer { width: 100%; }
+  .admin-drawer-foot { grid-template-columns: minmax(0, 1fr); }
+  .admin-page-note { font-size: var(--fs-11); }
+  /* The switch keeps its 44px-tall hit area on touch without growing the visual
+   * track: the track is centred inside a transparent, full-height button. */
+  .admin-toggle {
+    width: var(--hit-mobile);
+    height: var(--hit-mobile);
+    border-color: transparent;
+    background: transparent;
+  }
+  .admin-toggle::after {
+    position: absolute;
+    inset: 9px 0;
+    border: 1px solid var(--c-hairline-strong);
+    border-radius: var(--r-chip);
+    background: var(--c-inset);
+    content: '';
+    transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  }
+  .admin-toggle span { top: 12px; left: 3px; }
+  .admin-toggle.is-on { border-color: transparent; background: transparent; }
+  .admin-toggle.is-on::after { border-color: var(--c-accent); background: var(--c-accent-tint); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-toggle,
+  .admin-toggle span { transition-duration: 1ms; }
+}

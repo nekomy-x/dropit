@@ -1,0 +1,188 @@
+/* ============================================================================
+   DROP IT — deployment status strip
+   ----------------------------------------------------------------------------
+   Canonical copy: edit `packages/ui/status-bar.css`, then run
+       node scripts/sync-ui-tokens.mjs
+   which writes identical copies to
+       apps/web-club/src/styles/status-bar.css
+       apps/web-admin/src/styles/status-bar.css
+
+   One strip, three states
+   -----------------------
+   `test` and `maintenance` are a fixed band on the bottom edge of the viewport,
+   above every panel surface; `normal` renders nothing at all. The band is a
+   state report, not decoration: it carries words, not only colour, and it is
+   never dismissible. It is also the product's only deployment indicator — there
+   is no corner pill, badge or inline footnote reporting the same environment
+   elsewhere.
+
+   Chrome, not a tone wash
+   -----------------------
+   Two earlier attempts were both wrong for the same reason: they invented a
+   register the product does not have.
+
+   1. A full-bleed saturated fill (`--c-warn` / `--c-error` at 100%) made the
+      banner the loudest object on every screen and outranked the live session
+      state it sits under.
+   2. A 10% tone mixed into `--c-surface` fixed the volume but produced a muddy
+      brown band in dark theme (`color-mix` of amber into near-black) that read
+      as a smudge along the bottom edge rather than as part of the shell.
+
+   The band is persistent chrome — the same job as the rail and the mobile
+   navigation — so it now uses the same surface they do: `--c-rail` with a
+   single top hairline. That is the product's one language for "this belongs to
+   the frame, always". The tone does not tint the band at all; it lives in the
+   state chip.
+
+   The state is a chip
+   -------------------
+   The product has exactly one status primitive: `.chip` — 22px, `--r-chip`,
+   tint background, no border, the word always visible. The band reuses
+   `chip-warn` / `chip-error` instead of colouring its own text, so "a state is
+   being reported here" looks identical to a DJ status, a session state and a
+   failed payout. The facts stay on the secondary text ramp, unadorned.
+
+   There is no leading dot. The chip's word already names the mode, so a 5px
+   `currentColor` disc beside it encoded nothing.
+
+   The React component (`DeploymentStatus.tsx`) writes
+   `<html data-deployment-bar="test|maintenance">`. Every offset below keys off
+   that attribute, so content and the mobile navigation move up by exactly the
+   strip height while it is visible, and return when it is not.
+   ========================================================================== */
+
+:root {
+  --deployment-bar-h: 34px;
+}
+
+.deployment-bar {
+  position: fixed;
+  /* Above every layer the panels own: select menus 90, command palette
+     backdrop 80, dialogs 60. The environment fact is never occluded — a modal
+     does not get to hide which installation the user is working in. */
+  z-index: 100;
+  inset-inline: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: calc(var(--deployment-bar-h) + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  padding: 0 16px env(safe-area-inset-bottom);
+  border-top: 1px solid var(--c-hairline);
+  background: var(--c-rail);
+  color: var(--c-text-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-11);
+  line-height: 1;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The state word is a chip, not tinted body text. Both modes use the chip
+   primitive unchanged, so the only difference between them is which tone it
+   carries — the same way a DJ row and a payout row differ. */
+.deployment-bar-chip {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+/* A rule, not a dot: it separates the state from its facts and is the only
+   thing between them, so the row reads as one sentence rather than two blocks. */
+.deployment-bar-rule {
+  width: 1px;
+  height: 12px;
+  flex: 0 0 auto;
+  background: var(--c-hairline-strong);
+}
+
+.deployment-bar-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  color: var(--c-text-muted);
+}
+
+/* One line on wide screens: the facts stay inline and the separator is the
+   character between them, exactly as it reads. */
+.deployment-bar-fact + .deployment-bar-fact::before {
+  content: ' · ';
+  opacity: .75;
+}
+
+/* The whole sentence stays on screen at every width. On a phone the strip is
+   allowed to take two lines rather than dropping the detail into the accessible
+   tree only: the point of the band is that the mode and its facts are read, not
+   guessed from colour. The band grows to fit the sentence and the reserved
+   offset (`--deployment-bar-h`) grows with it, so no shell row hides under it. */
+@media (max-width: 639px) {
+  /* Two lines of copy plus padding: the reserved offset every shell reads has
+     to grow with the band, or the last row of content sits under it. The
+     measured height in `--deployment-bar-pad` corrects this if it is off. */
+  :root { --deployment-bar-h: 44px; }
+  .deployment-bar {
+    height: auto;
+    min-height: calc(var(--deployment-bar-h) + env(safe-area-inset-bottom));
+    align-items: flex-start;
+    gap: 8px;
+    padding-block: 9px env(safe-area-inset-bottom);
+    line-height: 1.35;
+    white-space: normal;
+  }
+  /* The chip takes the first line, the facts take the second one: the state is
+     read as a headline and the facts as its caption, so neither fights the
+     other for the width of a phone. */
+  .deployment-bar { flex-wrap: wrap; row-gap: 4px; }
+  .deployment-bar-rule { display: none; }
+  .deployment-bar-detail { flex: 1 0 100%; min-width: 0; }
+  /* Facts wrap as whole phrases: "mock payments" never breaks after "mock". */
+  .deployment-bar-detail { display: flex; flex-wrap: wrap; column-gap: 6px; row-gap: 2px; }
+  .deployment-bar-fact + .deployment-bar-fact::before {
+    content: '·';
+    margin-right: 6px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Offsets — content clears the strip
+   ------------------------------------------------------------------------ */
+html[data-deployment-bar] .panel-content {
+  padding-bottom: calc(24px + max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 1023px) {
+  /* No bottom bar to clear any more, so the only thing the content owes the
+     strip is its own height — the drawer is a full-height sheet and takes its
+     clearance from the body padding below. */
+  html[data-deployment-bar] .panel-content {
+    padding-bottom: calc(20px + max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+  }
+}
+
+/* The rail is a full-height column with the account control in its foot, so it
+   needs the same clearance as the page content. */
+html[data-deployment-bar] .panel-rail {
+  padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}
+
+/* The navigation drawer is a full-height sheet anchored to the bottom edge, so
+   it would otherwise run under the strip. Its list gets the strip's height back
+   as bottom padding instead of being pushed up: a sheet that stops 34px short
+   of the edge reads as a floating panel, not as a drawer. */
+html[data-deployment-bar] .panel-nav-sheet-body {
+  padding-bottom: calc(18px + max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}
+
+html[data-deployment-bar] .auth-screen {
+  padding-bottom: calc(32px + max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}
+
+html[data-deployment-bar] .auth-wizard {
+  padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}
+
+html[data-deployment-bar] .connect-root {
+  padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
+}

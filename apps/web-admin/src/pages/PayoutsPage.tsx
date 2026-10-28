@@ -10,18 +10,10 @@ import {
 import { useAsyncData } from '../hooks/useAsyncData';
 import ErrorState from '../components/ErrorState';
 import Loading from '../components/Loading';
-
-const STATUS_BADGE: Record<string, string> = {
-  scheduled: 'bg-blue-900/40 text-blue-300',
-  in_flight: 'bg-amber-900/40 text-amber-300',
-  paid: 'bg-green-900/40 text-green-300',
-  failed: 'bg-red-900/40 text-red-300',
-  on_hold: 'bg-neutral-800 text-neutral-300',
-};
-
-function badgeClass(status: string): string {
-  return STATUS_BADGE[status] ?? 'bg-neutral-800 text-neutral-300';
-}
+import StatusBadge from '../components/StatusBadge';
+import PageHeading from '../components/PageHeading';
+import Icon from '../components/Icon';
+import { useLocale } from '../locale';
 
 /**
  * Payouts page — a LIVE admin function (F6):
@@ -30,6 +22,9 @@ function badgeClass(status: string): string {
  *   POST /v1/admin/reconciliation/run — manual reconciliation trigger
  */
 export default function PayoutsPage() {
+  const { t, locale } = useLocale();
+  const money = (minor: number) => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(minor / 100);
+  const count = (value: number) => new Intl.NumberFormat(locale).format(value);
   const fetchPayouts = useCallback(() => listPayouts(), []);
   const { data, loading, error, reload } = useAsyncData(fetchPayouts);
 
@@ -49,7 +44,7 @@ export default function PayoutsPage() {
       reload();
     } catch (err) {
       setActionError(
-        err instanceof ApiRequestError ? err.message : 'Payout cycle failed',
+        err instanceof ApiRequestError ? err.message : t('payouts.cycleFailed'),
       );
     } finally {
       setRunning(false);
@@ -66,7 +61,7 @@ export default function PayoutsPage() {
       setReconResult(result);
     } catch (err) {
       setActionError(
-        err instanceof ApiRequestError ? err.message : 'Reconciliation failed',
+        err instanceof ApiRequestError ? err.message : t('payouts.reconciliationFailed'),
       );
     } finally {
       setRunning(false);
@@ -75,128 +70,91 @@ export default function PayoutsPage() {
 
   return (
     <div>
-      <h1 className="page-title">Payouts</h1>
-      <p className="page-subtitle">
-        Weekly payout cycle (prod: cron Mon 10:00 UTC): net per payee,
-        10.00 EUR minimum threshold, final payouts without threshold on
-        block/leave. Transfers are mock-provider (Test Mode) until ADR-004.
-      </p>
+      <PageHeading
+        title={t('payouts.title')}
+        action={(
+          <>
+            <button type="button" className="btn btn-primary" onClick={onRunCycle} disabled={running}>
+              <Icon name="lucide:arrow-down-to-line" size={15} />
+              {running ? t('payouts.running') : t('payouts.runCycle')}
+            </button>
+            <button type="button" className="btn btn-secondary" onClick={onRunReconciliation} disabled={running}>
+              <Icon name="lucide:scan-search" size={15} />
+              {running ? t('payouts.running') : t('payouts.runReconciliation')}
+            </button>
+          </>
+        )}
+      />
 
-      <div className="mt-6 flex flex-wrap gap-3">
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={onRunCycle}
-          disabled={running}
-        >
-          {running ? 'Running…' : 'Run payout cycle'}
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={onRunReconciliation}
-          disabled={running}
-        >
-          {running ? 'Running…' : 'Run reconciliation'}
-        </button>
-      </div>
+      <p className="admin-page-note">{t('payouts.note')}</p>
 
       {runResult ? (
-        <p
-          className="mt-4 rounded-lg border border-green-900/60 bg-green-950/30 px-4 py-3 text-sm text-green-200"
-          role="status"
-        >
-          Payout cycle complete — {runResult.payouts_created} payout(s) created,
-          total {(runResult.total_minor / 100).toFixed(2)} EUR.
+        <p className="admin-toast" role="status">
+          {t('payouts.cycleComplete', { count: count(runResult.payouts_created), amount: money(runResult.total_minor) })}
         </p>
       ) : null}
 
       {reconResult ? (
-        <p
-          className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900/60 px-4 py-3 text-sm text-neutral-300"
-          role="status"
-        >
-          Reconciliation run{' '}
-          <span className="font-mono text-xs">{reconResult.run_id}</span> —
-          status <span className="font-semibold">{reconResult.status}</span>.
+        <p className="admin-toast" role="status">
+          {t('payouts.reconciliationRun', { id: reconResult.run_id, status: reconResult.status })}
         </p>
       ) : null}
 
-      {actionError ? (
-        <p className="mt-4 text-sm text-red-300" role="alert">
-          {actionError}
-        </p>
-      ) : null}
+      {actionError ? <p className="panel-error" role="alert" style={{ marginTop: 16 }}>{actionError}</p> : null}
 
-      <div className="mt-6">
-        {loading ? <Loading label="Loading payouts…" /> : null}
-        {error ? (
-          <ErrorState
-            message={error.message}
-            code={error.code}
-            onRetry={reload}
-          />
-        ) : null}
-        {data ? (
-          data.items.length === 0 ? (
-            <p className="text-sm text-neutral-400">
-              No payouts in the last week. Run the cycle to settle pending
-              balances above the threshold.
-            </p>
-          ) : (
-            <div className="card overflow-x-auto p-0">
-              <table className="w-full text-sm">
+      {error ? <ErrorState message={error.message} code={error.code} onRetry={reload} /> : null}
+      {loading && !data ? <Loading label={t('payouts.loading')} /> : null}
+
+      {data ? (
+        data.items.length === 0 ? (
+          <div className="panel-empty" role="status">
+            <strong>{t('payouts.emptyTitle')}</strong>
+            <span>{t('payouts.emptyBody')}</span>
+          </div>
+        ) : (
+          <section className="panel-card" aria-label={t('payouts.cardLabel')}>
+            <header className="panel-card-head">
+              <div>
+                <h2 className="panel-card-title">{t('payouts.lastSevenDays')}</h2>
+                <p className="panel-card-sub">{t('payouts.cardSubtitle')}</p>
+              </div>
+              <div className="panel-card-tools">
+                <span className="chip chip-neutral">{t('payouts.count', { count: count(data.items.length) })}</span>
+              </div>
+            </header>
+
+            <div className="table-wrap">
+              <table className="data-table" style={{ minWidth: 760 }}>
                 <thead>
-                  <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                    <th className="py-3 px-6 font-medium">Payout</th>
-                    <th className="py-3 px-4 font-medium">Payee</th>
-                    <th className="py-3 px-4 font-medium">Amount</th>
-                    <th className="py-3 px-4 font-medium">Status</th>
-                    <th className="py-3 px-4 font-medium">Attempts</th>
-                    <th className="py-3 px-6 font-medium">Final</th>
+                  <tr>
+                    <th scope="col">{t('payouts.colPayout')}</th>
+                    <th scope="col">{t('payouts.colPayee')}</th>
+                    <th scope="col" className="is-num">{t('payouts.colAmount')}</th>
+                    <th scope="col">{t('payouts.colStatus')}</th>
+                    <th scope="col" className="is-num">{t('payouts.colAttempts')}</th>
+                    <th scope="col">{t('payouts.colFinal')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map((payout) => (
-                    <tr
-                      key={payout.id}
-                      className="border-b border-neutral-800/60"
-                    >
-                      <td className="py-3 px-6 font-mono text-xs text-neutral-400">
-                        {payout.id}
+                    <tr key={payout.id}>
+                      <td className="is-mono is-muted">{payout.id}</td>
+                      <td>
+                        <span className="chip chip-neutral">{payout.payee_type}</span>
+                        <span className="is-mono" style={{ marginLeft: 8, color: 'var(--c-text-muted-sm)' }}>{payout.payee_id.slice(0, 8)}</span>
                       </td>
-                      <td className="py-3 px-4">
-                        <span className="rounded-full bg-neutral-800 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-neutral-300">
-                          {payout.payee_type}
-                        </span>
-                        <span className="ml-2 font-mono text-xs text-neutral-500">
-                          {payout.payee_id.slice(0, 8)}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 font-medium text-neutral-100">
-                        {(payout.amount_minor / 100).toFixed(2)} EUR
-                      </td>
-                      <td className="py-3 px-4">
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider ${badgeClass(payout.status)}`}
-                        >
-                          {payout.status}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-neutral-400">
-                        {payout.attempts}
-                      </td>
-                      <td className="py-3 px-6 text-neutral-400">
-                        {payout.is_final ? 'yes' : 'no'}
-                      </td>
+                      <td className="is-num is-strong">{money(payout.amount_minor)}</td>
+                      <td><StatusBadge status={payout.status} /></td>
+                      <td className="is-num">{payout.attempts}</td>
+                      <td>{payout.is_final ? t('payouts.yes') : t('payouts.no')}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )
-        ) : null}
-      </div>
+          </section>
+        )
+      ) : null}
     </div>
   );
 }

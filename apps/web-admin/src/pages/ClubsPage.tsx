@@ -10,46 +10,55 @@ import {
   type ClubStatus,
 } from '../api/client';
 import { useAsyncData } from '../hooks/useAsyncData';
+import ErrorState from '../components/ErrorState';
+import Loading from '../components/Loading';
+import StatusBadge from '../components/StatusBadge';
+import PageHeading from '../components/PageHeading';
+import Icon from '../components/Icon';
+import { useLocale } from '../locale';
+import { STATUS_MESSAGE_KEY } from '../messages/status';
 
-const STATUS_ACTIONS: ReadonlyArray<{ to: ClubStatus; label: string }> = [
-  { to: 'active', label: 'Activate' },
-  { to: 'suspended', label: 'Suspend' },
-  { to: 'blocked', label: 'Block' },
+const STATUS_ACTIONS: ReadonlyArray<{ to: ClubStatus; labelKey: string }> = [
+  { to: 'active', labelKey: 'clubs.activate' },
+  { to: 'suspended', labelKey: 'clubs.suspend' },
+  { to: 'blocked', labelKey: 'clubs.block' },
 ];
 
-/**
- * Clubs management — "backend not implemented yet": CRUD /v1/admin/clubs
- * has no backend routes yet, so the client methods reject locally with a
- * 501 stub and the page renders a waiting-for-backend empty state.
- */
 export default function ClubsPage() {
+  const { t, locale } = useLocale();
+  const count = (value: number) => new Intl.NumberFormat(locale).format(value);
   const fetchClubs = useCallback(() => listClubs(), []);
-  const { data, loading, error } = useAsyncData<{ items: Club[] }>(fetchClubs);
+  const { data, loading, error, reload } = useAsyncData<{ items: Club[] }>(fetchClubs);
 
   const [form, setForm] = useState<ClubCreateInput>({
     name: '',
-    slug: '',
-    email: '',
+    city: '',
+    timezone: 'Europe/Madrid',
     address: '',
-    country: '',
-    phone: '',
   });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [updatingClubId, setUpdatingClubId] = useState<string | null>(null);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const onCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await createClub(form);
-      setForm({ name: '', slug: '', email: '', address: '', country: '', phone: '' });
+      const created = await createClub(form);
+      setCreatedToken(created.qrMasterToken);
+      setCopied(false);
+      setForm({ name: '', city: '', timezone: 'Europe/Madrid', address: '' });
+      reload();
     } catch (err) {
       setSubmitError(
         err instanceof ApiRequestError || err instanceof NotImplementedStubError
           ? err.message
-          : 'Could not create club',
+          : t('clubs.createFailed'),
       );
     } finally {
       setSubmitting(false);
@@ -58,204 +67,208 @@ export default function ClubsPage() {
 
   const onStatus = async (club: Club, status: ClubStatus) => {
     setActionError(null);
+    setActionMessage(null);
+    setUpdatingClubId(club.id);
     try {
       await patchClub(club.id, { status });
+      setActionMessage(t('clubs.statusUpdated', { name: club.name, status: t(STATUS_MESSAGE_KEY[status] ?? 'status.unknown') }));
+      reload();
     } catch (err) {
       setActionError(
         err instanceof ApiRequestError || err instanceof NotImplementedStubError
           ? err.message
-          : 'Status change failed',
+          : t('clubs.statusFailed'),
       );
+    } finally {
+      setUpdatingClubId(null);
+    }
+  };
+
+  const copyToken = async () => {
+    if (!createdToken || !navigator.clipboard) {
+      setActionError(t('clubs.clipboardUnavailable'));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(createdToken);
+      setCopied(true);
+    } catch {
+      setActionError(t('clubs.copyFailed'));
     }
   };
 
   const formIncomplete =
-    form.name === '' || form.slug === '' || form.email === '';
+    form.name === '' || form.city === '' || form.timezone === '';
 
   return (
     <div>
-      <h1 className="page-title">Clubs</h1>
-      <p className="page-subtitle">
-        Verify, suspend or block clubs. Blocking stops new guest requests
-        immediately.
-      </p>
+      <PageHeading
+        title={t('clubs.title')}
+        action={(
+          <button type="button" className="btn btn-secondary" onClick={reload} disabled={loading}>
+            <Icon name="lucide:refresh-cw" size={15} />
+            {loading ? t('common.refreshing') : t('common.refresh')}
+          </button>
+        )}
+      />
 
-      {loading ? (
-        <p className="mt-6 text-sm text-neutral-400">Loading clubs…</p>
+      {error ? <ErrorState message={error.message} code={error.code} onRetry={reload} /> : null}
+      {loading && !data ? <Loading label={t('clubs.loading')} /> : null}
+
+      {data ? (
+        <section className="panel-card" aria-label={t('clubs.cardLabel')}>
+          <header className="panel-card-head">
+            <div>
+              <h2 className="panel-card-title">{t('clubs.allClubs')}</h2>
+              <p className="panel-card-sub">{t('clubs.cardSubtitle')}</p>
+            </div>
+            <div className="panel-card-tools">
+              <span className="chip chip-neutral">{t('clubs.count', { count: count(data.items.length) })}</span>
+            </div>
+          </header>
+
+          {data.items.length === 0 ? (
+            <div className="panel-empty">
+              <strong>{t('clubs.emptyTitle')}</strong>
+              <span>{t('clubs.emptyBody')}</span>
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table" style={{ minWidth: 720 }}>
+                <thead>
+                  <tr>
+                    <th scope="col">{t('clubs.colClub')}</th>
+                    <th scope="col">{t('clubs.colCity')}</th>
+                    <th scope="col">{t('clubs.colStripe')}</th>
+                    <th scope="col">{t('clubs.colStatus')}</th>
+                    <th scope="col">{t('clubs.colActions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.items.map((club) => (
+                    <tr key={club.id}>
+                      <td className="is-strong">
+                        <span style={{ display: 'block' }}>{club.name}</span>
+                        <span className="is-mono" style={{ color: 'var(--c-text-muted-sm)' }}>{club.id.slice(0, 8)}</span>
+                      </td>
+                      <td>{club.city || '—'}</td>
+                      <td><StatusBadge status={club.stripeOnboardingStatus} /></td>
+                      <td><StatusBadge status={club.status} /></td>
+                      <td>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {STATUS_ACTIONS.filter((a) => a.to !== club.status).map((action) => (
+                            <button
+                              key={action.to}
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => onStatus(club, action.to)}
+                              disabled={updatingClubId !== null}
+                            >
+                              {updatingClubId === club.id ? t('clubs.updating') : t(action.labelKey)}
+                            </button>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       ) : null}
 
-      {error ? (
-        error.notImplemented ? (
-          <p
-            className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900/60 p-6 text-sm text-neutral-400"
-            role="status"
+      {createdToken ? (
+        <section className="panel-card" style={{ marginTop: 16 }} role="status">
+          <p style={{ margin: 0, color: 'var(--c-text)', fontSize: 'var(--fs-13)', fontWeight: 500 }}>
+            {t('clubs.tokenNote')}
+          </p>
+          <code
+            style={{
+              display: 'block',
+              marginTop: 8,
+              padding: 12,
+              borderRadius: 'var(--r-tile)',
+              background: 'var(--c-inset)',
+              color: 'var(--c-accent-quiet)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 'var(--fs-12)',
+              overflowWrap: 'anywhere',
+            }}
           >
-            Club management is waiting for the backend — CRUD under{' '}
-            <code>/v1/admin/clubs</code> is not implemented yet. The form
-            below is a local 501 stub.
-          </p>
-        ) : (
-          <p className="mt-6 text-sm text-red-300" role="alert">
-            {error.message}
-            {error.code ? ` (${error.code})` : ''}
-          </p>
-        )
+            {createdToken}
+          </code>
+          <button type="button" className="btn btn-secondary" style={{ marginTop: 12 }} onClick={() => { void copyToken(); }}>
+            {copied ? t('clubs.copied') : t('clubs.copyToken')}
+          </button>
+        </section>
       ) : null}
 
-      {data && data.items.length > 0 ? (
-        <div className="card mt-6 overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-800 text-left text-xs uppercase tracking-wider text-neutral-500">
-                <th className="py-3 px-6 font-medium">Club</th>
-                <th className="py-3 px-4 font-medium">Country</th>
-                <th className="py-3 px-4 font-medium">Stripe</th>
-                <th className="py-3 px-4 font-medium">Status</th>
-                <th className="py-3 px-6 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((club) => (
-                <tr key={club.id} className="border-b border-neutral-800/60">
-                  <td className="py-3 px-6">
-                    <p className="font-medium text-neutral-100">{club.name}</p>
-                    <p className="text-xs text-neutral-500">{club.email}</p>
-                  </td>
-                  <td className="py-3 px-4 text-neutral-400">{club.country}</td>
-                  <td className="py-3 px-4 text-neutral-400">
-                    {club.stripeOnboardingStatus}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span className="rounded-full bg-neutral-800 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-neutral-300">
-                      {club.status}
-                    </span>
-                  </td>
-                  <td className="py-3 px-6">
-                    <div className="flex gap-2">
-                      {STATUS_ACTIONS.filter((a) => a.to !== club.status).map(
-                        (action) => (
-                          <button
-                            key={action.to}
-                            type="button"
-                            className="btn-secondary px-2 py-1 text-xs"
-                            onClick={() => onStatus(club, action.to)}
-                          >
-                            {action.label}
-                          </button>
-                        ),
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
+      {actionError ? <p className="panel-error" role="alert" style={{ marginTop: 16 }}>{actionError}</p> : null}
+      {actionMessage ? <p className="admin-toast" role="status">{actionMessage}</p> : null}
 
-      {actionError ? (
-        <p className="mt-4 text-sm text-red-300" role="alert">
-          {actionError}
-        </p>
-      ) : null}
-
-      <section className="card mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-400">
-          Register a new club
-        </h2>
-        <form onSubmit={onCreate} className="mt-4 grid gap-4 md:grid-cols-3" noValidate>
+      <section className="panel-card" style={{ marginTop: 16 }}>
+        <header className="panel-card-head">
           <div>
-            <label htmlFor="club-name" className="field-label">
-              Name
-            </label>
-            <input
-              id="club-name"
-              type="text"
-              required
-              className="field-input"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
+            <h2 className="panel-card-title">{t('clubs.registerTitle')}</h2>
+            <p className="panel-card-sub">{t('clubs.registerSubtitle')}</p>
           </div>
-          <div>
-            <label htmlFor="club-slug" className="field-label">
-              Slug
-            </label>
-            <input
-              id="club-slug"
-              type="text"
-              required
-              placeholder="la-luz"
-              className="field-input"
-              value={form.slug}
-              onChange={(e) => setForm({ ...form, slug: e.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="club-email" className="field-label">
-              Email
-            </label>
-            <input
-              id="club-email"
-              type="email"
-              required
-              className="field-input"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="club-address" className="field-label">
-              Address
-            </label>
-            <input
-              id="club-address"
-              type="text"
-              className="field-input"
-              value={form.address}
-              onChange={(e) => setForm({ ...form, address: e.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="club-country" className="field-label">
-              Country
-            </label>
-            <input
-              id="club-country"
-              type="text"
-              placeholder="ES"
-              className="field-input"
-              value={form.country}
-              onChange={(e) => setForm({ ...form, country: e.target.value })}
-            />
-          </div>
-          <div>
-            <label htmlFor="club-phone" className="field-label">
-              Phone
-            </label>
-            <input
-              id="club-phone"
-              type="tel"
-              className="field-input"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            />
+        </header>
+        <form onSubmit={onCreate} noValidate>
+          <div className="admin-form-row">
+            <div>
+              <label htmlFor="club-name" className="field-label">{t('clubs.fieldName')}</label>
+              <input
+                id="club-name"
+                type="text"
+                required
+                className="field-input"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="club-city" className="field-label">{t('clubs.fieldCity')}</label>
+              <input
+                id="club-city"
+                type="text"
+                required
+                placeholder={t('clubs.cityPlaceholder')}
+                className="field-input"
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="club-timezone" className="field-label">{t('clubs.fieldTimezone')}</label>
+              <input
+                id="club-timezone"
+                type="text"
+                required
+                className="field-input"
+                value={form.timezone}
+                onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="club-address" className="field-label">{t('clubs.fieldAddress')}</label>
+              <input
+                id="club-address"
+                type="text"
+                className="field-input"
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+              />
+            </div>
           </div>
 
-          {submitError ? (
-            <p className="text-sm text-red-300 md:col-span-3" role="alert">
-              {submitError}
-            </p>
-          ) : null}
+          {submitError ? <p className="field-error" role="alert" style={{ marginTop: 12 }}>{submitError}</p> : null}
 
-          <div className="md:col-span-3">
-            <button
-              type="submit"
-              className="btn-primary"
-              disabled={submitting || formIncomplete}
-            >
-              {submitting ? 'Creating…' : 'Create club'}
+          <div className="admin-form-actions" style={{ marginTop: 16 }}>
+            <button type="submit" className="btn btn-primary" disabled={submitting || formIncomplete}>
+              {submitting ? t('clubs.creating') : t('clubs.createClub')}
             </button>
+            <span className="field-hint">{t('clubs.qrHint')}</span>
           </div>
         </form>
       </section>

@@ -5,9 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- CSRF token for the httpOnly-cookie admin session (Part I §3). -->
     <meta name="csrf-token" content="dev-csrf-placeholder" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <!-- Theme is applied before first paint: no flash, no layout shift. The
+         stored value is the only source of truth; `dark` is the product default. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('dropit-theme');
+          document.documentElement.setAttribute('data-theme', stored === 'light' ? 'light' : 'dark');
+        } catch (error) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <title>DROP IT — Admin Panel</title>
   </head>
-  <body class="bg-neutral-950 text-neutral-100 antialiased">
+  <body class="antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

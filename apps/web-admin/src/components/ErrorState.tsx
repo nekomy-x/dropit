@@ -1,24 +1,29 @@
+import { useLocale } from '../locale';
+
 interface ErrorStateProps {
   message: string;
   code?: string;
   onRetry?: () => void;
 }
 
-/** Error banner with optional retry; used by every page's failed state. */
+/**
+ * One failed-request banner per page (docs/ui/PANEL-DESIGN.md §Data honesty:
+ * "a failed request produces one `panel-error` with the code and a retry —
+ * not per-card error copy repeated four times"). No value is rendered here; the
+ * page itself has to mark its figures unavailable.
+ */
 export default function ErrorState({ message, code, onRetry }: ErrorStateProps) {
+  const { t } = useLocale();
   return (
-    <div
-      className="rounded-xl border border-red-900/60 bg-red-950/40 p-6"
-      role="alert"
-    >
-      <p className="text-sm font-semibold text-red-200">Something went wrong</p>
-      <p className="mt-1 text-sm text-red-300/80">{message}</p>
-      {code ? (
-        <p className="mt-1 font-mono text-xs text-red-400/60">{code}</p>
-      ) : null}
+    <div className="panel-error" role="alert">
+      <div>
+        <strong>{t('common.error')}</strong>
+        <p style={{ margin: '2px 0 0', color: 'var(--c-text-2)', fontSize: 'var(--fs-12)' }}>{message}</p>
+        {code ? <small>{code}</small> : null}
+      </div>
       {onRetry ? (
-        <button type="button" onClick={onRetry} className="btn-secondary mt-4">
-          Try again
+        <button type="button" onClick={onRetry} className="btn btn-secondary btn-sm">
+          {t('common.tryAgain')}
         </button>
       ) : null}
     </div>
