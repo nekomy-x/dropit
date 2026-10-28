@@ -18,3 +18,42 @@ deploy/.env
 node_modules/
 dist/
 *.apk
+
+# PROD deploy artifacts and secrets — никогда не коммитим
+/build/
+deploy/prod/.env.local
+deploy/prod/secrets.env
+deploy/prod/state/
+deploy/prod/backup/
+
+# local test Postgres cluster (scripts/agent-db.sh)
+.pgdata/
+
+# Локальные тулчейны и кэши сборки (кросс-сборка на macOS, см. scripts/build-linux.sh)
+# — лежат в рабочем каталоге, в git никогда не попадают
+/rustup/
+/zig/
+/musl/
+/home/
+/.npm-cache/
+/.pnpm-store/
+/.playwright-cli/
+/.dsh-computer-use/
+
+# Отчёты и скриншоты проверок (scripts/panel-shot.mjs, club-ui-check.mjs и т.п.)
+/output/
+apps/*/output/
+apps/*/dist-demo/
+apps/*/.export-test-bundle/
+apps/*/.geometry-test-bundle/
+apps/*/src/**/*.tmpdir/
+
+# Flutter/Dart (apps/mobile-*)
+apps/mobile-*/.dart_tool/
+apps/mobile-*/build/
+apps/mobile-*/.gradle/
+apps/mobile-*/.flutter-plugins-dependencies
+apps/mobile-*/android/.gradle/
+apps/mobile-*/android/local.properties
+apps/mobile-*/ios/Pods/
+apps/mobile-*/ios/.symlinks/
