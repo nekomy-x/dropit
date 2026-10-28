@@ -205,16 +205,19 @@ async fn create_payment_intent(
     // и БЕЗ создания нового intent. Два разных Idempotency-Key на один
     // request не должны плодить два интента → двойной capture.
     if let Ok(Some(existing)) = billing.find_active_payment_by_request(request_id).await {
-        return (StatusCode::OK, Json(PaymentIntentResponse {
-            payment_id: existing.id,
-            request_id,
-            amount_minor: existing.amount_minor,
-            currency: existing.currency.clone(),
-            // replay: у клиента уже есть оригинальный client_secret
-            // первого ответа; новый не выдаётся (и провайдер не дёргается).
-            client_secret: String::new(),
-            status: existing.status,
-        }))
+        return (
+            StatusCode::OK,
+            Json(PaymentIntentResponse {
+                payment_id: existing.id,
+                request_id,
+                amount_minor: existing.amount_minor,
+                currency: existing.currency.clone(),
+                // replay: у клиента уже есть оригинальный client_secret
+                // первого ответа; новый не выдаётся (и провайдер не дёргается).
+                client_secret: String::new(),
+                status: existing.status,
+            }),
+        )
             .into_response();
     }
 
@@ -259,13 +262,7 @@ async fn create_payment_intent(
         currency: currency.clone(),
     };
     match billing
-        .create_payment_for_request(
-            request_id,
-            price_minor,
-            &idem_key,
-            &intent.id,
-            &commission,
-        )
+        .create_payment_for_request(request_id, price_minor, &idem_key, &intent.id, &commission)
         .await
     {
         Ok(CreatePaymentOutcome::Created(payment)) => (
@@ -456,29 +453,27 @@ async fn confirm_payment(
         // Это НЕ GUARD-провал — отменять подтверждённый платёж нельзя
         // (W7-A, ДЕФЕКТ 1). Перечитываем актуальный статус и отвечаем
         // им: processing → 200 replay, иное → 409 без смены состояния.
-        Err(BillingError::InvalidTransition) => {
-            match billing.find_payment(payment_id).await {
-                Ok(Some(p)) if p.status == "processing" => (
-                    StatusCode::OK,
-                    Json(ConfirmResponse {
-                        payment_id: p.id,
-                        status: p.status,
-                    }),
-                )
-                    .into_response(),
-                Ok(Some(_p)) => (
-                    StatusCode::CONFLICT,
-                    Json(ErrorEnvelope {
-                        code: "conflict".into(),
-                        message: "Payment cannot be confirmed in current state.".into(),
-                        details: None,
-                    }),
-                )
-                    .into_response(),
-                Ok(None) => api_error(ApiError::NotFound, "payment not found"),
-                Err(_) => api_error(ApiError::Internal, "db error"),
-            }
-        }
+        Err(BillingError::InvalidTransition) => match billing.find_payment(payment_id).await {
+            Ok(Some(p)) if p.status == "processing" => (
+                StatusCode::OK,
+                Json(ConfirmResponse {
+                    payment_id: p.id,
+                    status: p.status,
+                }),
+            )
+                .into_response(),
+            Ok(Some(_p)) => (
+                StatusCode::CONFLICT,
+                Json(ErrorEnvelope {
+                    code: "conflict".into(),
+                    message: "Payment cannot be confirmed in current state.".into(),
+                    details: None,
+                }),
+            )
+                .into_response(),
+            Ok(None) => api_error(ApiError::NotFound, "payment not found"),
+            Err(_) => api_error(ApiError::Internal, "db error"),
+        },
         // GUARD сработал: session не active / request не pending. Здесь
         // платёж гарантированно был intent (иначе confirm_payment вернул
         // бы InvalidTransition выше) — отмена безопасна. begin_cancel
@@ -526,11 +521,7 @@ async fn confirm_payment(
 /// разбор `payment_intent.succeeded`/`charge.succeeded`, lookup платёжа
 /// по `stripe_payment_intent_id`, затем `handle_capture_webhook`
 /// (идемпотентность по `(aggregate_id, event_type)` не менялась).
-async fn stripe_webhook(
-    State(state): State<ApiEnv>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+async fn stripe_webhook(State(state): State<ApiEnv>, headers: HeaderMap, body: Bytes) -> Response {
     let billing = match state.billing.clone() {
         Some(b) => b,
         None => {

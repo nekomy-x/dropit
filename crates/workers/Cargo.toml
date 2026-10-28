@@ -10,6 +10,7 @@ dropit-infra-db = { path = "../infra-db" }
 dropit-infra-nats = { path = "../infra-nats" }
 dropit-infra-redis = { path = "../infra-redis" }
 dropit-infra-push = { path = "../infra-push" }
+dropit-infra-mail = { path = "../infra-mail" }
 dropit-infra-stripe = { path = "../infra-stripe" }
 
 tokio.workspace = true

@@ -27,9 +27,15 @@ const METHODS: &[&str] = &["get", "post", "patch", "put", "delete", "head", "opt
 const ALLOW_NO_SECURITY: &[&str] = &[
     "/healthz",
     "/readyz",
+    // Режим эксплуатации стенда для нижнего статус-бара панелей:
+    // публичный, без авторизации (те же факты, что у /readyz).
+    "/v1/status",
     "/v1/stripe/webhook",
     "/v1/stripe/transfer-webhook",
     "/v1/ws",
+    // Resend подписывает события Svix-подписью (`svix-*`), а не bearer-токеном:
+    // доверие даёт HMAC над сырым телом, поэтому security здесь не нужен.
+    "/webhooks/resend",
 ];
 
 /// Абсолютный путь к `docs/openapi.yaml` относительно `CARGO_MANIFEST_DIR`
@@ -46,17 +52,10 @@ fn src_dir() -> PathBuf {
 
 /// Разбор OpenAPI-документа из текста в `serde_json::Value`.
 fn load_openapi() -> Value {
-    let raw = fs::read_to_string(openapi_path()).unwrap_or_else(|e| {
-        panic!(
-            "не удалось прочитать {}: {e}",
-            openapi_path().display()
-        )
-    });
-    serde_yaml::from_str::<Value>(&raw).unwrap_or_else(|e| {
-        panic!(
-            "docs/openapi.yaml не валидный YAML: {e}"
-        )
-    })
+    let raw = fs::read_to_string(openapi_path())
+        .unwrap_or_else(|e| panic!("не удалось прочитать {}: {e}", openapi_path().display()));
+    serde_yaml::from_str::<Value>(&raw)
+        .unwrap_or_else(|e| panic!("docs/openapi.yaml не валидный YAML: {e}"))
 }
 
 /// Извлекает из текста исходников все регистрации `.route("path", method(...))`
@@ -70,21 +69,18 @@ fn load_openapi() -> Value {
 fn collect_code_routes() -> BTreeSet<(String, String)> {
     let mut routes = BTreeSet::new();
     let src = src_dir();
-    let entries = fs::read_dir(&src).unwrap_or_else(|e| {
-        panic!(
-            "не удалось прочитать каталог {}: {e}",
-            src.display()
-        )
-    });
+    let entries = fs::read_dir(&src)
+        .unwrap_or_else(|e| panic!("не удалось прочитать каталог {}: {e}", src.display()));
     // Один общий текст с разделителями — многострочные `.route(` могут
     // захватывать перевод строки между `.route(` и путём.
     let mut joined = String::new();
     for entry in entries {
         let path = entry.expect("read_dir entry").path();
         if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            joined.push_str(&fs::read_to_string(&path).unwrap_or_else(|e| {
-                panic!("не удалось прочитать {}: {e}", path.display())
-            }));
+            joined.push_str(
+                &fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("не удалось прочитать {}: {e}", path.display())),
+            );
             joined.push('\n');
         }
     }
@@ -159,9 +155,7 @@ fn normalize_path(p: &str) -> String {
         if bytes[i] == b':' {
             // Имя параметра — последовательность букв/цифр/_.
             let mut j = i + 1;
-            while j < bytes.len()
-                && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_')
-            {
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
                 j += 1;
             }
             if j > i + 1 {
@@ -185,7 +179,9 @@ fn collect_spec_routes(doc: &Value) -> BTreeSet<(String, String)> {
         panic!("openapi: отсутствует paths");
     };
     for (path, item) in paths {
-        let Some(obj) = item.as_object() else { continue };
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
         for method in METHODS {
             if obj.contains_key(*method) {
                 routes.insert((path.clone(), method.to_string()));
@@ -203,7 +199,10 @@ fn openapi_yaml_is_valid() {
         "openapi: отсутствует поле openapi"
     );
     assert!(
-        doc.get("paths").and_then(|v| v.as_object()).map(|o| !o.is_empty()).unwrap_or(false),
+        doc.get("paths")
+            .and_then(|v| v.as_object())
+            .map(|o| !o.is_empty())
+            .unwrap_or(false),
         "openapi: paths пуст"
     );
 }
@@ -256,7 +255,9 @@ fn v1_ops_have_security_and_tags() {
         if !path.starts_with("/v1/") {
             continue;
         }
-        let Some(obj) = item.as_object() else { continue };
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
         for method in METHODS {
             let Some(op) = obj.get(*method) else { continue };
             let upper = method.to_uppercase();
@@ -274,7 +275,12 @@ fn v1_ops_have_security_and_tags() {
                 problems.push(format!("{upper} {path}: нет tags"));
             }
             // responses обязателен.
-            if op.get("responses").and_then(|r| r.as_object()).map(|o| o.is_empty()).unwrap_or(true) {
+            if op
+                .get("responses")
+                .and_then(|r| r.as_object())
+                .map(|o| o.is_empty())
+                .unwrap_or(true)
+            {
                 problems.push(format!("{upper} {path}: нет responses"));
             }
         }
@@ -295,10 +301,7 @@ fn path_sets_match_exactly() {
         .into_iter()
         .map(|(p, _)| p)
         .collect();
-    let code_paths: BTreeSet<String> = collect_code_routes()
-        .into_iter()
-        .map(|(p, _)| p)
-        .collect();
+    let code_paths: BTreeSet<String> = collect_code_routes().into_iter().map(|(p, _)| p).collect();
     assert_eq!(
         spec_paths, code_paths,
         "множества путей кода и спецификации не совпадают"
@@ -324,7 +327,11 @@ fn print_coverage_summary() {
     if let Some(paths) = doc.get("paths").and_then(|v| v.as_object()) {
         for item in paths.values() {
             for method in METHODS {
-                if let Some(tags) = item.get(*method).and_then(|o| o.get("tags")).and_then(|t| t.as_array()) {
+                if let Some(tags) = item
+                    .get(*method)
+                    .and_then(|o| o.get("tags"))
+                    .and_then(|t| t.as_array())
+                {
                     for t in tags {
                         if let Some(name) = t.as_str() {
                             *by_tag.entry(name.to_string()).or_insert(0) += 1;

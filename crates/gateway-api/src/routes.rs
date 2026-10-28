@@ -93,8 +93,16 @@ pub fn router(env: ApiEnv) -> Router {
         .route("/v1/auth/:role/login", post(login))
         .route("/v1/auth/:role/2fa", post(login_2fa))
         .route("/v1/auth/club/master", post(club_master_login))
-        .route("/v1/auth/refresh", post(refresh));
-
+        .route("/v1/auth/refresh", post(refresh))
+        // Открытая регистрация (Test Mode): публичные роуты, гейт — флаг
+        // `DROPIT_OPEN_SIGNUP` внутри хендлеров (`403 signup_disabled`).
+        .merge(crate::signup_routes::signup_router())
+        // Сброс пароля: публичные роуты (пароль забыт потому, что войти
+        // нечем); контракт — `reset_routes.rs`, `docs/openapi.yaml`.
+        .merge(crate::reset_routes::reset_router())
+        // Режим эксплуатации стенда для нижнего статус-бара панелей:
+        // публичный `GET /v1/status` (test / maintenance / normal).
+        .merge(crate::status_routes::status_router());
     let dj = role_route(&[Role::Dj], env.keys.clone(), |r| {
         r.route("/v1/dj/echo", get(rbac::role_echo))
             .merge(crate::catalog_routes::dj_routes())
@@ -104,6 +112,7 @@ pub fn router(env: ApiEnv) -> Router {
     });
     let admin = role_route(&[Role::Admin], env.keys.clone(), |r| {
         r.route("/v1/admin/echo", get(rbac::role_echo))
+            .merge(crate::mail_routes::admin_mail_router())
     });
     let guest = role_route(&[Role::Guest], env.keys.clone(), |r| {
         r.route("/v1/guest/echo", get(rbac::role_echo))
@@ -114,12 +123,14 @@ pub fn router(env: ApiEnv) -> Router {
         .merge(dj)
         .merge(club)
         .merge(admin)
+        .merge(crate::catalog_routes::public_catalog_routes())
         .merge(guest)
         .merge(crate::sessions_routes::sessions_router())
         .merge(requests)
         .merge(crate::payments_routes::payments_router())
         .merge(crate::payouts_routes::payouts_router())
         .merge(crate::panel_routes::panel_router())
+        .merge(crate::mail_routes::webhook_router())
         .merge(crate::ws::ws_router())
         .with_state(env)
 }
@@ -185,10 +196,47 @@ async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({ "status": "ok" })))
 }
 
-async fn readyz() -> impl IntoResponse {
+/// Платёжный режим стенда: `"live"`, если `dropit_infra_stripe::from_env()`
+/// отдал ключи, иначе `"mock"` (тот же выбор провайдера, что в
+/// [`crate::infra::stripe`]).
+///
+/// Один и тот же признак читают `/readyz` и публичный `GET /v1/status`:
+/// два разных ответа про «mock или live» на одном стенде были бы багом.
+pub(crate) fn payments_mode() -> &'static str {
+    if dropit_infra_stripe::from_env().is_some() {
+        "live"
+    } else {
+        "mock"
+    }
+}
+
+/// Readiness: процесс готов + два факта о том, «какой это стенд».
+///
+/// `open_signup` и `payments` — не декоративная телеметрия, а источник
+/// правды для бейджа «Test stand, not production» в панелях
+/// (`apps/web-*/src/components/TestModeBadge.tsx`): один и тот же бандл
+/// сегодня стоит на стенде, а завтра в проде, поэтому режим определяет
+/// сервер, а не сборка. Значения обязаны быть правдивыми:
+///
+/// * `open_signup` — тот же флаг [`ApiEnv::open_signup`], который пускает
+///   `/v1/auth/{club,dj}/register` (читается при старте из
+///   `DROPIT_OPEN_SIGNUP`);
+/// * `payments` — `"live"`, если `dropit_infra_stripe::from_env()` отдал
+///   ключи, иначе `"mock"` (тот же выбор провайдера, что в
+///   [`crate::infra::stripe`]).
+///
+/// Роут остаётся публичным и не зависит от БД: readiness — про процесс и
+/// конфигурацию, а не про состояние данных. `/healthz` не меняется.
+async fn readyz(State(state): State<ApiEnv>) -> impl IntoResponse {
+    let payments = payments_mode();
     (
         StatusCode::OK,
-        Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") })),
+        Json(serde_json::json!({
+            "status": "ok",
+            "version": env!("CARGO_PKG_VERSION"),
+            "open_signup": state.open_signup,
+            "payments": payments,
+        })),
     )
 }
 
@@ -407,6 +455,31 @@ async fn issue_pair(
     }
 }
 
+/// Выдача пары токенов для открытой регистрации (Test Mode).
+///
+/// Тот же путь, что у логина: refresh сохраняется в `refresh_token` (новая
+/// семья), access подписывается `keys.issue_access`, поэтому ротация и
+/// reuse-детекция `/v1/auth/refresh` работают без отдельной ветки. Отличие
+/// от логина только во внешнем контракте: регистрация отдаёт `201` и
+/// доп. поле `club`/`dj` в теле, поэтому ей нужны компоненты пары, а не
+/// готовый `Response`.
+pub(crate) async fn issue_pair_parts(
+    state: &ApiEnv,
+    role: Role,
+    subject_id: Uuid,
+    repo: std::sync::Arc<IdentityRepo>,
+) -> Result<TokenPair, Response> {
+    match issue_pair_components(state, role, subject_id, repo).await {
+        Ok((access_token, refresh_token, expires_in)) => Ok(TokenPair {
+            access_token,
+            refresh_token,
+            token_type: "Bearer".into(),
+            expires_in,
+        }),
+        Err(resp) => Err(resp),
+    }
+}
+
 /// Нижний уровень выдачи токенов: сохраняет refresh (новая семья) и подписывает
 /// access JWT. Возвращает компоненты `(access, refresh, expires_in)` либо уже
 /// готовую `Response` с ошибкой. Переиспользуется обычным логином, 2FA и входом
@@ -525,6 +598,21 @@ pub struct ApiEnv {
     pub stripe: Option<std::sync::Arc<dyn dropit_infra_stripe::StripeApi>>,
     /// Внешний каталог треков (iTunes Search / Deezer).
     pub catalog: Option<std::sync::Arc<dyn dropit_infra_catalog::CatalogSearch>>,
+    /// Репозиторий очереди транзакционных писем (`mail_message`, ADR-008).
+    /// `None` — БД не настроена: почтовые админ-роуты отвечают `503`,
+    /// вебхук провайдера — тоже (событие нельзя записать, провайдер повторит).
+    pub mail: Option<std::sync::Arc<dropit_infra_db::mail::MailRepo>>,
+    /// Открытая регистрация (`DROPIT_OPEN_SIGNUP=1`): клуб/DJ создают
+    /// аккаунт сами, без инвайта и подтверждения e-mail. Выключено по
+    /// умолчанию — тогда `/v1/auth/{club,dj}/register` отвечают
+    /// `403 signup_disabled`. Значение читается один раз при старте
+    /// процесса ([`crate::infra::open_signup`]), чтобы поведение не «мигало»
+    /// при изменении переменной на живом процессе.
+    pub open_signup: bool,
+    /// Лимит открытой регистрации: регистраций с одного IP в час
+    /// (`DROPIT_SIGNUP_RATE_PER_HOUR`, дефолт 10, на Test Mode стенде 100).
+    /// Читается один раз при старте ([`crate::infra::signup_rate_per_hour`]).
+    pub signup_rate_per_hour: i64,
 }
 
 pub(crate) fn api_error(err: ApiError, detail: &str) -> Response {
@@ -606,11 +694,7 @@ fn trust_proxy() -> bool {
 ///   дают корректную per-IP изоляцию. Колонка `device_token_issue.ip` имеет
 ///   тип `INET NOT NULL`, поэтому литерал `"unknown"` неприменим —
 ///   `0.0.0.0` выбран как безопасный IPv4-сентинел. Паник нет.
-fn client_ip_with(
-    trust: bool,
-    headers: &HeaderMap,
-    conn: Option<std::net::SocketAddr>,
-) -> String {
+fn client_ip_with(trust: bool, headers: &HeaderMap, conn: Option<std::net::SocketAddr>) -> String {
     if trust {
         if let Some(ip) = headers
             .get("x-forwarded-for")
@@ -640,7 +724,7 @@ fn client_ip_with(
 /// Тонкая обёртка над [`client_ip_with`] для обработчиков: обработчик
 /// передаёт `Option<ConnectInfo<SocketAddr>>` (доступно, если роутер
 /// собран через `into_make_service_with_connect_info`).
-fn client_ip(headers: &HeaderMap, conn: Option<std::net::SocketAddr>) -> String {
+pub(crate) fn client_ip(headers: &HeaderMap, conn: Option<std::net::SocketAddr>) -> String {
     client_ip_with(trust_proxy(), headers, conn)
 }
 

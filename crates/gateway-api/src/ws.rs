@@ -723,7 +723,11 @@ mod tests {
     async fn ticket_store_single_use() {
         let store = InMemoryTicketStore::new();
         store
-            .put("t1", json!({"sub":"00000000-0000-0000-0000-000000000001"}), Duration::from_secs(30))
+            .put(
+                "t1",
+                json!({"sub":"00000000-0000-0000-0000-000000000001"}),
+                Duration::from_secs(30),
+            )
             .await
             .expect("put");
         let first = store.take("t1").await.expect("take");
@@ -736,7 +740,11 @@ mod tests {
     async fn ticket_store_ttl_expiry() {
         let store = InMemoryTicketStore::new();
         store
-            .put("t2", json!({"sub":"00000000-0000-0000-0000-000000000002"}), Duration::from_millis(10))
+            .put(
+                "t2",
+                json!({"sub":"00000000-0000-0000-0000-000000000002"}),
+                Duration::from_millis(10),
+            )
             .await
             .expect("put");
         tokio::time::sleep(Duration::from_millis(30)).await;

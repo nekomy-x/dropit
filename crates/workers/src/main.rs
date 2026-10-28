@@ -1,5 +1,5 @@
 //! DROP IT workers: фоновые задачи (outbox relay, выплаты, сверка, retention,
-//! автозакрытие сессий, push-диспетчер).
+//! автозакрытие сессий, push-диспетчер, диспетчер писем).
 //!
 //! Запуск:
 //!   `dropit-workers --once <job>` — один прогон (CI/крон),
@@ -8,11 +8,12 @@
 //! Каждая задача печатает одну JSON-строку итога и возвращает код 0/1.
 //! Деградация: без `DATABASE_URL` БД-задачи пропускаются; без `NATS_URL`
 //! используется `NoopBus` (outbox-реле пропускается, push продолжает работу);
-//! без push-ключей — `NoopPush`.
+//! без push-ключей — `NoopPush`; без `RESEND_API_KEY` — `NoopMail`.
 
 mod cli;
 mod config;
 mod jobs;
+mod mail;
 mod push;
 mod runtime;
 
@@ -52,11 +53,15 @@ fn init_tracing() {
 async fn dispatch_once(env: &WorkerEnv, job: &str) -> JobReport {
     match job {
         "outbox" => jobs::run_outbox_env(env).await,
-        "payouts" => jobs::run_payouts_once(env.jobs.as_ref(), env.payouts.as_ref()).await,
+        "payouts" => {
+            jobs::run_payouts_with_mail(env.jobs.as_ref(), env.payouts.as_ref(), env.mail.as_ref())
+                .await
+        }
         "reconcile" => jobs::run_reconcile_once(env.payouts.as_ref()).await,
         "retention" => jobs::run_retention_once(env.jobs.as_ref()).await,
         "close-sessions" => jobs::run_close_sessions_once(env.jobs.as_ref()).await,
         "push" => jobs::run_push_once(env).await,
+        "mail" => jobs::run_mail_once(env).await,
         other => JobReport::error("unknown", format!("неизвестная задача `{other}`")),
     }
 }

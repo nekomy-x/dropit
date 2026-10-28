@@ -19,6 +19,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::mail::{run_mail, DbMailStore};
 use crate::push::{run_push, DbTokenSource};
 use crate::runtime::WorkerEnv;
 
@@ -124,7 +125,11 @@ pub async fn run_outbox_once(
     let relay = OutboxRelay::new(store, bus, batch_size, max_attempts);
     match relay.run_once().await {
         Ok(r) => {
-            tracing::info!(claimed = r.claimed, published = r.published, "outbox relay done");
+            tracing::info!(
+                claimed = r.claimed,
+                published = r.published,
+                "outbox relay done"
+            );
             JobReport::ok("outbox", relay_detail(r))
         }
         Err(e) => JobReport::error("outbox", e.to_string()),
@@ -142,9 +147,20 @@ pub async fn run_outbox_once(
 /// cancelling после 15 мин TTL — техкарта V), затем выполняет цикл выплат
 /// (`run_payout_cycle`). Финальные payees (блокировка/уход) здесь не
 /// передаются — регулярный цикл.
-pub async fn run_payouts_once(
+#[cfg(test)]
+pub async fn run_payouts_once(jobs: Option<&JobsRepo>, payouts: Option<&PayoutRepo>) -> JobReport {
+    run_payouts_with_mail(jobs, payouts, None).await
+}
+
+/// Прогон выплат с уведомлениями: та же логика, плюс письма `payout_paid`.
+///
+/// Письмо ставится в очередь ПОСЛЕ успешного создания выплаты: если выплата
+/// не создалась, получатель не должен узнать о деньгах, которых нет.
+/// Ошибка почты не отменяет выплату — деньги важнее уведомления.
+pub async fn run_payouts_with_mail(
     jobs: Option<&JobsRepo>,
     payouts: Option<&PayoutRepo>,
+    mail: Option<&dropit_infra_db::mail::MailRepo>,
 ) -> JobReport {
     let Some(payouts) = payouts else {
         return JobReport::skipped("payouts", "no_database");
@@ -161,6 +177,10 @@ pub async fn run_payouts_once(
     match payouts.run_payout_cycle(&[]).await {
         Ok(rows) => {
             let total: i64 = rows.iter().map(|r| r.amount_minor).sum();
+            let mailed = match mail {
+                Some(repo) => enqueue_payout_mails(repo, &rows).await,
+                None => 0,
+            };
             tracing::info!(
                 created = rows.len(),
                 expired_intents = expired,
@@ -173,6 +193,7 @@ pub async fn run_payouts_once(
                     "payouts_created": rows.len(),
                     "total_minor": total,
                     "expired_intents": expired,
+                    "mails_queued": mailed,
                 }),
             )
         }
@@ -193,7 +214,10 @@ pub async fn run_reconcile_once(payouts: Option<&PayoutRepo>) -> JobReport {
         .run_status(run_id)
         .await
         .unwrap_or_else(|_| "unknown".to_string());
-    let violations = payouts.payee_invariant_violations().await.unwrap_or_default();
+    let violations = payouts
+        .payee_invariant_violations()
+        .await
+        .unwrap_or_default();
     tracing::info!(run_id = %run_id, status = %status, violations = violations.len(), "reconciliation done");
     JobReport::ok(
         "reconcile",
@@ -213,10 +237,7 @@ pub async fn run_retention_once(jobs: Option<&JobsRepo>) -> JobReport {
     match jobs.retention_sweep().await {
         Ok(ids) => {
             tracing::info!(anonymized = ids.len(), "retention sweep done");
-            JobReport::ok(
-                "retention",
-                json!({ "anonymized_devices": ids.len() }),
-            )
+            JobReport::ok("retention", json!({ "anonymized_devices": ids.len() }))
         }
         Err(e) => JobReport::error("retention", format!("retention_sweep: {e}")),
     }
@@ -229,7 +250,10 @@ pub async fn run_close_sessions_once(jobs: Option<&JobsRepo>) -> JobReport {
     };
     match jobs.auto_close_sessions().await {
         Ok(closed) => {
-            let ids: Vec<Uuid> = closed.iter().map(|c: &ClosedSession| c.session_id).collect();
+            let ids: Vec<Uuid> = closed
+                .iter()
+                .map(|c: &ClosedSession| c.session_id)
+                .collect();
             tracing::info!(closed = ids.len(), "auto-close sessions done");
             JobReport::ok(
                 "close-sessions",
@@ -259,6 +283,19 @@ pub async fn run_push_once(env: &WorkerEnv) -> JobReport {
     .await
 }
 
+/// Прогон диспетчера писем над DB-backed очередью.
+///
+/// Без БД — `skipped` (очередь читать неоткуда). Без ключей провайдера
+/// диспетчер всё равно работает: `NoopMail` помечает письма отправленными
+/// без сети, поэтому локальный стенд и e2e видят тот же жизненный цикл.
+pub async fn run_mail_once(env: &WorkerEnv) -> JobReport {
+    let Some(repo) = env.mail.as_ref() else {
+        return JobReport::skipped("mail", "no_database");
+    };
+    let store = DbMailStore::new(repo.clone());
+    run_mail(&store, env.mail_sender.as_ref(), env.config.mail_batch_size).await
+}
+
 /// Прогон outbox над DB-backed стором.
 pub async fn run_outbox_env(env: &WorkerEnv) -> JobReport {
     let Some(store) = env.outbox_store.as_ref() else {
@@ -273,6 +310,141 @@ pub async fn run_outbox_env(env: &WorkerEnv) -> JobReport {
         env.nats_connected,
     )
     .await
+}
+
+/// Поставить в очередь письма об отправленных выплатах.
+///
+/// Возвращает число писем, реально вставленных в очередь (дубликаты по
+/// `idempotency_key` не считаются). Ключ — `payout_paid:<payout_id>`, поэтому
+/// повторный прогон цикла (или рестарт воркера) не рассылает письма заново.
+async fn enqueue_payout_mails(
+    mail: &dropit_infra_db::mail::MailRepo,
+    rows: &[dropit_infra_db::PayoutRow],
+) -> usize {
+    let mut queued = 0usize;
+    let pool = mail.pool();
+    for row in rows {
+        let Some(email) = payee_email(&pool, &row.payee_type, row.payee_id).await else {
+            tracing::debug!(
+                payee_type = %row.payee_type,
+                payee_id = %row.payee_id,
+                "mail: у получателя выплаты нет e-mail, письмо пропущено"
+            );
+            continue;
+        };
+        let to = match dropit_infra_mail::MailAddress::parse(&email) {
+            Ok(addr) => addr,
+            Err(e) => {
+                tracing::warn!(error = %e, "mail: адрес получателя выплаты не разобран");
+                continue;
+            }
+        };
+        let vars = serde_json::json!({
+            "payee_name": payee_name(&pool, &row.payee_type, row.payee_id).await
+                .unwrap_or_else(|| "Здравствуйте".to_string()),
+            "amount": format_minor_eur(row.amount_minor),
+            "period": format_period(row.period_start, row.period_end),
+        });
+        let rendered =
+            match dropit_infra_mail::render(dropit_infra_mail::TemplateKey::PayoutPaid, &vars) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(error = %e, "mail: шаблон выплаты не отрисован");
+                    continue;
+                }
+            };
+        let new_mail = dropit_infra_db::mail::NewMail {
+            idempotency_key: format!("payout_paid:{}", row.id),
+            template: dropit_infra_mail::TemplateKey::PayoutPaid
+                .as_str()
+                .to_string(),
+            to_email: to.email.clone(),
+            to_name: to.name.clone(),
+            from_email: mail_from(),
+            reply_to: mail_reply_to(),
+            subject: rendered.subject,
+            html: rendered.html,
+            text: rendered.text,
+            vars,
+            aggregate_type: Some("payout".to_string()),
+            aggregate_id: Some(row.id),
+        };
+        match mail.enqueue(new_mail).await {
+            Ok((_, duplicate)) => {
+                if !duplicate {
+                    queued += 1;
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "mail: не удалось поставить письмо о выплате"),
+        }
+    }
+    queued
+}
+
+/// Адрес получателя выплаты: `club.email` или `dj.email`.
+async fn payee_email(pool: &sqlx::PgPool, payee_type: &str, payee_id: Uuid) -> Option<String> {
+    let query = match payee_type {
+        "club" => "SELECT email::text FROM club WHERE id = $1",
+        "dj" => "SELECT email::text FROM dj WHERE id = $1",
+        _ => return None,
+    };
+    let row: Option<(String,)> = sqlx::query_as(query)
+        .bind(payee_id)
+        .fetch_optional(pool)
+        .await
+        .ok()?;
+    row.map(|(e,)| e).filter(|e| e.contains('@'))
+}
+
+/// Имя получателя выплаты для приветствия в письме.
+async fn payee_name(pool: &sqlx::PgPool, payee_type: &str, payee_id: Uuid) -> Option<String> {
+    let query = match payee_type {
+        "club" => "SELECT name FROM club WHERE id = $1",
+        "dj" => "SELECT display_name FROM dj WHERE id = $1",
+        _ => return None,
+    };
+    let row: Option<(String,)> = sqlx::query_as(query)
+        .bind(payee_id)
+        .fetch_optional(pool)
+        .await
+        .ok()?;
+    row.map(|(n,)| n).filter(|n| !n.trim().is_empty())
+}
+
+/// Сумма в минорных единицах → `"12.34 EUR"`.
+///
+/// Своя функция, а не `format!` на месте: в `dropit_common::money` нет
+/// форматтера, а деньги в письме не имеют права показываться «как есть»
+/// (`1234` вместо `12.34` читается как ошибка в 100 раз).
+fn format_minor_eur(amount_minor: i64) -> String {
+    let sign = if amount_minor < 0 { "-" } else { "" };
+    let abs = amount_minor.unsigned_abs();
+    format!("{sign}{}.{:02} EUR", abs / 100, abs % 100)
+}
+
+/// Период выплаты → `"2026-10-01 — 2026-10-08"`.
+fn format_period(
+    start: chrono::DateTime<chrono::Utc>,
+    end: chrono::DateTime<chrono::Utc>,
+) -> String {
+    format!("{} — {}", start.format("%Y-%m-%d"), end.format("%Y-%m-%d"))
+}
+
+/// Адрес отправителя писем (`MAIL_FROM`).
+fn mail_from() -> String {
+    std::env::var("MAIL_FROM")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "DROP IT <no-reply@dropit.local>".to_string())
+}
+
+/// Адрес для ответа (`MAIL_REPLY_TO`).
+fn mail_reply_to() -> Option<String> {
+    std::env::var("MAIL_REPLY_TO")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 // ============================================================
@@ -300,9 +472,19 @@ pub async fn run_supervisor(env: Arc<WorkerEnv>) -> i32 {
     ));
     handles.push(spawn_interval(
         env.clone(),
+        env.config.mail_interval,
+        "mail",
+        |e| Box::pin(async move { run_mail_once(&e).await }),
+    ));
+    handles.push(spawn_interval(
+        env.clone(),
         env.config.payout_interval,
         "payouts",
-        |e| Box::pin(async move { run_payouts_once(e.jobs.as_ref(), e.payouts.as_ref()).await }),
+        |e| {
+            Box::pin(async move {
+                run_payouts_with_mail(e.jobs.as_ref(), e.payouts.as_ref(), e.mail.as_ref()).await
+            })
+        },
     ));
     handles.push(spawn_interval(
         env.clone(),
@@ -323,7 +505,10 @@ pub async fn run_supervisor(env: Arc<WorkerEnv>) -> i32 {
         |e| Box::pin(async move { run_close_sessions_once(e.jobs.as_ref()).await }),
     ));
 
-    tracing::info!("supervisor: запущено {} задач, ожидание Ctrl-C", handles.len());
+    tracing::info!(
+        "supervisor: запущено {} задач, ожидание Ctrl-C",
+        handles.len()
+    );
     // Ждём сигнал прерывания; задачи крутятся до отмены.
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
@@ -338,9 +523,8 @@ pub async fn run_supervisor(env: Arc<WorkerEnv>) -> i32 {
 
 /// Тип функции-задачи для супервизора: принимает окружение, возвращает
 /// `Pin<Box<Future>>` (асинхронный прогон).
-type JobFn = fn(
-    Arc<WorkerEnv>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = JobReport> + Send>>;
+type JobFn =
+    fn(Arc<WorkerEnv>) -> std::pin::Pin<Box<dyn std::future::Future<Output = JobReport> + Send>>;
 
 /// Запустить цикл задачи с интервалом.
 fn spawn_interval(
@@ -411,8 +595,7 @@ mod tests {
     async fn outbox_noop_bus_is_skipped() {
         let store: Arc<dyn OutboxStore> = Arc::new(InMemoryOutboxStore::new());
         let bus: Arc<dyn MessageBus> = Arc::new(dropit_infra_nats::NoopBus);
-        let report =
-            run_outbox_once(store, bus, 10, 5, false).await;
+        let report = run_outbox_once(store, bus, 10, 5, false).await;
         assert_eq!(report.status, "skipped");
         assert_eq!(report.exit_code(), 0);
     }
@@ -445,10 +628,7 @@ mod tests {
 
     #[tokio::test]
     async fn db_jobs_without_repo_are_skipped() {
-        assert_eq!(
-            run_payouts_once(None, None).await.status,
-            "skipped"
-        );
+        assert_eq!(run_payouts_once(None, None).await.status, "skipped");
         assert_eq!(run_reconcile_once(None).await.status, "skipped");
         assert_eq!(run_retention_once(None).await.status, "skipped");
         assert_eq!(run_close_sessions_once(None).await.status, "skipped");
@@ -465,10 +645,16 @@ mod tests {
             push_sender: Arc::new(NoopPush),
             jobs: None,
             payouts: None,
+            mail_sender: Arc::new(dropit_infra_mail::NoopMail),
+            mail: None,
         };
         let report = run_push_once(&env).await;
         assert_eq!(report.status, "skipped");
         assert_eq!(report.exit_code(), 0);
+        // Диспетчер писем без БД тоже деградирует, а не падает.
+        let mail_report = crate::jobs::run_mail_once(&env).await;
+        assert_eq!(mail_report.status, "skipped");
+        assert_eq!(mail_report.detail["reason"], "no_database");
     }
 
     use crate::config::Config;

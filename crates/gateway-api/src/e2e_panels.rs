@@ -8,7 +8,9 @@
 //!   * club dashboard/profile/earnings/djs;
 //!   * dj shift/stats;
 //!   * payments + splits;
-//!   * RBAC: клуб не может в админ-роуты.
+//!   * RBAC: клуб не может в админ-роуты;
+//!   * режим эксплуатации стенда: `runtime_mode` в platform-settings и
+//!     публичный `GET /v1/status` (test / maintenance / normal).
 //!
 //! W2-C дополнения: инвайт DJ, Stripe-онбординг (status/link), создание
 //! клуба админом, список гостей клуба (пагинация), история сверок.
@@ -228,6 +230,59 @@ async fn e2e_panel_routes() {
 
     let (s, body) = call(
         &env,
+        "PATCH",
+        &format!("/v1/club/djs/{dj_id}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "suspend DJ: {body}");
+    assert_eq!(body["status"], "suspended");
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{dj_id}"),
+        Some(json!({ "status": "active" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "restore DJ: {body}");
+    assert_eq!(body["status"], "active");
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{dj_id}"),
+        Some(json!({ "status": "blocked" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let foreign_dj = Uuid::now_v7();
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{foreign_dj}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "club cannot mutate another club's DJ"
+    );
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{dj_id}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&dj),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "DJ cannot manage club roster");
+
+    let (s, body) = call(
+        &env,
         "GET",
         "/v1/club/earnings?period=week",
         None,
@@ -354,9 +409,18 @@ async fn e2e_club_djs_invite() {
         .await
         .unwrap();
     }
-    let token_a = env.keys.issue_access(club_a, Role::Club, Uuid::now_v7()).unwrap();
-    let token_b = env.keys.issue_access(club_b, Role::Club, Uuid::now_v7()).unwrap();
-    let dj_tok = env.keys.issue_access(Uuid::now_v7(), Role::Dj, Uuid::now_v7()).unwrap();
+    let token_a = env
+        .keys
+        .issue_access(club_a, Role::Club, Uuid::now_v7())
+        .unwrap();
+    let token_b = env
+        .keys
+        .issue_access(club_b, Role::Club, Uuid::now_v7())
+        .unwrap();
+    let dj_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Dj, Uuid::now_v7())
+        .unwrap();
     let admin_tok = env
         .keys
         .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
@@ -410,14 +474,21 @@ async fn e2e_club_djs_invite() {
         Some(&token_a),
     )
     .await;
-    assert_eq!(s, StatusCode::CREATED, "invite body club_id ignored: {body}");
+    assert_eq!(
+        s,
+        StatusCode::CREATED,
+        "invite body club_id ignored: {body}"
+    );
     let dj2: Uuid = sfield(&body, "dj_id").parse().unwrap();
     let (club_of_dj2,): (Uuid,) = sqlx::query_as("SELECT club_id FROM dj WHERE id = $1")
         .bind(dj2)
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(club_of_dj2, club_a, "club_id в теле игнорируется (изоляция)");
+    assert_eq!(
+        club_of_dj2, club_a,
+        "club_id в теле игнорируется (изоляция)"
+    );
 
     // 409 на повторную попытку того же e-mail в этот клуб.
     let (s, body) = call(
@@ -444,13 +515,11 @@ async fn e2e_club_djs_invite() {
         invite_token,
         "plain-токен не хранится"
     );
-    let (count,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM dj WHERE invite_token_hash = $1",
-    )
-    .bind(&invite_token)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM dj WHERE invite_token_hash = $1")
+        .bind(&invite_token)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(count, 0, "plain-токен не находится по колонке хеша");
 
     // DJ в статусе invited.
@@ -460,6 +529,36 @@ async fn e2e_club_djs_invite() {
         .await
         .unwrap();
     assert_eq!(status, "invited");
+
+    // Одноразовая активация задаёт пароль и очищает приглашение.
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/dj/invite/accept",
+        Some(json!({ "invite_token": invite_token, "password": "dj-password-123" })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "accept invite: {body}");
+    assert_eq!(body["accepted"], true);
+    let (status, invite_hash): (String, Option<String>) =
+        sqlx::query_as("SELECT status, invite_token_hash FROM dj WHERE id = $1")
+            .bind(dj_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "active");
+    assert!(invite_hash.is_none(), "accepted invite token is cleared");
+
+    let (s, _) = call(
+        &env,
+        "POST",
+        "/v1/dj/invite/accept",
+        Some(json!({ "invite_token": invite_token, "password": "dj-password-123" })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "invite cannot be reused");
 
     // Изоляция: клуб B не видит DJ клуба A (и наоборот).
     let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&token_b)).await;
@@ -494,8 +593,14 @@ async fn e2e_club_stripe_onboarding() {
     .execute(&pool)
     .await
     .unwrap();
-    let club_tok = env.keys.issue_access(club_id, Role::Club, Uuid::now_v7()).unwrap();
-    let dj_tok = env.keys.issue_access(Uuid::now_v7(), Role::Dj, Uuid::now_v7()).unwrap();
+    let club_tok = env
+        .keys
+        .issue_access(club_id, Role::Club, Uuid::now_v7())
+        .unwrap();
+    let dj_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Dj, Uuid::now_v7())
+        .unwrap();
     let admin_tok = env
         .keys
         .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
@@ -623,7 +728,12 @@ async fn e2e_club_stripe_onboarding() {
 #[tokio::test]
 async fn e2e_admin_clubs_create() {
     let repo = maybe_skip!(test_repo().await);
-    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
     let pool = repo.pool();
     let admin_tok = env
         .keys
@@ -750,10 +860,7 @@ async fn e2e_admin_guests() {
     // Два гостя, один с профилем и запросом.
     let g1 = Uuid::now_v7();
     let g2 = Uuid::now_v7();
-    for (id, disp, email) in [
-        (g1, Some("Alice"), Some("alice@g.test")),
-        (g2, None, None),
-    ] {
+    for (id, disp, email) in [(g1, Some("Alice"), Some("alice@g.test")), (g2, None, None)] {
         sqlx::query(
             "INSERT INTO guest_device (id, platform, display_name, email) \
              VALUES ($1, 'ios', $2, $3)",
@@ -837,7 +944,11 @@ async fn e2e_admin_guests() {
     )
     .await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(body["items"].as_array().unwrap().len(), 1, "первая страница = 1");
+    assert_eq!(
+        body["items"].as_array().unwrap().len(),
+        1,
+        "первая страница = 1"
+    );
     let cursor = body["next_cursor"].as_str().unwrap().to_string();
     assert!(!cursor.is_empty(), "next_cursor непустой");
     let (s, body2) = call(
@@ -928,7 +1039,12 @@ async fn e2e_admin_guests() {
 #[tokio::test]
 async fn e2e_admin_reconciliation_runs() {
     let repo = maybe_skip!(test_repo().await);
-    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
     let pool = repo.pool();
     let admin_tok = env
         .keys
@@ -1039,7 +1155,12 @@ async fn e2e_admin_reconciliation_runs() {
 #[tokio::test]
 async fn e2e_club_master_login() {
     let repo = maybe_skip!(test_repo().await);
-    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
     let pool = repo.pool();
     // XFF-флуд-сценарий ниже считает лимит по IP из заголовка. После
     // смены безопасного дефолта (TRUST_PROXY по умолчанию ВЫКЛ) заголовок
@@ -1090,12 +1211,13 @@ async fn e2e_club_master_login() {
     assert_eq!(s, StatusCode::OK, "master-issued jwt on dashboard: {body}");
 
     // В audit_log записан club_master_login (без токена).
-    let (n,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM audit_log WHERE action = 'club_master_login' AND actor_id = $1")
-            .bind(club_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM audit_log WHERE action = 'club_master_login' AND actor_id = $1",
+    )
+    .bind(club_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(n, 1, "club_master_login audit entry written");
 
     // --- Неверный токен → 401 invalid_credentials ---
@@ -1139,7 +1261,11 @@ async fn e2e_club_master_login() {
         )
         .await;
         if i <= 10 {
-            assert_eq!(s, StatusCode::UNAUTHORIZED, "flood #{i} must be 401: {body}");
+            assert_eq!(
+                s,
+                StatusCode::UNAUTHORIZED,
+                "flood #{i} must be 401: {body}"
+            );
         } else {
             assert_eq!(
                 s,
@@ -1242,7 +1368,12 @@ async fn insert_payment(pool: &sqlx::PgPool, request_id: Uuid, status: &str, amo
 #[tokio::test]
 async fn e2e_admin_payments_filters() {
     let repo = maybe_skip!(test_repo().await);
-    let env = app_env(Some(repo.clone()), Some(SessionRepo::new(repo.pool())), None).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
     let pool = repo.pool();
     let admin = env
         .keys
@@ -1305,7 +1436,11 @@ async fn e2e_admin_payments_filters() {
         Some(&admin),
     )
     .await;
-    assert_eq!(s, StatusCode::BAD_REQUEST, "invalid status must be 400: {body}");
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "invalid status must be 400: {body}"
+    );
     assert_eq!(body["code"], "invalid_status", "error code: {body}");
 
     // --- club_id=club_a: 3 платежа (изоляция клуба через JOIN) ---
@@ -1353,4 +1488,534 @@ async fn e2e_admin_payments_filters() {
         Some(1),
         "club_a failed: {body}"
     );
+}
+
+/// Управление составом DJ: заметка, присутствие, мягкое удаление,
+/// восстановление и жёсткое удаление непринятого приглашения.
+///
+/// Контракт, который проверяется:
+///   * `note` — независимое от `status` поле; `null` очищает;
+///   * `online` считается сервером по `last_seen_at` (heartbeat DJ), а не
+///     присылается клиентом;
+///   * `DELETE` не стирает историю: DJ с паролем остаётся строкой с
+///     `removed_at`, исчезает из состава и возвращается `/restore`;
+///   * непринятое приглашение удаляется физически, чтобы тот же e-mail
+///     можно было пригласить снова (UNIQUE(email));
+///   * DJ с открытой сменой снять нельзя (409 `dj_on_shift`);
+///   * чужой DJ не меняется (404), DJ не управляет составом (403).
+#[tokio::test]
+async fn e2e_club_dj_management() {
+    let repo = maybe_skip!(test_repo().await);
+    let sessions = SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions), None).await;
+    let pool = repo.pool();
+
+    let club_id = Uuid::now_v7();
+    let other_club = Uuid::now_v7();
+    for (id, name, slug, email) in [
+        (club_id, "Roster Club", "roster-club", "roster@club.test"),
+        (other_club, "Other Club", "other-club", "other@club.test"),
+    ] {
+        sqlx::query(
+            "INSERT INTO club (id, name, slug, email, password_hash) \
+             VALUES ($1, $2, $3, $4, 'x')",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(slug)
+        .bind(email)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let club_tok = env
+        .keys
+        .issue_access(club_id, Role::Club, Uuid::now_v7())
+        .unwrap();
+    let other_tok = env
+        .keys
+        .issue_access(other_club, Role::Club, Uuid::now_v7())
+        .unwrap();
+
+    // DJ, принявший приглашение (есть пароль) и непринятый DJ.
+    let active_dj = Uuid::now_v7();
+    let invited_dj = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name, status) \
+         VALUES ($1, $2, 'active@dj.test', 'x', 'Active DJ', 'active')",
+    )
+    .bind(active_dj)
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name, status) \
+         VALUES ($1, $2, 'invited@dj.test', '!', 'Invited DJ', 'invited')",
+    )
+    .bind(invited_dj)
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- список: присутствие и смена считаются сервером ---------------
+    let (s, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    assert_eq!(s, StatusCode::OK, "list: {body}");
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2, "two DJs: {body}");
+    for item in items {
+        assert_eq!(item["online"], false, "no heartbeat → offline: {item}");
+        assert_eq!(item["on_shift"], false, "no session → off shift: {item}");
+        assert!(item["note"].is_null(), "no note yet: {item}");
+    }
+    assert!(body["presence_ttl_seconds"].as_i64().is_some());
+
+    // --- заметка: сохраняется, читается, очищается --------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "note": "  vinyl only  " })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "set note: {body}");
+    assert_eq!(body["note"], "vinyl only", "note is trimmed");
+    assert_eq!(body["status"], "active", "note patch leaves status alone");
+
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("active dj listed");
+    assert_eq!(row["note"], "vinyl only");
+
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "note": null })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "clear note: {body}");
+    assert!(body["note"].is_null(), "note cleared: {body}");
+
+    // Пустое тело и слишком длинная заметка — 400.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({})),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::BAD_REQUEST,
+        "empty patch is rejected: {body}"
+    );
+    let too_long = "x".repeat(501);
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "note": too_long })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "note over 500 chars rejected");
+
+    // --- статус приглашённого DJ не переключается ---------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{invited_dj}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "invited dj status locked: {body}");
+    assert_eq!(body["code"], "dj_status_locked");
+
+    // --- присутствие: heartbeat DJ → online --------------------------
+    let dj_tok = env
+        .keys
+        .issue_access(active_dj, Role::Dj, Uuid::now_v7())
+        .unwrap();
+    let (s, body) = call(&env, "POST", "/v1/dj/presence", None, Some(&dj_tok)).await;
+    assert_eq!(s, StatusCode::OK, "presence: {body}");
+    assert_eq!(body["online"], true);
+
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("active dj listed");
+    assert_eq!(row["online"], true, "heartbeat makes the DJ online: {row}");
+    assert!(row["last_seen_at"].is_string(), "last_seen_at is set");
+    assert!(
+        row["presence_age_seconds"].as_i64().unwrap_or(99) <= 5,
+        "fresh heartbeat: {row}"
+    );
+
+    // Старый heartbeat — снова offline, но last_seen остаётся известным.
+    sqlx::query("UPDATE dj SET last_seen_at = now() - interval '10 minutes' WHERE id = $1")
+        .bind(active_dj)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("active dj listed");
+    assert_eq!(row["online"], false, "stale heartbeat is offline: {row}");
+    assert!(
+        row["presence_age_seconds"].as_i64().unwrap_or(0) >= 590,
+        "age keeps growing for the 'last seen' line: {row}"
+    );
+
+    // RBAC: клуб не может писать чужой heartbeat, DJ не управляет составом.
+    let (s, _) = call(&env, "POST", "/v1/dj/presence", None, Some(&club_tok)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club is not a DJ");
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&dj_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "dj cannot manage the roster");
+
+    // --- изоляция: чужой клуб не видит и не меняет DJ ----------------
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&other_tok)).await;
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(0),
+        "other club sees an empty roster"
+    );
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "note": "hijacked" })),
+        Some(&other_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "other club cannot patch the DJ");
+    let (s, _) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/club/djs/{active_dj}"),
+        None,
+        Some(&other_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "other club cannot remove the DJ");
+
+    // --- удаление непринятого приглашения: жёсткое --------------------
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/club/djs/{invited_dj}"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "remove invite: {body}");
+    assert_eq!(body["deleted"], "hard");
+    let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM dj WHERE id = $1")
+        .bind(invited_dj)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "unaccepted invitation row is gone");
+    // Тот же e-mail можно пригласить снова.
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/club/djs/invite",
+        Some(json!({ "email": "invited@dj.test", "display_name": "Invited DJ" })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CREATED,
+        "re-invite after hard delete: {body}"
+    );
+
+    // --- удаление DJ с историей: мягкое + восстановление -------------
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/club/djs/{active_dj}"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "soft remove: {body}");
+    assert_eq!(body["deleted"], "soft");
+    assert_eq!(body["status"], "suspended", "access is revoked");
+
+    let (removed_at, status): (Option<chrono::DateTime<chrono::Utc>>, String) =
+        sqlx::query_as("SELECT removed_at, status FROM dj WHERE id = $1")
+            .bind(active_dj)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(removed_at.is_some(), "row is kept with removed_at");
+    assert_eq!(status, "suspended", "access revoked in the row");
+
+    // Скрыт из состава по умолчанию, виден с include_removed=1.
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    assert!(
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["id"] != active_dj.to_string()),
+        "removed DJ is hidden by default: {body}"
+    );
+    let (_, body) = call(
+        &env,
+        "GET",
+        "/v1/club/djs?include_removed=1",
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    let removed_row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("removed DJ is listed on request");
+    assert_eq!(removed_row["removed"], true);
+    assert!(removed_row["removed_at"].is_string());
+
+    // Снятый DJ не патчится (его сначала возвращают) — 404.
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/djs/{active_dj}"),
+        Some(json!({ "note": "while removed" })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "removed DJ is not patchable");
+
+    // Восстановление: снова в составе, доступ активен.
+    let (s, body) = call(
+        &env,
+        "POST",
+        &format!("/v1/club/djs/{active_dj}/restore"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "restore: {body}");
+    assert_eq!(body["removed"], false);
+    assert_eq!(body["status"], "active");
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    assert!(
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == active_dj.to_string()),
+        "restored DJ is back in the roster: {body}"
+    );
+    // Идемпотентность: повторный restore не падает.
+    let (s, _) = call(
+        &env,
+        "POST",
+        &format!("/v1/club/djs/{active_dj}/restore"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "restore is idempotent");
+
+    // --- открытая смена блокирует удаление ---------------------------
+    let session_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO session (id, club_id, dj_id, status, timezone) \
+         VALUES ($1, $2, $3, 'active', 'Europe/Madrid')",
+    )
+    .bind(session_id)
+    .bind(club_id)
+    .bind(active_dj)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/club/djs/{active_dj}"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "on-shift DJ cannot be removed: {body}"
+    );
+    assert_eq!(body["code"], "dj_on_shift");
+
+    // И список честно показывает смену.
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("active dj listed");
+    assert_eq!(row["on_shift"], true, "open session is reported: {row}");
+
+    // Закрытая смена — не считается.
+    sqlx::query("UPDATE session SET status = 'closed' WHERE id = $1")
+        .bind(session_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (_, body) = call(&env, "GET", "/v1/club/djs", None, Some(&club_tok)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == active_dj.to_string())
+        .expect("active dj listed");
+    assert_eq!(row["on_shift"], false, "closed session is off shift: {row}");
+}
+
+/// Режим эксплуатации стенда: админская настройка `runtime_mode` и публичный
+/// `GET /v1/status`.
+///
+/// Проверяем ровно контракт нижнего статус-бара:
+///   * `PATCH /v1/admin/platform-settings` принимает `runtime_mode` и GET
+///     возвращает его же (round-trip + аудит);
+///   * значение вне enum → `422`;
+///   * публичный `GET /v1/status` без токена отдаёт `{mode, source,
+///     runtime_mode, open_signup, payments}`, где ручной режим даёт
+///     `source = "admin"`;
+///   * после сброса в `auto` режим снова разрешается фактами стенда
+///     (в e2e `open_signup = true`, поэтому `test`, если не выставлен
+///     `DROPIT_MAINTENANCE`).
+#[tokio::test]
+async fn e2e_status_runtime_mode() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e статуса пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions), None).await;
+    let pool = repo.pool();
+    let admin = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .unwrap();
+
+    // Публичный статус без токена: стартовое значение — auto, факты стенда
+    // в e2e всегда тестовые (open_signup = true).
+    let (s, body) = call(&env, "GET", "/v1/status", None, None).await;
+    assert_eq!(s, StatusCode::OK, "public status: {body}");
+    assert_eq!(body["runtime_mode"], "auto", "default runtime_mode");
+    assert_eq!(body["open_signup"], true, "e2e env has open signup");
+    assert!(
+        matches!(body["payments"].as_str(), Some("mock") | Some("live")),
+        "payments enum: {body}"
+    );
+
+    // Админ ставит ручной режим — он побеждает любые факты стенда.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/admin/platform-settings",
+        Some(json!({ "runtime_mode": "normal" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "runtime_mode patch: {body}");
+    assert_eq!(body["runtime_mode"], "normal", "GET returns saved mode");
+
+    let (s, body) = call(&env, "GET", "/v1/status", None, None).await;
+    assert_eq!(s, StatusCode::OK, "status after patch: {body}");
+    assert_eq!(body["mode"], "normal");
+    assert_eq!(body["source"], "admin");
+    assert_eq!(body["runtime_mode"], "normal");
+
+    // Значение вне enum отклоняется, настройка не меняется.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/admin/platform-settings",
+        Some(json!({ "runtime_mode": "production" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad enum: {body}");
+    let (_, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/platform-settings",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(body["runtime_mode"], "normal", "rejected patch is no-op");
+
+    // Аудит: изменение режима — административное действие.
+    let audit: Option<(String,)> = sqlx::query_as(
+        "SELECT diff::text FROM audit_log \
+         WHERE action = 'platform_settings.update' ORDER BY at DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap_or(None);
+    let audit = audit.expect("platform_settings.update audited").0;
+    assert!(
+        audit.contains("\"runtime_mode\": \"normal\""),
+        "audit diff has runtime_mode: {audit}"
+    );
+
+    // Назад в auto: режим снова разрешается фактами стенда. Env-флаг
+    // проверяется условно — в среде прогона он обычно выключен.
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        "/v1/admin/platform-settings",
+        Some(json!({ "runtime_mode": "auto" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, body) = call(&env, "GET", "/v1/status", None, None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["runtime_mode"], "auto");
+    match body["source"].as_str() {
+        Some("adaptive") => assert_eq!(
+            body["mode"], "test",
+            "open signup makes adaptive mode test: {body}"
+        ),
+        Some("env") => assert_eq!(
+            body["mode"], "maintenance",
+            "DROPIT_MAINTENANCE forces maintenance: {body}"
+        ),
+        other => panic!("unexpected source after auto: {other:?} ({body})"),
+    }
 }

@@ -7,7 +7,11 @@ mod catalog_routes;
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
+mod e2e_catalog;
+#[cfg(test)]
 mod e2e_f8;
+#[cfg(test)]
+mod e2e_mail;
 #[cfg(test)]
 mod e2e_panels;
 #[cfg(test)]
@@ -17,20 +21,26 @@ mod e2e_payouts;
 #[cfg(test)]
 mod e2e_requests;
 #[cfg(test)]
-mod e2e_catalog;
+mod e2e_reset;
 #[cfg(test)]
 mod e2e_sessions;
 #[cfg(test)]
+mod e2e_signup;
+#[cfg(test)]
 mod e2e_ws;
 mod infra;
+mod mail_routes;
 mod panel_routes;
 mod payments;
 mod payments_routes;
 mod payouts_routes;
 mod rbac;
 mod requests_routes;
+mod reset_routes;
 mod routes;
 mod sessions_routes;
+mod signup_routes;
+mod status_routes;
 mod ws;
 
 use std::net::SocketAddr;
@@ -55,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
     let db_url = std::env::var("DATABASE_URL")
         .or_else(|_| std::env::var("DROPIT_DATABASE_URL"))
         .ok();
-    let (repo, sessions, requests, billing, payouts, jobs) = if let Some(url) = db_url {
+    let (repo, sessions, requests, billing, payouts, jobs, mail) = if let Some(url) = db_url {
         match dropit_infra_db::connect(&url).await {
             Ok(pool) => {
                 tracing::info!("database connected (pool ready)");
@@ -79,16 +89,19 @@ async fn main() -> anyhow::Result<()> {
                     Some(std::sync::Arc::new(dropit_infra_db::JobsRepo::new(
                         pool.as_ref().clone(),
                     ))),
+                    Some(std::sync::Arc::new(dropit_infra_db::mail::MailRepo::new(
+                        pool.as_ref().clone(),
+                    ))),
                 )
             }
             Err(e) => {
                 tracing::warn!("database unreachable ({e}) — data routes will 503");
-                (None, None, None, None, None, None)
+                (None, None, None, None, None, None, None)
             }
         }
     } else {
         tracing::warn!("DATABASE_URL not set — data routes will 503");
-        (None, None, None, None, None, None)
+        (None, None, None, None, None, None, None)
     };
 
     let env = routes::ApiEnv {
@@ -99,11 +112,17 @@ async fn main() -> anyhow::Result<()> {
         billing,
         payouts,
         jobs,
+        mail,
         ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
         tickets: Some(infra::ticket_store().await),
         bus: Some(infra::event_bus().await),
         stripe: Some(infra::stripe()),
         catalog: Some(infra::catalog()),
+        // Открытая регистрация клуба/DJ (Test Mode stand): включается
+        // только `DROPIT_OPEN_SIGNUP=1|true|yes|on`, по умолчанию выкл.
+        open_signup: infra::open_signup(),
+        // Лимит регистраций/IP/час: DROPIT_SIGNUP_RATE_PER_HOUR, дефолт 10.
+        signup_rate_per_hour: infra::signup_rate_per_hour(),
     };
     let app = routes::router(env);
 

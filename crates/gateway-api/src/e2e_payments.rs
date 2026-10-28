@@ -280,11 +280,7 @@ async fn signed_webhook(
     payment_id: uuid::Uuid,
     amount_minor: i64,
 ) -> (StatusCode, Value) {
-    let pool = env
-        .repo
-        .as_ref()
-        .expect("repo configured in e2e")
-        .pool();
+    let pool = env.repo.as_ref().expect("repo configured in e2e").pool();
     let (intent_id,): (String,) =
         sqlx::query_as("SELECT stripe_payment_intent_id FROM payment WHERE id = $1")
             .bind(payment_id)
@@ -337,7 +333,9 @@ impl dropit_infra_stripe::StripeApi for RejectingStripe {
         &self,
         req: dropit_infra_stripe::CreateIntent,
     ) -> Result<dropit_infra_stripe::IntentResult, dropit_infra_stripe::StripeError> {
-        dropit_infra_stripe::MockStripe.create_payment_intent(req).await
+        dropit_infra_stripe::MockStripe
+            .create_payment_intent(req)
+            .await
     }
     async fn capture(
         &self,
@@ -359,13 +357,17 @@ impl dropit_infra_stripe::StripeApi for RejectingStripe {
         &self,
         req: dropit_infra_stripe::ConnectAccountReq,
     ) -> Result<dropit_infra_stripe::ConnectedAccount, dropit_infra_stripe::StripeError> {
-        dropit_infra_stripe::MockStripe.create_connected_account(req).await
+        dropit_infra_stripe::MockStripe
+            .create_connected_account(req)
+            .await
     }
     async fn retrieve_account(
         &self,
         account_id: &str,
     ) -> Result<dropit_infra_stripe::ConnectedAccount, dropit_infra_stripe::StripeError> {
-        dropit_infra_stripe::MockStripe.retrieve_account(account_id).await
+        dropit_infra_stripe::MockStripe
+            .retrieve_account(account_id)
+            .await
     }
     async fn account_link(
         &self,
@@ -493,10 +495,7 @@ struct CountingStripe {
 
 impl CountingStripe {
     /// Возвращает (провайдер, счётчик) — счётчик читает тест после вызовов.
-    fn new() -> (
-        Self,
-        std::sync::Arc<std::sync::atomic::AtomicU64>,
-    ) {
+    fn new() -> (Self, std::sync::Arc<std::sync::atomic::AtomicU64>) {
         let counter = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         (
             Self {
@@ -515,7 +514,9 @@ impl dropit_infra_stripe::StripeApi for CountingStripe {
     ) -> Result<dropit_infra_stripe::IntentResult, dropit_infra_stripe::StripeError> {
         self.create_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        dropit_infra_stripe::MockStripe.create_payment_intent(req).await
+        dropit_infra_stripe::MockStripe
+            .create_payment_intent(req)
+            .await
     }
     async fn capture(
         &self,
@@ -537,13 +538,17 @@ impl dropit_infra_stripe::StripeApi for CountingStripe {
         &self,
         req: dropit_infra_stripe::ConnectAccountReq,
     ) -> Result<dropit_infra_stripe::ConnectedAccount, dropit_infra_stripe::StripeError> {
-        dropit_infra_stripe::MockStripe.create_connected_account(req).await
+        dropit_infra_stripe::MockStripe
+            .create_connected_account(req)
+            .await
     }
     async fn retrieve_account(
         &self,
         account_id: &str,
     ) -> Result<dropit_infra_stripe::ConnectedAccount, dropit_infra_stripe::StripeError> {
-        dropit_infra_stripe::MockStripe.retrieve_account(account_id).await
+        dropit_infra_stripe::MockStripe
+            .retrieve_account(account_id)
+            .await
     }
     async fn account_link(
         &self,
@@ -706,12 +711,11 @@ async fn e2e_payment_one_per_request_provider_called_once() {
     );
 
     // В БД ровно одна строка payment для request.
-    let (cnt,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
-            .bind(fx.request_id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
+        .bind(fx.request_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 1, "exactly one payment per request");
 }
 
@@ -751,12 +755,11 @@ async fn e2e_payment_idempotency_key_replay_no_500() {
         "provider called once on same-key replay"
     );
 
-    let (cnt,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
-            .bind(fx.request_id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
+        .bind(fx.request_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 1, "no duplicate payment row");
 }
 
@@ -782,24 +785,19 @@ async fn e2e_payment_parallel_race_creates_one_payment() {
     let t1 = token.clone();
     let t2 = token.clone();
     let (r1, r2) = tokio::join!(
-        async {
-            http_call(&env1, "POST", &uri1, None, Some(&t1), Some("race-A")).await
-        },
-        async {
-            http_call(&env2, "POST", &uri2, None, Some(&t2), Some("race-B")).await
-        },
+        async { http_call(&env1, "POST", &uri1, None, Some(&t1), Some("race-A")).await },
+        async { http_call(&env2, "POST", &uri2, None, Some(&t2), Some("race-B")).await },
     );
     // Оба успешны (один 201, другой 200 replay-выигравшего).
     assert!(r1.0.is_success(), "race r1: {r1:?}");
     assert!(r2.0.is_success(), "race r2: {r2:?}");
 
     // В БД ровно ОДНА строка payment — FOR UPDATE по request сериализовал.
-    let (cnt,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
-            .bind(fx.request_id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
+        .bind(fx.request_id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 1, "parallel race must create exactly one payment");
 
     // И оба ответа указывают на один и тот же payment_id.
@@ -843,16 +841,39 @@ async fn e2e_confirm_auth_and_ownership() {
     let body = json!({ "payment_method": "pm_mock" });
 
     // Без токена → 401.
-    let (s, _) = http_call(&fx.env, "POST", &uri, Some(body.clone()), None, Some("c-noauth")).await;
+    let (s, _) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body.clone()),
+        None,
+        Some("c-noauth"),
+    )
+    .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "no token → 401");
 
     // Чужой device-token → 404 (владение, существование не раскрывается).
-    let (s, b) =
-        http_call(&fx.env, "POST", &uri, Some(body.clone()), Some(&foreign), Some("c-foreign")).await;
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body.clone()),
+        Some(&foreign),
+        Some("c-foreign"),
+    )
+    .await;
     assert_eq!(s, StatusCode::NOT_FOUND, "foreign token → 404: {b}");
 
     // Владелец → 200 processing.
-    let (s, b) = http_call(&fx.env, "POST", &uri, Some(body), Some(&owner), Some("c-owner")).await;
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body),
+        Some(&owner),
+        Some("c-owner"),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "owner → 200: {b}");
     assert_eq!(b["status"], "processing");
 }
@@ -888,12 +909,28 @@ async fn e2e_confirm_idempotent_replay() {
     let body = json!({ "payment_method": "pm_mock" });
 
     // Первый confirm → 200 processing.
-    let (s1, b1) = http_call(&fx.env, "POST", &uri, Some(body.clone()), Some(&owner), Some("replay-key")).await;
+    let (s1, b1) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body.clone()),
+        Some(&owner),
+        Some("replay-key"),
+    )
+    .await;
     assert_eq!(s1, StatusCode::OK, "confirm 1: {b1}");
     assert_eq!(b1["status"], "processing");
 
     // Повтор тем же ключом → 200 processing, состояние НЕ меняется.
-    let (s2, b2) = http_call(&fx.env, "POST", &uri, Some(body), Some(&owner), Some("replay-key")).await;
+    let (s2, b2) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body),
+        Some(&owner),
+        Some("replay-key"),
+    )
+    .await;
     assert_eq!(s2, StatusCode::OK, "confirm replay: {b2}");
     assert_eq!(b2["status"], "processing");
 
@@ -962,10 +999,26 @@ async fn e2e_confirm_parallel_race_does_not_cancel() {
     let t2 = token.clone();
     let (r1, r2) = tokio::join!(
         async {
-            http_call(&env1, "POST", &uri1, Some(b1), Some(&t1), Some("cfm-race-A")).await
+            http_call(
+                &env1,
+                "POST",
+                &uri1,
+                Some(b1),
+                Some(&t1),
+                Some("cfm-race-A"),
+            )
+            .await
         },
         async {
-            http_call(&env2, "POST", &uri2, Some(b2), Some(&t2), Some("cfm-race-B")).await
+            http_call(
+                &env2,
+                "POST",
+                &uri2,
+                Some(b2),
+                Some(&t2),
+                Some("cfm-race-B"),
+            )
+            .await
         },
     );
 
@@ -985,19 +1038,16 @@ async fn e2e_confirm_parallel_race_does_not_cancel() {
     );
 
     // Деньги не захвачены (capture — отдельный вебхук), ledger/split пусты.
-    let (lc,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM ledger_entry WHERE ref = $1",
-    )
-    .bind(payment.id.to_string())
-    .fetch_one(&fx.pool)
-    .await
-    .unwrap();
-    let (sc,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM split WHERE payment_id = $1")
-            .bind(payment.id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (lc,): (i64,) = sqlx::query_as("SELECT count(*) FROM ledger_entry WHERE ref = $1")
+        .bind(payment.id.to_string())
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    let (sc,): (i64,) = sqlx::query_as("SELECT count(*) FROM split WHERE payment_id = $1")
+        .bind(payment.id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(lc, 0, "no ledger on confirm-only");
     assert_eq!(sc, 0, "no split on confirm-only");
 }
@@ -1038,7 +1088,15 @@ async fn e2e_confirm_guard_failure_cancels_no_capture() {
     let uri = format!("/v1/payments/{}/confirm", payment.id);
     let token = fx.guest_id.to_string();
     let body = json!({ "payment_method": "pm_mock" });
-    let (s, b) = http_call(&fx.env, "POST", &uri, Some(body), Some(&token), Some("guard-cfm")).await;
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri,
+        Some(body),
+        Some(&token),
+        Some("guard-cfm"),
+    )
+    .await;
     assert_eq!(s, StatusCode::CONFLICT, "guard: closed session: {s} {b}");
     assert_eq!(b["code"], "session_paused", "guard code: {b}");
 
@@ -1052,12 +1110,11 @@ async fn e2e_confirm_guard_failure_cancels_no_capture() {
         .fetch_one(&fx.pool)
         .await
         .unwrap();
-    let (sc,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM split WHERE payment_id = $1")
-            .bind(payment.id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (sc,): (i64,) = sqlx::query_as("SELECT count(*) FROM split WHERE payment_id = $1")
+        .bind(payment.id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(lc, 0, "no ledger on cancelled intent");
     assert_eq!(sc, 0, "no split on cancelled intent");
 }
@@ -1098,7 +1155,15 @@ async fn e2e_idempotency_key_foreign_request_conflict() {
     let uri_b = format!("/v1/requests/{}/payment", req_b.id);
 
     // A с ключом K → 201 created.
-    let (s, b) = http_call(&fx.env, "POST", &uri_a, None, Some(&token), Some("shared-key-K")).await;
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri_a,
+        None,
+        Some(&token),
+        Some("shared-key-K"),
+    )
+    .await;
     assert_eq!(s, StatusCode::CREATED, "create A: {b}");
     let id_a = b["payment_id"]
         .as_str()
@@ -1106,12 +1171,16 @@ async fn e2e_idempotency_key_foreign_request_conflict() {
         .to_string();
 
     // B (другой request) с тем же ключом K → 409 idempotency_conflict.
-    let (s, b) = http_call(&fx.env, "POST", &uri_b, None, Some(&token), Some("shared-key-K")).await;
-    assert_eq!(
-        s,
-        StatusCode::CONFLICT,
-        "foreign key must conflict: {b}"
-    );
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri_b,
+        None,
+        Some(&token),
+        Some("shared-key-K"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "foreign key must conflict: {b}");
     assert_eq!(b["code"], "idempotency_conflict", "conflict code: {b}");
     // Чужой payment_id НЕ выдан.
     assert!(
@@ -1120,17 +1189,23 @@ async fn e2e_idempotency_key_foreign_request_conflict() {
     );
 
     // Платёж B НЕ создан.
-    let (cnt_b,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
-            .bind(req_b.id)
-            .fetch_one(&fx.pool)
-            .await
-            .unwrap();
+    let (cnt_b,): (i64,) = sqlx::query_as("SELECT count(*) FROM payment WHERE request_id = $1")
+        .bind(req_b.id)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
     assert_eq!(cnt_b, 0, "no payment created for foreign request B");
 
     // Replay того же request A с тем же ключом → тот же payment_id (200).
-    let (s, b) =
-        http_call(&fx.env, "POST", &uri_a, None, Some(&token), Some("shared-key-K")).await;
+    let (s, b) = http_call(
+        &fx.env,
+        "POST",
+        &uri_a,
+        None,
+        Some(&token),
+        Some("shared-key-K"),
+    )
+    .await;
     assert_eq!(s, StatusCode::OK, "replay A: {b}");
     assert_eq!(
         b["payment_id"].as_str().unwrap(),

@@ -718,7 +718,10 @@ mod tests {
             .await
             .unwrap();
         let guest_id = Uuid::now_v7();
-        identity.create_guest_device(guest_id, "ios", None).await.unwrap();
+        identity
+            .create_guest_device(guest_id, "ios", None)
+            .await
+            .unwrap();
         sessions
             .grant_session_guest(session.id, guest_id)
             .await
@@ -854,9 +857,15 @@ mod tests {
         let (session_id, guest_a, track_id, _, _) = fixtures(&pool).await;
         let identity = IdentityRepo::new(pool.clone());
         let guest_b = Uuid::now_v7();
-        identity.create_guest_device(guest_b, "android", None).await.unwrap();
+        identity
+            .create_guest_device(guest_b, "android", None)
+            .await
+            .unwrap();
         // Гостю B нужен грант в той же (или любой active) сессии.
-        SessionRepo::new(pool.clone()).grant_session_guest(session_id, guest_b).await.unwrap();
+        SessionRepo::new(pool.clone())
+            .grant_session_guest(session_id, guest_b)
+            .await
+            .unwrap();
         let repo = RequestRepo::new(pool.clone());
         let key = format!("w5e-foreign-{}", Uuid::now_v7());
 

@@ -3,12 +3,14 @@
 //!
 //! Правило: отсутствие сервиса не валит воркер. БД-задачи без `DATABASE_URL`
 //! пропускаются (статус `skipped`); NATS без `NATS_URL` → [`NoopBus`];
-//! push без ключей → [`NoopPush`].
+//! push без ключей → [`NoopPush`]; почта без `RESEND_API_KEY` → `NoopMail`.
 
 use std::sync::Arc;
 
+use dropit_infra_db::mail::MailRepo;
 use dropit_infra_db::outbox::PgOutboxStore;
 use dropit_infra_db::{JobsRepo, PayoutRepo};
+use dropit_infra_mail::{MailSender, NoopMail, ResendSender};
 use dropit_infra_nats::{MessageBus, NatsBus, NoopBus};
 use dropit_infra_push::{NoopPush, PushSender, RoutingPush};
 
@@ -33,6 +35,10 @@ pub struct WorkerEnv {
     pub jobs: Option<JobsRepo>,
     /// Репозиторий выплат/сверки.
     pub payouts: Option<PayoutRepo>,
+    /// Отправитель писем: `ResendSender` при ключах, иначе `NoopMail`.
+    pub mail_sender: Arc<dyn MailSender>,
+    /// Репозиторий очереди писем (None — без БД).
+    pub mail: Option<MailRepo>,
 }
 
 impl WorkerEnv {
@@ -40,12 +46,17 @@ impl WorkerEnv {
     pub async fn build(config: Config) -> WorkerEnv {
         let pool = build_pool(&config).await;
         let (bus, nats_connected) = build_bus().await;
-        let outbox_store = pool
-            .as_ref()
-            .map(|p| Arc::new(PgOutboxStore::with_max_attempts(p.clone(), config.outbox_max_attempts)));
+        let outbox_store = pool.as_ref().map(|p| {
+            Arc::new(PgOutboxStore::with_max_attempts(
+                p.clone(),
+                config.outbox_max_attempts,
+            ))
+        });
         let push_sender = build_push();
         let jobs = pool.as_ref().map(|p| JobsRepo::new(p.clone()));
         let payouts = pool.as_ref().map(|p| PayoutRepo::new(p.clone()));
+        let mail = pool.as_ref().map(|p| MailRepo::new(p.clone()));
+        let mail_sender = build_mail();
 
         if let Some(r) = redis_url() {
             tracing::info!(redis_url = %r, "redis url detected (workers use it indirectly via shared infra)");
@@ -61,6 +72,8 @@ impl WorkerEnv {
             push_sender,
             jobs,
             payouts,
+            mail_sender,
+            mail,
         }
     }
 }
@@ -89,7 +102,9 @@ async fn build_pool(config: &Config) -> Option<sqlx::PgPool> {
 /// Собрать шину: NatsBus при `NATS_URL`, иначе NoopBus.
 async fn build_bus() -> (Arc<dyn MessageBus>, bool) {
     let Some(url) = nats_url() else {
-        tracing::warn!("nats: NATS_URL не задан — используется NoopBus, outbox-реле будет пропущен");
+        tracing::warn!(
+            "nats: NATS_URL не задан — используется NoopBus, outbox-реле будет пропущен"
+        );
         return (Arc::new(NoopBus), false);
     };
     match NatsBus::connect(&url, NATS_STREAM).await {
@@ -124,6 +139,30 @@ fn build_push() -> Arc<dyn PushSender> {
         None => {
             tracing::info!("push: NoopPush (ключи не заданы)");
             Arc::new(NoopPush)
+        }
+    }
+}
+
+/// Собрать отправителя писем: `ResendSender` при наличии ключей, иначе `NoopMail`.
+///
+/// Недонастроенная группа (ключ есть, `MAIL_FROM` нет) — это ошибка
+/// конфигурации, а не повод падать: пишем `warn` и деградируем в `NoopMail`,
+/// чтобы письма продолжали копиться в журнале и были видны в админке.
+fn build_mail() -> Arc<dyn MailSender> {
+    match dropit_infra_mail::from_env() {
+        Some(cfg) => match ResendSender::new(cfg.resend) {
+            Ok(sender) => {
+                tracing::info!("mail: resend");
+                Arc::new(sender)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "mail: конфигурация невалидна — NoopMail");
+                Arc::new(NoopMail)
+            }
+        },
+        None => {
+            tracing::info!("mail: NoopMail (RESEND_API_KEY не задан)");
+            Arc::new(NoopMail)
         }
     }
 }

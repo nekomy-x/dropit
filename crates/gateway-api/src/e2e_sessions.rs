@@ -270,8 +270,7 @@ async fn e2e_sessions_current() {
         }
     };
     let sessions = SessionRepo::new(repo.pool());
-    let env =
-        crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let env = crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
     let pool = repo.pool();
 
     // --- Фикстуры: клуб A/B + DJ + сессии -------------------------
@@ -327,11 +326,16 @@ async fn e2e_sessions_current() {
     assert_eq!(sess["dj"]["id"], json!(dj_a));
     assert_eq!(sess["dj"]["display_name"], "DJ E2E Club A");
     assert_eq!(sess["requests_open"], true);
-    assert!(sess["closes_at"].is_null(), "active session: closes_at null");
+    assert!(
+        sess["closes_at"].is_null(),
+        "active session: closes_at null"
+    );
     assert!(sess["opened_at"].as_str().is_some(), "opened_at present");
     // grant_expires_at — будущая RFC3339 (плановое закрытие QR).
     let ge = chrono::DateTime::parse_from_rfc3339(
-        sess["guest_grant_expires_at"].as_str().expect("grant_expires_at"),
+        sess["guest_grant_expires_at"]
+            .as_str()
+            .expect("grant_expires_at"),
     )
     .expect("grant_expires_at rfc3339");
     assert!(ge.with_timezone(&chrono::Utc) > chrono::Utc::now());
@@ -461,14 +465,8 @@ async fn e2e_sessions_current() {
         .keys
         .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
         .unwrap();
-    let (s, body) = crate::e2e::call(
-        &env,
-        "GET",
-        "/v1/sessions/current",
-        None,
-        Some(&club_jwt),
-    )
-    .await;
+    let (s, body) =
+        crate::e2e::call(&env, "GET", "/v1/sessions/current", None, Some(&club_jwt)).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "club_owner token: {body}");
     assert_eq!(body["code"], "forbidden");
 }
@@ -480,13 +478,12 @@ async fn e2e_sessions_current() {
 /// Подсчитывает активные QR-токены сессии в БД (для проверок
 /// идемпотентности и реального состояния).
 async fn count_active_qr(pool: &sqlx::PgPool, session_id: Uuid) -> i64 {
-    let row: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM qr_token WHERE session_id = $1 AND active",
-    )
-    .bind(session_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    let row: (i64,) =
+        sqlx::query_as("SELECT count(*) FROM qr_token WHERE session_id = $1 AND active")
+            .bind(session_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
     row.0
 }
 
@@ -514,8 +511,7 @@ async fn e2e_qr_activate_deactivate_real_state() {
         }
     };
     let sessions = SessionRepo::new(repo.pool());
-    let env =
-        crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let env = crate::e2e::app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
     let pool = repo.pool();
 
     // --- Фикстуры: клуб + DJ + сессия (active) ---------------------
@@ -641,7 +637,11 @@ async fn e2e_qr_activate_deactivate_real_state() {
         Some(&device2.to_string()),
     )
     .await;
-    assert_eq!(s, StatusCode::NOT_FOUND, "new guest blocked after deactivate: {body}");
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "new guest blocked after deactivate: {body}"
+    );
     assert_eq!(body["code"], "not_found");
 
     // --- Уже вошедший гость сохраняет доступ (current -> 200) -------
@@ -653,7 +653,11 @@ async fn e2e_qr_activate_deactivate_real_state() {
         Some(&device.to_string()),
     )
     .await;
-    assert_eq!(s, StatusCode::OK, "already-joined guest keeps access: {body}");
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "already-joined guest keeps access: {body}"
+    );
     assert_eq!(body["session"]["club_name"], "W5D Club");
     // Грант не отозван — основа «вечер продолжается для вошедших».
 

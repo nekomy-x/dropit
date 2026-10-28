@@ -6,7 +6,7 @@
 //!   dropit-workers --help | -h    — справка
 //!
 //! `<job>` ∈ {`outbox`, `payouts`, `reconcile`, `retention`,
-//! `close-sessions`, `push`}.
+//! `close-sessions`, `push`, `mail`}.
 
 use std::process::exit;
 
@@ -18,6 +18,7 @@ pub const ONCE_JOBS: &[&str] = &[
     "retention",
     "close-sessions",
     "push",
+    "mail",
 ];
 
 /// Распознанная команда.
@@ -90,6 +91,7 @@ pub fn help_text() -> String {
             "retention" => "GDPR/retention: псевдонимизация по срокам",
             "close-sessions" => "автозакрытие сессий по расписанию клуба",
             "push" => "отправка накопленных push-уведомлений",
+            "mail" => "отправка очереди транзакционных писем (Resend)",
             _ => "",
         };
         s.push_str(&format!("    {j:<16}{desc}\n"));
@@ -198,7 +200,11 @@ mod tests {
     #[test]
     fn with_args_wrapper_is_harmless() {
         with_args(&["run"], || {
-            assert_eq!(ONCE_JOBS.len(), 6);
+            assert_eq!(
+                ONCE_JOBS.len(),
+                7,
+                "outbox, payouts, reconcile, retention, close-sessions, push, mail"
+            );
         });
     }
 }

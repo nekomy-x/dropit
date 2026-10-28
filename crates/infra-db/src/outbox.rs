@@ -250,11 +250,10 @@ mod tests {
 
     /// Счётчик невыпущенных строк.
     async fn pending(pool: &PgPool) -> i64 {
-        let (c,): (i64,) =
-            sqlx::query_as("SELECT count(*) FROM outbox WHERE published_at IS NULL")
-                .fetch_one(pool)
-                .await
-                .unwrap();
+        let (c,): (i64,) = sqlx::query_as("SELECT count(*) FROM outbox WHERE published_at IS NULL")
+            .fetch_one(pool)
+            .await
+            .unwrap();
         c
     }
 
@@ -331,7 +330,10 @@ mod tests {
         s.mark_failed(id, "boom-3").await.expect("fail3");
         assert_eq!(attempts_of(&pool, id).await, 3);
         let claimed = s.claim_batch(10).await.expect("claim after poison");
-        assert!(claimed.is_empty(), "отравленная строка не должна забираться");
+        assert!(
+            claimed.is_empty(),
+            "отравленная строка не должна забираться"
+        );
 
         // last_error сохранён (колонка гарантирована ensure).
         let (err,): (Option<String>,) =

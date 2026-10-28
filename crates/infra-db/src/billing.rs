@@ -670,12 +670,14 @@ impl BillingRepo {
             // АКТУАЛЬНОЕ состояние и возвращаем его — не рапортуем об
             // отмене и не возвращаем ошибку. Это защита подтверждённого
             // платежа от параллельного replay confirm.
-            None => sqlx::query_as::<_, PaymentRow>(&format!(
-                "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1"
-            ))
-            .bind(payment_id)
-            .fetch_one(&mut *tx)
-            .await?,
+            None => {
+                sqlx::query_as::<_, PaymentRow>(&format!(
+                    "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1"
+                ))
+                .bind(payment_id)
+                .fetch_one(&mut *tx)
+                .await?
+            }
         };
         tx.commit().await?;
         Ok(row)

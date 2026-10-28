@@ -36,6 +36,11 @@ tags:
     description: Профиль гостя (push-токен, upgrade)
   - name: websocket
     description: Live-обновления и одноразовые билеты WS
+  - name: mail
+    description: |
+      Транзакционные письма через Resend (ADR-008): журнал, повторная
+      отправка, подавления, вебхуки доставки. Отправка выполняется
+      воркером `dropit-workers` (задача `mail`), не в обработчике запроса.
 paths:
   /healthz:
     get:
@@ -54,13 +59,54 @@ paths:
       tags: [health]
       summary: Readiness
       security: []
+      description: |
+        Процесс готов принимать трафик. Дополнительно отдаёт два честных
+        факта о стенде — их читает полоса режима работы
+        «Test mode · open signup · mock payments» в панелях
+        (`packages/ui/DeploymentStatus.tsx`):
+
+          * `open_signup` — тот же флаг, что пускает
+            `/v1/auth/{club,dj}/register` (`DROPIT_OPEN_SIGNUP`);
+          * `payments` — `"live"`, если заданы ключи Stripe
+            (`dropit_infra_stripe::from_env()`), иначе `"mock"`.
+
+        `/healthz` не менялся и остаётся минимальным.
       responses:
         "200":
           description: Готов принимать трафик
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: "#/components/schemas/Ready"
+  /v1/status:
+    get:
+      tags: [health]
+      summary: Режим эксплуатации стенда (test / maintenance / normal)
+      security: []
+      description: |
+        Публичный роут без авторизации: панели опрашивают его один раз при
+        загрузке страницы, чтобы нарисовать нижний статус-бар. Один и тот же
+        бандл стоит на тестовом стенде и в проде, поэтому режим определяет
+        сервер, а не сборка.
+
+        Порядок разрешения (контракт):
+
+          1. `platform_settings.runtime_mode` != `auto` и строка прочитана →
+             этот режим, `source = "admin"`;
+          2. `auto` (или БД недоступна) и `DROPIT_MAINTENANCE` включён
+             (`1`/`true`/`yes`/`on`) → `maintenance`, `source = "env"`;
+          3. иначе адаптивно: открытая регистрация или mock-платежи →
+             `test`, иначе `normal`, `source = "adaptive"`.
+
+        Недоступная БД НЕ валит эндпоинт: ответ всегда `200`, `runtime_mode`
+        тогда `"auto"`, а режим берётся из шагов 2/3.
+      responses:
+        "200":
+          description: Разрешённый режим стенда
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Status"
 
   # ==========================================================
   # F1 — identity
@@ -282,6 +328,361 @@ paths:
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
+
+  # ==========================================================
+  # Открытая регистрация (Test Mode stand) — docs/signup-contract.md
+  # ==========================================================
+  /v1/auth/club/register:
+    post:
+      tags: [identity]
+      summary: Открытая регистрация клуба (без 2FA и подтверждения e-mail)
+      security: []
+      description: |
+        Публичный роут (без auth). Работает только при
+        `DROPIT_OPEN_SIGNUP=1|true|yes|on`; иначе `403 signup_disabled`.
+        Флаг читается при старте процесса — включение/выключение это
+        перезапуск gateway.
+
+        В Test Mode аккаунт сразу рабочий: `club.status='active'` (без
+        верификации админом), поэтому `POST /v1/auth/club/login` сразу
+        возвращает пару токенов без шага 2FA.
+
+        Ответ — сразу пара токенов (авто-логин) в том же формате, что у
+        логина (`TokenPair` развёрнут в корень), плюс доп. поле `club`
+        (клиенты могут игнорировать). Refresh-токен сохраняется в
+        `refresh_token` (новая семья), поэтому ротация и reuse-детекция
+        `/v1/auth/refresh` работают как после логина.
+
+        `slug` генерируется из `name` (транслит → `[a-z0-9-]`); при
+        коллизии `UNIQUE(slug)` добавляется суффикс `-2`, `-3`, … Лимит:
+        `DROPIT_SIGNUP_RATE_PER_HOUR` регистраций с одного IP за час
+        (дефолт 10; на Test Mode стенде — 100, потому что несколько
+        посетителей за одним NAT выжигают малый бюджет за минуты).
+        Учёт в БД, таблица `signup_attempt` (миграция 0011); IP
+        определяется так же, как в `POST /v1/guest/device`
+        (`TRUST_PROXY=1` за nginx). Счётчик fail-open: если таблицы нет
+        (бинарник приехал раньше миграции), регистрация продолжает
+        работать, инцидент пишется в warn-лог.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  examples: [Barrio Latino]
+                email:
+                  type: string
+                  format: email
+                  description: Сравнивается без учёта регистра (citext)
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Argon2id, как в логине
+                city:
+                  type: string
+                  description: Необязательно
+                country:
+                  type: string
+                  pattern: '^[A-Za-z]{2}$'
+                  description: ISO-3166 alpha-2, необязательно
+      responses:
+        "201":
+          description: Клуб создан (status=active), выдана пара токенов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClubRegisterResponse"
+        "400":
+          description: Ошибка валидации (`validation_failed`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Регистрация выключена (`signup_disabled`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: E-mail уже занят (`email_taken`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: |
+            Превышен `DROPIT_SIGNUP_RATE_PER_HOUR` регистраций с IP за час
+            (`rate_limited`; дефолт 10, на стенде 100)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/auth/dj/register:
+    post:
+      tags: [identity]
+      summary: Открытая регистрация DJ (фрилансер или привязка к клубу)
+      security: []
+      description: |
+        Публичный роут (без auth). Гейт — тот же `DROPIT_OPEN_SIGNUP`
+        (иначе `403 signup_disabled`). DJ создаётся `status='active'`.
+
+        Без `club_slug` — фрилансер (`club_id = null`); DJ-консоль увидит
+        только сессии, к которым привязан (в Test Mode допустимо). С
+        `club_slug` — привязка к клубу; неизвестный slug →
+        `404 club_not_found`.
+
+        Ответ — пара токенов (как у логина, `TokenPair` в корне) плюс
+        доп. поле `dj`. Лимит `DROPIT_SIGNUP_RATE_PER_HOUR` (дефолт 10,
+        стенд — 100) регистраций/IP/час общий с регистрацией клуба.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name, email, password]
+              properties:
+                display_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                  examples: [DJ Noche]
+                email:
+                  type: string
+                  format: email
+                  description: Сравнивается без учёта регистра (citext)
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                club_slug:
+                  type: string
+                  description: Slug клуба для привязки; без него — фрилансер
+                  examples: [barrio-latino]
+      responses:
+        "201":
+          description: DJ создан (status=active), выдана пара токенов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DjRegisterResponse"
+        "400":
+          description: Ошибка валидации (`validation_failed`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Регистрация выключена (`signup_disabled`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Клуб по `club_slug` не найден (`club_not_found`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: E-mail уже занят (`email_taken`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: |
+            Превышен `DROPIT_SIGNUP_RATE_PER_HOUR` регистраций с IP за час
+            (`rate_limited`; дефолт 10, на стенде 100)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/auth/admin/register:
+    post:
+      tags: [identity]
+      summary: Публичная регистрация админа — запрещена
+      security: []
+      description: |
+        Админ публично НЕ регистрируется (только seed/админка). Роут
+        существует, чтобы клиент получал внятный `403 forbidden`, а не
+        404. Тело не читается; ответ одинаков при любом теле.
+      responses:
+        "403":
+          description: Всегда `forbidden`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  # ==========================================================
+  # Сброс пароля (клуб / DJ / админ) — Test Mode stand без почты
+  # ==========================================================
+  /v1/auth/password/reset-request:
+    post:
+      tags: [identity]
+      summary: Запросить ссылку сброса пароля
+      security: []
+      description: |
+        Публичный роут (без auth): пароль забыт именно потому, что войти
+        нечем. `role` — `club` | `dj` | `admin`, по умолчанию `club`
+        (фронт присылает его всегда): одно и то же имя ящика может
+        существовать в разных таблицах, роль — часть ключа поиска.
+
+        Ответ ВСЕГДА `202 {requested:true}`, когда тело корректно — и для
+        несуществующего адреса тоже (no user enumeration: иначе форма
+        превращается в оракул «есть ли у вас аккаунт»). `400` — только
+        пустой/кривой e-mail или неизвестная роль.
+
+        Лимит: 5 запросов в час на адрес И на IP (таблица
+        `password_reset_token`, миграция 0015); шестой → `429
+        rate_limited`. Считаются только запросы, по которым выпущен токен
+        (на неизвестный адрес строка не пишется — ответ от этого не
+        меняется).
+
+        ## Test Mode: ссылка в теле ответа
+
+        В репозитории нет мейлера в пути сброса. Поэтому при
+        `DROPIT_RESET_REVEAL_TOKEN=1|true|yes|on` и существующем аккаунте
+        тело `202` ДОПОЛНИТЕЛЬНО содержит `reset_url`
+        (`/reset-password/<token>`) и `expires_at` (RFC3339, TTL 30 минут).
+        Флаг читается на каждом запросе.
+
+        **Прод обязан работать с выключенным флагом и настоящим мейлером**:
+        `reset_url` в ответе — это выдача токена сброса любому, кто знает
+        адрес, то есть обход модели безопасности. При выключенном флаге
+        оба поля отсутствуют, и ответ неотличим от ответа на неизвестный
+        адрес. Ссылка (без пароля) в любом случае пишется в
+        `tracing::info!`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: Сравнивается без учёта регистра (citext)
+                  examples: [owner@club.test]
+                role:
+                  type: string
+                  enum: [club, dj, admin]
+                  default: club
+                  description: |
+                    Тип аккаунта. Неизвестное значение (в т.ч. `guest`) →
+                    `400 validation_failed`.
+      responses:
+        "202":
+          description: |
+            Запрос принят. `reset_url`/`expires_at` — только при включённом
+            `DROPIT_RESET_REVEAL_TOKEN` и существующем аккаунте (Test Mode).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetRequested"
+        "400":
+          description: |
+            Ошибка валидации (`validation_failed`): пустой/кривой e-mail или
+            неизвестная роль
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: |
+            Больше 5 запросов сброса за час на этот адрес или с этого IP
+            (`rate_limited`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: |
+            БД не настроена (`external_service_unavailable`) — тот же
+            паттерн, что у регистрации
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+
+  /v1/auth/password/reset:
+    post:
+      tags: [identity]
+      summary: Сменить пароль по одноразовому токену
+      security: []
+      description: |
+        Публичный роут (без auth). Токен — из письма (на стенде — из
+        `reset_url` ответа `reset-request`); живёт 30 минут и гасится
+        один раз: повторная отправка формы с тем же токеном → `401`.
+
+        Успех — `204 No Content` без тела. Пароль меняется на Argon2id-хеш
+        (тот же, что у регистрации), и ВСЕ refresh-токены субъекта
+        отзываются: украденная сессия не переживает смену пароля.
+
+        Неизвестный, уже использованный и просроченный токен дают ОДИН и
+        тот же `401 invalid_reset_token` — состояние токена наружу не
+        утекает.
+
+        Валидация пароля идёт до погашения токена: `400` не сжигает
+        ссылку, и пользователь с опечаткой не запрашивает новую.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token:
+                  type: string
+                  description: Одноразовый токен из ссылки (opaque)
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Новый пароль (границы — как у регистрации)
+      responses:
+        "204":
+          description: Пароль изменён, refresh-токены субъекта отозваны
+        "400":
+          description: |
+            Ошибка валидации (`validation_failed`): пароль короче 8 или
+            длиннее 128 символов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: |
+            Токен неизвестен, уже использован или истёк
+            (`invalid_reset_token`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: БД не настроена (`external_service_unavailable`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 
   # RBAC-эхо (демо-роуты каждой роли)
   /v1/dj/echo:
@@ -817,6 +1218,58 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
         "409":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/guest/verify:
+    post:
+      tags: [guest]
+      summary: Подтверждение e-mail кодом из письма
+      description: |
+        Код приходит письмом `guest_verify` после `POST /v1/guest/upgrade`
+        (ADR-008). Успех выставляет `guest_account.verified = TRUE`; код
+        одноразовый и живёт 15 минут.
+
+        Перебор ограничен: пять неверных попыток гасят код, после чего
+        нужен новый (повторный апгрейд). Сравнение — по SHA-256 от
+        `"{account_id}:{code}"`, сам код в БД не хранится.
+      security:
+        - deviceToken: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: Шестизначный код из письма
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "200":
+          description: Адрес подтверждён
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [verified]
+                properties:
+                  verified: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Error"
+        "410":
+          description: |
+            `code_expired` — код неизвестен, просрочен или погашен
+            исчерпанием попыток.
+          $ref: "#/components/responses/Error"
+        "422":
+          description: |
+            `invalid_code` — код не совпал; в `details.attempts_left`
+            остаток попыток.
           $ref: "#/components/responses/Error"
         "503":
           $ref: "#/components/responses/Error"
@@ -1650,12 +2103,222 @@ paths:
   /v1/club/djs:
     get:
       tags: [club-panel]
-      summary: Диджеи клуба
+      summary: Состав DJ клуба
+      description: |
+        Строки `dj` этого клуба. По умолчанию — только действующий состав
+        (`removed_at IS NULL`); `?include_removed=1` добавляет снятых с
+        состава, чтобы их можно было вернуть.
+
+        `online` — heartbeat моложе `presence_ttl_seconds` (DJ-консоль
+        зовёт `POST /v1/dj/presence` раз в 30 с); `on_shift` — у DJ есть
+        незакрытая сессия; `note` — рабочая заметка клуба.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: include_removed
+          required: false
+          schema: { type: string, enum: ["0", "1", "true", "false"] }
       responses:
-        "200": { description: Список }
+        "200":
+          description: Список
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [server_time, presence_ttl_seconds, items]
+                properties:
+                  server_time: { type: string, format: date-time }
+                  presence_ttl_seconds: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, display_name, email, status, online, on_shift, removed]
+                      properties:
+                        id: { type: string, format: uuid }
+                        display_name: { type: string }
+                        email: { type: string, format: email }
+                        status: { type: string, enum: [invited, active, suspended, blocked] }
+                        note: { type: string, nullable: true, maxLength: 500 }
+                        last_seen_at: { type: string, format: date-time, nullable: true }
+                        presence_age_seconds: { type: integer, nullable: true }
+                        online: { type: boolean }
+                        on_shift: { type: boolean }
+                        open_session_id: { type: string, format: uuid, nullable: true }
+                        removed: { type: boolean }
+                        removed_at: { type: string, format: date-time, nullable: true }
+                        invite_expires_at: { type: string, format: date-time, nullable: true }
+                        has_password: { type: boolean }
+                        created_at: { type: string, format: date-time }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/dj/invite/accept:
+    post:
+      tags: [dj]
+      summary: Активировать приглашение DJ
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_token, password]
+              properties:
+                invite_token: { type: string }
+                password: { type: string, minLength: 10, maxLength: 128 }
+      responses:
+        "200": { description: Аккаунт активирован }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/club/djs/{id}:
+    patch:
+      tags: [club-panel]
+      summary: Изменить доступ и/или заметку DJ клуба
+      description: |
+        Поля независимы и оба необязательны, но хотя бы одно должно быть
+        передано:
+
+        * `status` — `active` | `suspended`; допускается только для DJ,
+          принявшего приглашение (иначе `409 dj_status_locked`);
+        * `note` — строка до 500 символов (`null` очищает заметку).
+
+        Клуб берётся из токена, `club_id` в теле отсутствует. Снятый с
+        состава DJ (`removed_at IS NOT NULL`) отвечает `404 dj_not_found` —
+        его сначала возвращают через `/restore`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, suspended] }
+                note: { type: string, nullable: true, maxLength: 500 }
+      responses:
+        "200":
+          description: Доступ и/или заметка изменены
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, display_name, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  display_name: { type: string }
+                  status: { type: string }
+                  note: { type: string, nullable: true }
+        "400":
+          description: |
+            Пустое тело (ни `status`, ни `note`), неизвестный `status` или
+            заметка длиннее 500 символов.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [club-panel]
+      summary: Снять DJ с состава
+      description: |
+        Мягкое удаление: строка `dj` сохраняется (`removed_at`), потому что
+        на неё ссылаются история смен и выплат; доступ блокируется, инвайт
+        аннулируется, DJ скрывается из состава и может быть возвращён через
+        `POST /v1/club/djs/{id}/restore`.
+
+        Два исключения:
+
+        * DJ, так и не принявший приглашение (нет пароля, нет смен),
+          удаляется физически — иначе `UNIQUE(email)` навсегда заблокировал
+          бы повторный инвайт на тот же адрес (`deleted: "hard"`);
+        * DJ с открытой сменой снять нельзя — `409 dj_on_shift`, сначала
+          закрывается смена.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: DJ снят с состава
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  display_name: { type: string }
+                  deleted: { type: string, enum: [soft, hard] }
+                  status: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/club/djs/{id}/restore:
+    post:
+      tags: [club-panel]
+      summary: Вернуть DJ в состав
+      description: |
+        Снимает `removed_at` и восстанавливает доступ (`status = active`).
+        Идемпотентно: на DJ, который и так в составе, отвечает 200 с текущим
+        состоянием.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: DJ в составе
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, display_name, status, removed]
+                properties:
+                  id: { type: string, format: uuid }
+                  display_name: { type: string }
+                  status: { type: string }
+                  removed: { type: boolean }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/dj/presence:
+    post:
+      tags: [dj]
+      summary: Heartbeat присутствия DJ
+      description: |
+        DJ-консоль зовёт раз в 30 с, пока вкладка видима; клуб читает
+        `last_seen_at` в `GET /v1/club/djs` и считает DJ «в сети», пока
+        heartbeat моложе 90 с. Ничего не кешируется и не пишется в
+        реальном времени: это одна строка `dj.last_seen_at`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Присутствие отмечено
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [last_seen_at, online]
+                properties:
+                  last_seen_at: { type: string, format: date-time }
+                  online: { type: boolean }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/club/djs/invite:
     post:
@@ -1965,7 +2628,7 @@ paths:
       summary: Настройки платформы (NULL = не задано владельцем)
       security: [{ bearerAuth: [] }]
       responses:
-        "200": { description: Текущие значения }
+        "200": { description: Текущие значения (включая runtime_mode) }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
@@ -1975,6 +2638,13 @@ paths:
       description: |
         Значения задаёт владелец (Q11); код проверяет только
         диапазоны. clear_* флаги сбрасывают поля в NULL.
+
+        `runtime_mode` — режим эксплуатации стенда (test / maintenance /
+        normal), который читает публичный `GET /v1/status` для нижнего
+        статус-бара панелей. `auto` — режим выводится из фактов стенда
+        (открытая регистрация или mock-платежи → test; иначе normal),
+        env-флаг `DROPIT_MAINTENANCE` может форсировать maintenance.
+        Значение вне enum → `422`.
       security: [{ bearerAuth: [] }]
       requestBody:
         content:
@@ -1988,6 +2658,7 @@ paths:
                 min_price_minor: { type: integer, minimum: 1 }
                 max_price_minor: { type: integer, minimum: 1 }
                 dj_share_of_remainder_bp: { type: integer, minimum: 0, maximum: 10000 }
+                runtime_mode: { type: string, enum: [auto, test, maintenance, normal] }
                 clear_commission_percent_bp: { type: boolean }
                 clear_commission_fixed_minor: { type: boolean }
                 clear_min_price_minor: { type: boolean }
@@ -2028,6 +2699,284 @@ paths:
         "200": { description: Запросы/принято/сыграно/доход }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+
+  # ==========================================================
+  # Mail (ADR-008): транзакционные письма через Resend
+  # ==========================================================
+  /webhooks/resend:
+    post:
+      tags: [mail]
+      summary: Вебхук доставки Resend (Svix-подпись)
+      description: |
+        Публичный роут без Bearer-токена: доверие даёт только подпись
+        Svix (`svix-id`, `svix-timestamp`, `svix-signature`) над СЫРЫМ
+        телом. Подпись проверяется по HMAC-SHA256 строки
+        `"{svix_id}.{svix_timestamp}.{raw_body}"` секретом
+        `RESEND_WEBHOOK_SECRET` (`whsec_…`), допуск по времени — 300 с.
+
+        Идемпотентность: повтор с уже известным `svix-id` отвечает `200`
+        с `duplicate: true` и ничего не меняет. Тело разбирается ТОЛЬКО
+        после проверки подписи; неизвестный `type` — не ошибка (событие
+        пишется в журнал, состояние письма не меняется).
+
+        События → состояние письма: `email.sent` → `sent`,
+        `email.delivered` → `delivered`, `email.delivery_delayed` →
+        `delivery_delayed`, `email.bounced` → `bounced` (+адрес в
+        suppression), `email.complained` → `complained` (+suppression),
+        `email.failed` → `failed`, `email.suppressed` → `suppressed`.
+        `email.opened`/`email.clicked` пишутся только в журнал.
+      security: []
+      parameters:
+        - name: svix-id
+          in: header
+          required: true
+          schema: { type: string }
+        - name: svix-timestamp
+          in: header
+          required: true
+          schema: { type: string }
+        - name: svix-signature
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Тело события Resend (разбирается после проверки подписи)
+      responses:
+        "200":
+          description: Принято (или повтор известного события)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+                  duplicate: { type: boolean }
+                required: [received]
+        "400":
+          description: |
+            `mail_webhook_invalid` — подпись не сходится, timestamp вне
+            допуска или тело не разбирается.
+          $ref: "#/components/responses/Error"
+        "413":
+          description: Тело больше 1 МиБ
+          $ref: "#/components/responses/Error"
+        "503":
+          description: |
+            `mail_webhook_disabled` — `RESEND_WEBHOOK_SECRET` не задан;
+            неподписанные события не принимаются ни при каких условиях.
+          $ref: "#/components/responses/Error"
+  /v1/admin/mail:
+    get:
+      tags: [mail]
+      summary: Журнал писем (админ)
+      description: |
+        Keyset-пагинация по `(created_at DESC, id DESC)`; курсор
+        непрозрачен для клиента. `q` — подстрока в адресе, теме и
+        шаблоне (без учёта регистра). `status` — одно из значений
+        стейт-машины письма; мусор → `400 invalid_status`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [queued, sending, sent, delivered, delivery_delayed, bounced, complained, failed, suppressed]
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, maxLength: 200 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Страница журнала
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MailItem" }
+                  next_cursor:
+                    type: string
+                    nullable: true
+                required: [items]
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/stats:
+    get:
+      tags: [mail]
+      summary: Счётчики писем по статусам за окно
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: window_hours
+          in: query
+          required: false
+          schema: { type: integer, default: 24, minimum: 1, maximum: 720 }
+      responses:
+        "200":
+          description: Счётчики
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MailStats" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/suppressions:
+    get:
+      tags: [mail]
+      summary: Список подавленных адресов (bounce/complaint/manual)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 100, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Адреса, на которые письма не отправляются
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/MailSuppression" }
+                required: [items]
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/suppressions/{email}:
+    delete:
+      tags: [mail]
+      summary: Снять подавление адреса
+      description: |
+        Ручное снятие после разбора причины. Идемпотентно: отсутствующий
+        адрес → `200 {"removed": false}`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: email
+          in: path
+          required: true
+          schema: { type: string, format: email }
+      responses:
+        "200":
+          description: Результат удаления
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  removed: { type: boolean }
+                required: [removed]
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/{id}:
+    get:
+      tags: [mail]
+      summary: Письмо целиком + журнал событий доставки
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Письмо и его события
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MailDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404":
+          description: "mail_not_found"
+          $ref: "#/components/responses/Error"
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/{id}/resend:
+    post:
+      tags: [mail]
+      summary: Повторная отправка письма
+      description: |
+        Создаёт НОВОЕ письмо с тем же содержимым и ключом
+        идемпотентности `<original>:r<n>` — исходная строка журнала не
+        меняется (история доставки остаётся честной). Письмо ставится в
+        очередь; фактическая отправка — воркером.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Новое письмо в очереди
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [queued] }
+                required: [id, status]
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404":
+          description: "mail_not_found"
+          $ref: "#/components/responses/Error"
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/mail/test:
+    post:
+      tags: [mail]
+      summary: Тестовое письмо (проверка ключа и домена)
+      description: |
+        Ставит в очередь письмо по шаблону `mail_test`. Без
+        `RESEND_API_KEY` работает `NoopMail`: строка журнала создаётся,
+        в сеть ничего не уходит (`noop` в отчёте воркера).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: string, format: email }
+              required: [to]
+      responses:
+        "200":
+          description: Письмо в очереди
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [queued] }
+                required: [id, status]
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422":
+          description: "`mail_validation_failed` — невалидный адрес"
+          $ref: "#/components/responses/Error"
         "503": { $ref: "#/components/responses/Error" }
 
   # ==========================================================
@@ -2079,6 +3028,95 @@ components:
         version:
           type: string
       required: [status]
+    Ready:
+      type: object
+      description: |
+        Ответ `/readyz`. `open_signup` и `payments` — источник правды для
+        полосы режима работы «Test mode · open signup · mock payments»:
+        один и тот же бандл сегодня
+        стоит на стенде, а завтра в проде, поэтому режим определяет сервер,
+        а не сборка. Значения правдивые, а не декоративные.
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+          description: Версия gateway (`CARGO_PKG_VERSION`)
+        open_signup:
+          type: boolean
+          description: |
+            `DROPIT_OPEN_SIGNUP` включён — публичная регистрация клуба/DJ
+            работает (признак Test Mode)
+        payments:
+          type: string
+          enum: [mock, live]
+          description: |
+            `live` — заданы ключи Stripe (`dropit_infra_stripe::from_env()`);
+            `mock` — платежи имитируются
+      required: [status, version, open_signup, payments]
+    Status:
+      type: object
+      description: |
+        Ответ `GET /v1/status`. `mode` — эффективный режим для нижнего
+        статус-бара панелей, `source` — откуда он взялся (ручная настройка
+        админа, env-флаг или адаптивные факты стенда), `runtime_mode` —
+        сырое значение настройки в БД (при недоступной БД — `"auto"`).
+      properties:
+        mode:
+          type: string
+          enum: [test, maintenance, normal]
+          description: |
+            `test` — тестовый стенд (открытая регистрация или mock-платежи),
+            `maintenance` — обслуживание, `normal` — боевой режим
+        source:
+          type: string
+          enum: [admin, env, adaptive]
+          description: |
+            `admin` — режим задан в админ-панели; `env` — включён
+            `DROPIT_MAINTENANCE`; `adaptive` — выведен из фактов стенда
+        runtime_mode:
+          type: string
+          enum: [auto, test, maintenance, normal]
+          description: |
+            Сырое значение `platform_settings.runtime_mode`; `"auto"` —
+            ручного решения нет (режим разрешён по шагам 2/3)
+        open_signup:
+          type: boolean
+          description: |
+            `DROPIT_OPEN_SIGNUP` включён (признак Test Mode)
+        payments:
+          type: string
+          enum: [mock, live]
+          description: |
+            `live` — заданы ключи Stripe (`dropit_infra_stripe::from_env()`);
+            `mock` — платежи имитируются
+      required: [mode, source, runtime_mode, open_signup, payments]
+    PasswordResetRequested:
+      type: object
+      description: |
+        Ответ `POST /v1/auth/password/reset-request`. `requested` есть всегда;
+        `reset_url` и `expires_at` — ТОЛЬКО при включённом
+        `DROPIT_RESET_REVEAL_TOKEN` и существующем аккаунте (Test Mode без
+        мейлера). В проде полей нет, и ответ неотличим от ответа на
+        неизвестный адрес.
+      properties:
+        requested:
+          type: boolean
+          enum: [true]
+        reset_url:
+          type: string
+          description: |
+            Относительная ссылка `/reset-password/<token>` (Test Mode:
+            стенд без SMTP). В проде отсутствует.
+          examples: [/reset-password/9f2c…]
+        expires_at:
+          type: string
+          format: date-time
+          description: |
+            Срок жизни токена (RFC3339, TTL 30 минут). Только вместе с
+            `reset_url`.
+      required: [requested]
     ErrorEnvelope:
       type: object
       description: Единый формат ошибок; code — стабильный i18n-ключ
@@ -2126,6 +3164,64 @@ components:
           type: string
           enum: [club]
       required: [access_token, refresh_token, expires_in, club_id, role]
+    RegisteredClub:
+      type: object
+      description: Клуб, созданный открытой регистрацией (Test Mode).
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+          description: Уникальный slug из имени (`[a-z0-9-]`, суффикс `-2`, `-3` при коллизии)
+        email:
+          type: string
+          format: email
+      required: [id, name, slug, email]
+    RegisteredDj:
+      type: object
+      description: DJ, созданный открытой регистрацией (Test Mode).
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        club_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: null — фрилансер (без `club_slug` в запросе)
+      required: [id, display_name, email]
+    ClubRegisterResponse:
+      type: object
+      description: |
+        Ответ `POST /v1/auth/club/register`: пара токенов как у логина
+        (`TokenPair` развёрнут в корень) + доп. поле `club`.
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          properties:
+            club:
+              $ref: "#/components/schemas/RegisteredClub"
+          required: [club]
+    DjRegisterResponse:
+      type: object
+      description: |
+        Ответ `POST /v1/auth/dj/register`: пара токенов как у логина
+        (`TokenPair` развёрнут в корень) + доп. поле `dj`.
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          properties:
+            dj:
+              $ref: "#/components/schemas/RegisteredDj"
+          required: [dj]
     QrToggleResponse:
       type: object
       description: |
@@ -2394,6 +3490,103 @@ components:
               format: uuid
             - type: "null"
       required: [id, status, timezone]
+    MailStatus:
+      type: string
+      description: |
+        Стейт-машина письма. Переходы монотонны: позднее `sent` не
+        откатывает уже `delivered`.
+      enum: [queued, sending, sent, delivered, delivery_delayed, bounced, complained, failed, suppressed]
+    MailItem:
+      type: object
+      description: Строка журнала писем (без тела письма).
+      properties:
+        id: { type: string, format: uuid }
+        to: { type: string, format: email }
+        to_name:
+          type: string
+          nullable: true
+        subject: { type: string }
+        template:
+          type: string
+          enum: [dj_invite, guest_verify, payout_paid, mail_test]
+        status: { $ref: "#/components/schemas/MailStatus" }
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        provider_id:
+          type: string
+          nullable: true
+          description: Идентификатор письма у провайдера (Resend)
+        last_error:
+          type: string
+          nullable: true
+          description: Причина последней неудачи (санитизированная, без секретов)
+        aggregate_type:
+          type: string
+          nullable: true
+        aggregate_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at: { type: string, format: date-time }
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, to, subject, template, status, attempts, created_at]
+    MailDetail:
+      allOf:
+        - $ref: "#/components/schemas/MailItem"
+        - type: object
+          properties:
+            html:
+              type: string
+              description: Отрисованный HTML (показывать только в sandboxed iframe)
+            text: { type: string }
+            vars:
+              type: object
+              description: Переменные шаблона на момент отправки
+            events:
+              type: array
+              items:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  type: { type: string, examples: [email.delivered] }
+                  received_at: { type: string, format: date-time }
+                required: [id, type, received_at]
+          required: [html, text, events]
+    MailStats:
+      type: object
+      description: Счётчики писем по статусам за окно (по умолчанию 24 ч).
+      properties:
+        window_hours: { type: integer }
+        queued: { type: integer }
+        sending: { type: integer }
+        sent: { type: integer }
+        delivered: { type: integer }
+        bounced: { type: integer }
+        complained: { type: integer }
+        failed: { type: integer }
+        suppressed: { type: integer }
+        total: { type: integer }
+      required: [window_hours, queued, sending, sent, delivered, bounced, complained, failed, suppressed, total]
+    MailSuppression:
+      type: object
+      description: Адрес, на который письма не отправляются.
+      properties:
+        email: { type: string, format: email }
+        reason:
+          type: string
+          enum: [bounce, complaint, manual]
+        detail:
+          type: string
+          nullable: true
+        created_at: { type: string, format: date-time }
+      required: [email, reason, created_at]
   responses:
     Error:
       description: Ошибка с единым envelope

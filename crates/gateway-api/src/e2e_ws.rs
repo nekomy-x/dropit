@@ -296,11 +296,14 @@ fn ticket_env(tickets: Arc<dyn TicketStore>, bus: Option<Arc<dyn EventBus>>) -> 
         billing: None,
         payouts: None,
         jobs: None,
+        mail: None,
         ws: Some(Arc::new(WsHub::new())),
         tickets: Some(tickets),
         bus,
         stripe: Some(Arc::new(dropit_infra_stripe::MockStripe)),
         catalog: Some(Arc::new(dropit_infra_catalog::MockCatalog::empty())),
+        open_signup: false,
+        signup_rate_per_hour: crate::infra::DEFAULT_SIGNUP_RATE_PER_HOUR,
     }
 }
 
@@ -433,7 +436,9 @@ async fn ws_bus_event_reaches_client() {
         "origin": "remote-node",
         "event": serde_json::to_value(&event).unwrap(),
     });
-    bus.publish(&format!("session:{sid}"), payload).await.unwrap();
+    bus.publish(&format!("session:{sid}"), payload)
+        .await
+        .unwrap();
 
     let ev = tokio::time::timeout(Duration::from_secs(1), rx.recv())
         .await
@@ -522,8 +527,7 @@ async fn ws_http_event_exactly_once() {
         Some(requests.clone()),
     )
     .await;
-    let (_club_id, _dj_id, session, guest_id, track_id) =
-        ws_fixtures(&repo, &sessions).await;
+    let (_club_id, _dj_id, session, guest_id, track_id) = ws_fixtures(&repo, &sessions).await;
 
     // Подключаем шину до подписки (как router()).
     crate::ws::spawn_relay(&env);
@@ -571,8 +575,7 @@ async fn ws_degradation_bus_none() {
     .await;
     // Деградация: шины нет.
     env.bus = None;
-    let (_club_id, _dj_id, session, guest_id, track_id) =
-        ws_fixtures(&repo, &sessions).await;
+    let (_club_id, _dj_id, session, guest_id, track_id) = ws_fixtures(&repo, &sessions).await;
 
     let hub = env.ws.clone().unwrap();
     let mut dj_rx = hub.subscribe(Topic::Queue(session.id));

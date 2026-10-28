@@ -49,9 +49,27 @@ pub struct SearchParams {
 #[derive(Serialize)]
 pub struct SearchResponse {
     /// Найденные треки (нормализованное представление `CatalogHit`).
-    pub items: Vec<CatalogHit>,
+    pub items: Vec<CatalogItemDto>,
     /// `true`, если ответ отдан из кеша БД без обращения к внешнему каталогу.
     pub cached: bool,
+}
+
+/// Клиентский результат включает UUID строки `track_cache`: именно его
+/// нужно передавать в POST /v1/requests. Source id для этого не подходит.
+#[derive(Serialize)]
+pub struct CatalogItemDto {
+    pub id: uuid::Uuid,
+    pub source: String,
+    pub source_id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: Option<String>,
+    pub duration_ms: i64,
+    pub isrc: Option<String>,
+    pub artwork_url: Option<String>,
+    pub preview_url: Option<String>,
+    pub source_url: Option<String>,
+    pub explicit: bool,
 }
 
 /// Тело `POST /v1/guest/push-token`.
@@ -77,13 +95,17 @@ pub struct DjStylesResponse {
 // Router
 // ============================================================
 
-/// Роуты гостя: поиск каталога + регистрация push-токена.
+/// Роуты гостя с JWT-гейтом: регистрация push-токена.
 ///
 /// Монтируется под `role_route(&[Role::Guest], …)` в `routes::router`.
 pub fn guest_routes() -> Router<ApiEnv> {
-    Router::new()
-        .route("/v1/catalog/search", get(search_catalog))
-        .route("/v1/guest/push-token", post(register_push_token))
+    Router::new().route("/v1/guest/push-token", post(register_push_token))
+}
+
+/// Поиск каталога авторизуется device-token в мобильном клиенте, а не JWT.
+/// Поэтому маршрут монтируется отдельно от role middleware.
+pub fn public_catalog_routes() -> Router<ApiEnv> {
+    Router::new().route("/v1/catalog/search", get(search_catalog))
 }
 
 /// Роуты DJ: управление стилями профиля.
@@ -150,15 +172,12 @@ async fn search_catalog(
     let query_key = canonical_key("", q);
 
     // 1. Кеш: свежая запись индекса → отдаём треки из БД.
-    if let Ok(Some(qrow)) = catalog_repo
-        .find_query_cache(&query_key, style_key)
-        .await
-    {
+    if let Ok(Some(qrow)) = catalog_repo.find_query_cache(&query_key, style_key).await {
         let ttl = cache_ttl(qrow.has_isrc);
         if CatalogRepo::is_fresh(&qrow, ttl) {
             match catalog_repo.load_tracks_by_ids(&qrow.track_ids).await {
                 Ok(tracks) => {
-                    let items: Vec<CatalogHit> = tracks.into_iter().map(hit_from_row).collect();
+                    let items: Vec<CatalogItemDto> = tracks.into_iter().map(dto_from_row).collect();
                     return (
                         StatusCode::OK,
                         Json(SearchResponse {
@@ -249,7 +268,24 @@ async fn search_catalog(
         .save_query_cache(&query_key, style_key, &ids, has_isrc)
         .await;
 
-    let items = enriched.into_iter().map(|(h, _, _)| h).collect();
+    let items = enriched
+        .into_iter()
+        .zip(ids)
+        .map(|((h, _, _), id)| CatalogItemDto {
+            id,
+            source: h.source,
+            source_id: h.source_id,
+            title: h.title,
+            artist: h.artist,
+            album: h.album,
+            duration_ms: h.duration_ms,
+            isrc: h.isrc,
+            artwork_url: h.artwork_url,
+            preview_url: h.preview_url,
+            source_url: h.source_url,
+            explicit: h.explicit,
+        })
+        .collect();
     (
         StatusCode::OK,
         Json(SearchResponse {
@@ -294,7 +330,12 @@ async fn register_push_token(
 
     let repo = match state.repo.clone() {
         Some(r) => r,
-        None => return api_error(ApiError::ExternalServiceUnavailable, "database not configured"),
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
     };
     let push_repo = PushTokenRepo::new(repo.pool());
     match push_repo
@@ -351,7 +392,12 @@ async fn update_dj_styles(
 
     let repo = match state.repo.clone() {
         Some(r) => r,
-        None => return api_error(ApiError::ExternalServiceUnavailable, "database not configured"),
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
     };
     let dj_repo = DjProfileRepo::new(repo.pool());
     match dj_repo.set_styles(ctx.subject_id(), &normalized).await {
@@ -369,9 +415,9 @@ async fn update_dj_styles(
 // Вспомогательное
 // ============================================================
 
-/// Собирает `CatalogHit` из строки кеша (`cover_url` → `artwork_url`).
-fn hit_from_row(r: dropit_infra_db::catalog::CachedTrackRow) -> CatalogHit {
-    CatalogHit {
+fn dto_from_row(r: dropit_infra_db::catalog::CachedTrackRow) -> CatalogItemDto {
+    CatalogItemDto {
+        id: r.id,
         source: r.source,
         source_id: r.source_id,
         title: r.title,

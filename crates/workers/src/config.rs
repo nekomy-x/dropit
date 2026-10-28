@@ -35,6 +35,11 @@ pub struct Config {
     pub outbox_max_attempts: i32,
     /// Размер батча push-диспетчера. По умолчанию 100.
     pub push_batch_size: i64,
+    /// Интервал диспетчера писем (с). По умолчанию 2 — письмо уходит почти
+    /// сразу, но провайдерский таймаут никогда не попадает в latency API.
+    pub mail_interval: Duration,
+    /// Размер батча диспетчера писем. По умолчанию 50.
+    pub mail_batch_size: i64,
     /// Запустить миграции при старте (`DROPIT_RUN_MIGRATIONS=true`).
     pub run_migrations: bool,
 }
@@ -54,6 +59,8 @@ impl Default for Config {
             outbox_batch_size: env_i64("OUTBOX_BATCH_SIZE", 100),
             outbox_max_attempts: env_i32("OUTBOX_MAX_ATTEMPTS", 5),
             push_batch_size: env_i64("PUSH_BATCH_SIZE", 100),
+            mail_interval: Duration::from_secs(env_secs("MAIL_INTERVAL_SECS", 2)),
+            mail_batch_size: env_i64("MAIL_BATCH_SIZE", 50),
             run_migrations: env_bool("DROPIT_RUN_MIGRATIONS"),
         }
     }
@@ -78,17 +85,13 @@ pub fn database_url() -> Option<String> {
 /// Прочитать `NATS_URL`.
 #[must_use]
 pub fn nats_url() -> Option<String> {
-    env::var("NATS_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    env::var("NATS_URL").ok().filter(|s| !s.trim().is_empty())
 }
 
 /// Прочитать `REDIS_URL` (логируется, воркером напрямую не используется).
 #[must_use]
 pub fn redis_url() -> Option<String> {
-    env::var("REDIS_URL")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    env::var("REDIS_URL").ok().filter(|s| !s.trim().is_empty())
 }
 
 fn env_secs(key: &str, default: u64) -> u64 {
@@ -131,6 +134,8 @@ mod tests {
         let c = Config::from_env();
         assert!(c.outbox_interval.as_secs() >= 1);
         assert!(c.push_interval.as_secs() >= 1);
+        assert!(c.mail_interval.as_secs() >= 1);
+        assert!(c.mail_batch_size > 0);
         assert!(c.outbox_batch_size > 0);
         assert!(c.outbox_max_attempts > 0);
     }

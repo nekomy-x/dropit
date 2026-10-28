@@ -39,6 +39,7 @@ pub(crate) async fn test_repo() -> Option<IdentityRepo> {
         "idempotency_key",
         "idempotency_response",
         "device_token_issue",
+        "signup_attempt",
         "outbox_event",
         "request",
         "session_guest",
@@ -62,7 +63,7 @@ pub(crate) async fn test_repo() -> Option<IdentityRepo> {
     let _ = sqlx::query(
         "UPDATE platform_settings SET commission_mode='unset', commission_percent_bp=NULL, \
          commission_fixed_minor=NULL, min_price_minor=NULL, max_price_minor=NULL, \
-         dj_share_of_remainder_bp=NULL WHERE id=1",
+         dj_share_of_remainder_bp=NULL, runtime_mode='auto' WHERE id=1",
     )
     .execute(&pool)
     .await;
@@ -87,6 +88,10 @@ pub(crate) async fn app_env(
         .as_ref()
         .map(|p| dropit_infra_db::JobsRepo::new(p.clone()))
         .map(std::sync::Arc::new);
+    let mail = pool
+        .as_ref()
+        .map(|p| dropit_infra_db::mail::MailRepo::new(p.clone()))
+        .map(std::sync::Arc::new);
     ApiEnv {
         keys: JwtKeys::from_secret(b"e2e-test-secret-key-32-bytes-xxxxx"),
         repo: repo.map(std::sync::Arc::new),
@@ -97,13 +102,22 @@ pub(crate) async fn app_env(
         billing,
         payouts,
         jobs,
+        mail,
         ws: Some(std::sync::Arc::new(crate::ws::WsHub::new())),
         tickets: Some(std::sync::Arc::new(
             dropit_infra_redis::InMemoryTicketStore::new(),
         )),
-        bus: Some(std::sync::Arc::new(dropit_infra_redis::InMemoryEventBus::new())),
+        bus: Some(std::sync::Arc::new(
+            dropit_infra_redis::InMemoryEventBus::new(),
+        )),
         stripe: Some(std::sync::Arc::new(dropit_infra_stripe::MockStripe)),
-        catalog: Some(std::sync::Arc::new(dropit_infra_catalog::MockCatalog::empty())),
+        catalog: Some(std::sync::Arc::new(
+            dropit_infra_catalog::MockCatalog::empty(),
+        )),
+        // Тесты по умолчанию работают при включённой открытой регистрации;
+        // тест выключенного флага гасит его в своей копии окружения.
+        open_signup: true,
+        signup_rate_per_hour: crate::infra::DEFAULT_SIGNUP_RATE_PER_HOUR,
     }
 }
 
@@ -394,7 +408,11 @@ async fn e2e_device_token_ip_limit() {
             &[("x-forwarded-for", xff.as_str())],
         )
         .await;
-        assert_eq!(s, StatusCode::OK, "trust on, different ip #{i} must pass: {body}");
+        assert_eq!(
+            s,
+            StatusCode::OK,
+            "trust on, different ip #{i} must pass: {body}"
+        );
     }
     // 6 запросов с одним IP: 1..5 → 200, 6-й → 429.
     let same = "203.0.113.50";
@@ -409,7 +427,11 @@ async fn e2e_device_token_ip_limit() {
         )
         .await;
         if i <= 5 {
-            assert_eq!(s, StatusCode::OK, "trust on, same ip #{i} must pass: {body}");
+            assert_eq!(
+                s,
+                StatusCode::OK,
+                "trust on, same ip #{i} must pass: {body}"
+            );
         } else {
             assert_eq!(
                 s,

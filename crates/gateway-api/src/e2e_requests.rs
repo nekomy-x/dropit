@@ -389,7 +389,12 @@ async fn e2e_my_request_detail() {
     };
     let sessions = SessionRepo::new(repo.pool());
     let requests = RequestRepo::new(repo.pool());
-    let env = app_env(Some(repo.clone()), Some(sessions.clone()), Some(requests.clone())).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(sessions.clone()),
+        Some(requests.clone()),
+    )
+    .await;
     let pool = repo.pool();
 
     // Фикстуры: клуб, DJ, сессия (active), гранты, трек.
@@ -418,7 +423,10 @@ async fn e2e_my_request_detail() {
     // Гость 1 с грантом.
     let guest1 = uuid::Uuid::now_v7();
     repo.create_guest_device(guest1, "ios", None).await.unwrap();
-    sessions.grant_session_guest(session.id, guest1).await.unwrap();
+    sessions
+        .grant_session_guest(session.id, guest1)
+        .await
+        .unwrap();
 
     let track_id = insert_track(&pool, "itunes", "w2b-1", "Vivir Mi Vida", "Marc Anthony").await;
 
@@ -460,8 +468,13 @@ async fn e2e_my_request_detail() {
 
     // --- 3. Второй гость заказывает ТОТ ЖЕ трек → same_song_count растёт
     let guest2 = uuid::Uuid::now_v7();
-    repo.create_guest_device(guest2, "android", None).await.unwrap();
-    sessions.grant_session_guest(session.id, guest2).await.unwrap();
+    repo.create_guest_device(guest2, "android", None)
+        .await
+        .unwrap();
+    sessions
+        .grant_session_guest(session.id, guest2)
+        .await
+        .unwrap();
     let (s, body2) = call_with_key(
         &env,
         "POST",
@@ -484,7 +497,10 @@ async fn e2e_my_request_detail() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "detail after guest2: {body}");
-    assert_eq!(body["request"]["same_song_count"], 2, "same_song_count grows");
+    assert_eq!(
+        body["request"]["same_song_count"], 2,
+        "same_song_count grows"
+    );
     assert_eq!(body["request"]["queue_size"], 2);
     assert_eq!(body["request"]["position"], 1, "guest1 is first in FIFO");
 
@@ -563,7 +579,10 @@ async fn e2e_my_request_detail() {
         .await
         .unwrap();
     // Гость 1 вступает в новую сессию → его активная сессия = session2.
-    sessions.grant_session_guest(session2.id, guest1).await.unwrap();
+    sessions
+        .grant_session_guest(session2.id, guest1)
+        .await
+        .unwrap();
     let (s, body) = call(
         &env,
         "GET",
@@ -573,7 +592,8 @@ async fn e2e_my_request_detail() {
     )
     .await;
     assert_eq!(
-        s, StatusCode::NOT_FOUND,
+        s,
+        StatusCode::NOT_FOUND,
         "request from another session must 404: {body}"
     );
     assert_eq!(body["code"], "request_not_found");
@@ -605,7 +625,9 @@ async fn e2e_guest_upgrade() {
     let guest1 = uuid::Uuid::now_v7();
     let guest2 = uuid::Uuid::now_v7();
     repo.create_guest_device(guest1, "ios", None).await.unwrap();
-    repo.create_guest_device(guest2, "android", None).await.unwrap();
+    repo.create_guest_device(guest2, "android", None)
+        .await
+        .unwrap();
 
     // --- 1. Успешный апгрейд: e-mail нормализуется ----------------
     let (s, body) = call(
@@ -675,11 +697,7 @@ async fn e2e_guest_upgrade() {
             Some(&guest2.to_string()),
         )
         .await;
-        assert_eq!(
-            s,
-            StatusCode::BAD_REQUEST,
-            "invalid email '{bad}': {body}"
-        );
+        assert_eq!(s, StatusCode::BAD_REQUEST, "invalid email '{bad}': {body}");
         assert_eq!(body["code"], "invalid_email");
     }
 
@@ -842,7 +860,10 @@ async fn e2e_parallel_idempotency_no_duplicate() {
     assert_eq!(s2, StatusCode::CREATED, "parallel #2: {b2}");
     let id1 = b1["request_id"].as_str().expect("request_id #1");
     let id2 = b2["request_id"].as_str().expect("request_id #2");
-    assert_eq!(id1, id2, "both responses must reference the same request_id");
+    assert_eq!(
+        id1, id2,
+        "both responses must reference the same request_id"
+    );
 
     // --- 2. В БД ровно одна заявка этого гостя ---------------------
     let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM request WHERE guest_device_id = $1")
@@ -873,7 +894,10 @@ async fn e2e_parallel_idempotency_no_duplicate() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(ob_cnt, 1, "exactly one request.created outbox event per request");
+    assert_eq!(
+        ob_cnt, 1,
+        "exactly one request.created outbox event per request"
+    );
 
     // --- 5. Последовательный повтор → тот же id, без дубля ---------
     let (s3, b3) = call_with_key(
@@ -897,7 +921,10 @@ async fn e2e_parallel_idempotency_no_duplicate() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(cnt2, 1, "sequential replay must not create a second request");
+    assert_eq!(
+        cnt2, 1,
+        "sequential replay must not create a second request"
+    );
 
     let (ob_cnt2,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM outbox WHERE aggregate_type = 'request' \

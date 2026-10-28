@@ -274,32 +274,23 @@ impl DjProfileRepo {
     /// Возвращает `true`, если строка DJ найдена и обновлена; `false`, если
     /// DJ с таким id нет (вызывающий отвечает 404, чтобы не раскрывать
     /// существование).
-    pub async fn set_styles(
-        &self,
-        dj_id: Uuid,
-        styles: &[String],
-    ) -> Result<bool, sqlx::Error> {
-        let row: Option<(Uuid,)> = sqlx::query_as(
-            "UPDATE dj SET styles = $2 WHERE id = $1 RETURNING id",
-        )
-        .bind(dj_id)
-        .bind(styles)
-        .fetch_optional(&self.pool)
-        .await?;
+    pub async fn set_styles(&self, dj_id: Uuid, styles: &[String]) -> Result<bool, sqlx::Error> {
+        let row: Option<(Uuid,)> =
+            sqlx::query_as("UPDATE dj SET styles = $2 WHERE id = $1 RETURNING id")
+                .bind(dj_id)
+                .bind(styles)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.is_some())
     }
 
     /// Возвращает текущий массив `styles` DJ или `None`, если DJ не найден.
-    pub async fn get_styles(
-        &self,
-        dj_id: Uuid,
-    ) -> Result<Option<Vec<String>>, sqlx::Error> {
-        let row: Option<(Option<Vec<String>>,)> = sqlx::query_as(
-            "SELECT styles FROM dj WHERE id = $1",
-        )
-        .bind(dj_id)
-        .fetch_optional(&self.pool)
-        .await?;
+    pub async fn get_styles(&self, dj_id: Uuid) -> Result<Option<Vec<String>>, sqlx::Error> {
+        let row: Option<(Option<Vec<String>>,)> =
+            sqlx::query_as("SELECT styles FROM dj WHERE id = $1")
+                .bind(dj_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(s,)| s.unwrap_or_default()))
     }
 }

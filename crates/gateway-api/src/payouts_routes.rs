@@ -28,9 +28,7 @@ use axum::{
     Json, Router,
 };
 use dropit_common::{ApiError, ErrorEnvelope, Role};
-use dropit_domain::{
-    decide_payout, PayoutDecision, PayoutStatus, DEFAULT_PAYOUT_THRESHOLD_MINOR,
-};
+use dropit_domain::{decide_payout, PayoutDecision, PayoutStatus, DEFAULT_PAYOUT_THRESHOLD_MINOR};
 use dropit_infra_db::{Payee, PayoutError, PayoutRepo};
 use dropit_infra_stripe::{StripeError, TransferReq, WebhookEvent, WEBHOOK_TOLERANCE_SECS};
 use serde::{Deserialize, Serialize};
@@ -224,10 +222,7 @@ async fn run_payouts(ctx: AuthContext, State(state): State<ApiEnv>) -> Response 
         let Some(destination) = destination else {
             // payee без аккаунта не должен был дойти до цикла — фиксируем failed.
             // transfer id ещё NULL → fail_payout по payout_id (не по transfer_id).
-            if let Err(e) = payouts
-                .fail_payout(row.id, "stripe_account_missing")
-                .await
-            {
+            if let Err(e) = payouts.fail_payout(row.id, "stripe_account_missing").await {
                 warn!(error = %e, payout = %row.id, "fail_payout (missing account) failed");
             }
             continue;
@@ -254,10 +249,7 @@ async fn run_payouts(ctx: AuthContext, State(state): State<ApiEnv>) -> Response 
                 warn!(error = %e, payout = %row.id, "stripe create_transfer failed");
                 // Провайдер отказал до возврата transfer id — статус failed,
                 // stripe_transfer_id остаётся NULL (фиксируем по payout_id).
-                if let Err(e2) = payouts
-                    .fail_payout(row.id, "stripe transfer failed")
-                    .await
-                {
+                if let Err(e2) = payouts.fail_payout(row.id, "stripe transfer failed").await {
                     warn!(error = %e2, payout = %row.id, "fail_payout (provider error) failed");
                 }
             }
@@ -410,17 +402,12 @@ async fn transfer_webhook(
                 Json(serde_json::json!({ "received": true })),
             )
                 .into_response(),
-            Err(PayoutError::NotFound) => {
-                api_error(ApiError::NotFound, "transfer not found")
-            }
+            Err(PayoutError::NotFound) => api_error(ApiError::NotFound, "transfer not found"),
             Err(_) => api_error(ApiError::Internal, "db error"),
         },
         "transfer.failed" => {
             let reason = reason.unwrap_or_else(|| "unspecified".into());
-            match payouts
-                .handle_transfer_failed(&transfer_id, &reason)
-                .await
-            {
+            match payouts.handle_transfer_failed(&transfer_id, &reason).await {
                 Ok(row) => (
                     StatusCode::OK,
                     Json(serde_json::json!({
@@ -430,9 +417,7 @@ async fn transfer_webhook(
                     })),
                 )
                     .into_response(),
-                Err(PayoutError::NotFound) => {
-                    api_error(ApiError::NotFound, "transfer not found")
-                }
+                Err(PayoutError::NotFound) => api_error(ApiError::NotFound, "transfer not found"),
                 Err(_) => api_error(ApiError::Internal, "db error"),
             }
         }

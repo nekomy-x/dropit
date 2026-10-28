@@ -231,15 +231,15 @@ async fn e2e_payout_cycle() {
         .handle_transfer_failed(&tid, "insufficient platform balance")
         .await
         .unwrap(); // attempts=2, failed
-               // Ретраи до on_hold: retry → fail (attempts растёт), как только
-               // attempts ≥ MAX_PAYOUT_ATTEMPTS — handle переводит в on_hold.
+                   // Ретраи до on_hold: retry → fail (attempts растёт), как только
+                   // attempts ≥ MAX_PAYOUT_ATTEMPTS — handle переводит в on_hold.
     let mut guard = 0;
     loop {
         guard += 1;
         assert!(guard < 20, "retry loop runaway");
         current = payouts.retry_payout(current.id).await.unwrap(); // in_flight, transfer id сброшен в NULL
-        // retry обнулил transfer id — прикрепим новый, как после нового
-        // вызова провайдера, прежде чем ломать вебхуком.
+                                                                   // retry обнулил transfer id — прикрепим новый, как после нового
+                                                                   // вызова провайдера, прежде чем ломать вебхуком.
         assert!(
             current.stripe_transfer_id.is_none(),
             "retry_payout must clear transfer id"
@@ -619,7 +619,10 @@ async fn e2e_payout_transfer_success_and_idempotent_rerun() {
         .await;
         assert_eq!(s, StatusCode::OK, "transfer paid: {body}");
         let updated = payouts.find_payout(row.id).await.unwrap().unwrap();
-        assert_eq!(updated.status, "paid", "payout completed after transfer.paid");
+        assert_eq!(
+            updated.status, "paid",
+            "payout completed after transfer.paid"
+        );
         assert_eq!(
             updated.stripe_transfer_id.as_deref(),
             Some(tid.as_str()),
@@ -639,7 +642,10 @@ async fn e2e_payout_transfer_success_and_idempotent_rerun() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "rerun: {body}");
-    assert_eq!(body["payouts_created"], 0, "no new payouts on rerun: {body}");
+    assert_eq!(
+        body["payouts_created"], 0,
+        "no new payouts on rerun: {body}"
+    );
     assert_eq!(
         fake.transfer_calls(),
         calls_before_rerun,
@@ -690,7 +696,11 @@ async fn e2e_payout_transfer_failure_marks_failed() {
     assert_eq!(s, StatusCode::OK, "payout run: {body}");
     assert_eq!(body["payouts_created"], 2, "payouts created: {body}");
     // create_transfer вызван (и отказал) по разу на выплату.
-    assert_eq!(fake.transfer_calls(), 2, "transfer attempted once per payout");
+    assert_eq!(
+        fake.transfer_calls(),
+        2,
+        "transfer attempted once per payout"
+    );
 
     // Все созданные выплаты — failed (провайдер отказал).
     let in_flight = payouts.in_flight_payouts().await.unwrap();
@@ -707,25 +717,28 @@ async fn e2e_payout_transfer_failure_marks_failed() {
 
     // При ошибке провайдера transfer id НЕ зафиксирован (NULL): матчить
     // вебхук не по чему — выплата провалена по payout_id.
-    let (null_tid_cnt,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payout WHERE status = 'failed' AND stripe_transfer_id IS NULL")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (null_tid_cnt,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM payout WHERE status = 'failed' AND stripe_transfer_id IS NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         null_tid_cnt, 2,
         "failed payouts must have NULL stripe_transfer_id"
     );
 
     // Деньги не задвоены: сплиты payee остались paid_out (не вернулись в pending).
-    let (paid_out_cnt,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM split WHERE payee_id = $1 AND status = 'paid_out'",
-    )
-    .bind(club_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(paid_out_cnt > 0, "splits remain paid_out (locked, not doubled)");
+    let (paid_out_cnt,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM split WHERE payee_id = $1 AND status = 'paid_out'")
+            .bind(club_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        paid_out_cnt > 0,
+        "splits remain paid_out (locked, not doubled)"
+    );
 
     // Повторный запуск: нетто пусто → нет новых выплат, нет второго transfer.
     let calls_before = fake.transfer_calls();
@@ -787,7 +800,10 @@ async fn e2e_payout_transfer_webhook_matches_real_id() {
 
     // Берём одну in_flight выплату с прикреплённым реальным id.
     let mut in_flight = payouts.in_flight_payouts().await.unwrap();
-    assert!(!in_flight.is_empty(), "expected in_flight payouts after run");
+    assert!(
+        !in_flight.is_empty(),
+        "expected in_flight payouts after run"
+    );
     let row = in_flight.remove(0);
     let real_tid = row
         .stripe_transfer_id
@@ -800,14 +816,8 @@ async fn e2e_payout_transfer_webhook_matches_real_id() {
 
     // Чужой id — вебхук игнорируется: 200, выплата остаётся in_flight.
     let foreign = "tr_foreign_not_in_db";
-    let (s, body) = signed_transfer_webhook(
-        &env,
-        "evt_foreign",
-        "transfer.paid",
-        foreign,
-        None,
-    )
-    .await;
+    let (s, body) =
+        signed_transfer_webhook(&env, "evt_foreign", "transfer.paid", foreign, None).await;
     assert_eq!(s, StatusCode::OK, "foreign-id webhook acknowledged: {body}");
     let untouched = payouts.find_payout(row.id).await.unwrap().unwrap();
     assert_eq!(
@@ -816,14 +826,8 @@ async fn e2e_payout_transfer_webhook_matches_real_id() {
     );
 
     // Реальный id из БД → выплата completed.
-    let (s, body) = signed_transfer_webhook(
-        &env,
-        "evt_real",
-        "transfer.paid",
-        &real_tid,
-        None,
-    )
-    .await;
+    let (s, body) =
+        signed_transfer_webhook(&env, "evt_real", "transfer.paid", &real_tid, None).await;
     assert_eq!(s, StatusCode::OK, "real-id webhook: {body}");
     let closed = payouts.find_payout(row.id).await.unwrap().unwrap();
     assert_eq!(closed.status, "paid", "real transfer_id closes payout");
@@ -1193,27 +1197,15 @@ async fn e2e_transfer_webhook_signature_security() {
     );
 
     // --- С ВАЛИДНОЙ подписью: transfer.paid → completed ------------
-    let (s, body) = signed_transfer_webhook(
-        &env,
-        "evt_paid_sig",
-        "transfer.paid",
-        &tid_paid,
-        None,
-    )
-    .await;
+    let (s, body) =
+        signed_transfer_webhook(&env, "evt_paid_sig", "transfer.paid", &tid_paid, None).await;
     assert_eq!(s, StatusCode::OK, "valid transfer.paid: {body}");
     let closed = payouts.find_payout(row_paid.id).await.unwrap().unwrap();
     assert_eq!(closed.status, "paid", "transfer.paid closes payout");
 
     // --- ДУБЛЬ transfer.paid → no-op 200, второй проводки нет -------
-    let (s, body) = signed_transfer_webhook(
-        &env,
-        "evt_paid_dup",
-        "transfer.paid",
-        &tid_paid,
-        None,
-    )
-    .await;
+    let (s, body) =
+        signed_transfer_webhook(&env, "evt_paid_dup", "transfer.paid", &tid_paid, None).await;
     assert_eq!(s, StatusCode::OK, "duplicate transfer.paid: no-op {body}");
     let still_closed = payouts.find_payout(row_paid.id).await.unwrap().unwrap();
     assert_eq!(still_closed.status, "paid", "duplicate does not reopen");
@@ -1337,7 +1329,12 @@ async fn e2e_payout_atomicity_rollback_on_split_update_failure() {
     let requests = RequestRepo::new(repo.pool());
     let billing = BillingRepo::new(repo.pool());
     let payouts = PayoutRepo::new(repo.pool());
-    let env = app_env(Some(repo.clone()), Some(sessions.clone()), Some(requests.clone())).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(sessions.clone()),
+        Some(requests.clone()),
+    )
+    .await;
     let pool = repo.pool();
 
     let (club_id, dj_id) = fixture(&pool, "atom").await;
@@ -1489,8 +1486,8 @@ async fn e2e_payout_concurrent_cycles_no_double_payout() {
     assert_eq!(s2, StatusCode::OK, "race call B: {b2}");
 
     // Сумма созданных за оба вызова == 2 (один payout на payee), не 4.
-    let created_total = b1["payouts_created"].as_i64().unwrap_or(0)
-        + b2["payouts_created"].as_i64().unwrap_or(0);
+    let created_total =
+        b1["payouts_created"].as_i64().unwrap_or(0) + b2["payouts_created"].as_i64().unwrap_or(0);
     assert_eq!(
         created_total, 2,
         "exactly one payout per payee across both parallel cycles: A={b1} B={b2}"
@@ -1582,14 +1579,16 @@ async fn e2e_payout_sequential_rerun_no_duplicate() {
     );
 
     // По-прежнему ровно 2 payout (по одному на payee).
-    let (total,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM payout WHERE payee_id IN ($1, $2)")
-            .bind(club_id)
-            .bind(dj_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(total, 2, "still exactly 2 payouts after rerun (no duplicate)");
+    let (total,): (i64,) = sqlx::query_as("SELECT count(*) FROM payout WHERE payee_id IN ($1, $2)")
+        .bind(club_id)
+        .bind(dj_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        total, 2,
+        "still exactly 2 payouts after rerun (no duplicate)"
+    );
 
     // Инвариант payee держится.
     let violations = payouts.payee_invariant_violations().await.unwrap();

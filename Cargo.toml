@@ -9,6 +9,7 @@ members = [
     "crates/infra-stripe",
     "crates/infra-catalog",
     "crates/infra-push",
+    "crates/infra-mail",
     "crates/workers",
     "crates/gateway-api",
 ]

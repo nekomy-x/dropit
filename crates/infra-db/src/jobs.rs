@@ -312,10 +312,7 @@ impl JobsRepo {
     /// Возвращает токены с платформой (`'android'` / `'ios'`) из таблицы
     /// `guest_push_token` (миграция 0009). Отозванные (`revoked_at IS NOT
     /// NULL`) исключаются — по ним повторная отправка не выполняется.
-    pub async fn active_push_tokens(
-        &self,
-        guest_id: Uuid,
-    ) -> Result<Vec<PushTokenRow>, JobsError> {
+    pub async fn active_push_tokens(&self, guest_id: Uuid) -> Result<Vec<PushTokenRow>, JobsError> {
         let rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT token, platform FROM guest_push_token \
              WHERE guest_id = $1 AND revoked_at IS NULL",

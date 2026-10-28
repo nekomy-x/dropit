@@ -30,6 +30,7 @@ use chrono::{DateTime, Utc};
 use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_domain::RequestAction;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use uuid::Uuid;
 
 // ============================================================
@@ -141,6 +142,12 @@ pub struct UpgradeRequest {
     pub email: String,
 }
 
+#[derive(Deserialize)]
+pub struct VerifyRequest {
+    /// Шестизначный код из письма.
+    pub code: String,
+}
+
 #[derive(Serialize)]
 pub struct UpgradeResponse {
     pub email: String,
@@ -158,6 +165,7 @@ pub fn requests_router() -> Router<ApiEnv> {
         .route("/v1/my/requests", get(my_requests))
         .route("/v1/my/requests/:id", get(my_request_detail))
         .route("/v1/guest/upgrade", post(guest_upgrade))
+        .route("/v1/guest/verify", post(guest_verify))
         .route("/v1/dj/queue", get(dj_queue))
         .route("/v1/dj/requests/:id/accept", post(dj_accept))
         .route("/v1/dj/requests/:id/reject", post(dj_reject))
@@ -457,7 +465,11 @@ async fn my_request_detail(
     let active_session = match sessions.find_active_session_of_guest(guest_device_id).await {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return envelope(StatusCode::NOT_FOUND, "request_not_found", "Request not found.")
+            return envelope(
+                StatusCode::NOT_FOUND,
+                "request_not_found",
+                "Request not found.",
+            )
         }
         Err(_) => return api_error(ApiError::Internal, "db error"),
     };
@@ -468,7 +480,11 @@ async fn my_request_detail(
     {
         Ok(Some(d)) => d,
         Ok(None) => {
-            return envelope(StatusCode::NOT_FOUND, "request_not_found", "Request not found.")
+            return envelope(
+                StatusCode::NOT_FOUND,
+                "request_not_found",
+                "Request not found.",
+            )
         }
         Err(_) => return api_error(ApiError::Internal, "db error"),
     };
@@ -598,15 +614,23 @@ async fn guest_upgrade(
         Ok(dropit_infra_db::requests::UpgradeOutcome::Bound {
             email,
             already_upgraded,
-        }) => (
-            StatusCode::OK,
-            Json(UpgradeResponse {
-                email,
-                verified: false,
-                already_upgraded,
-            }),
-        )
-            .into_response(),
+        }) => {
+            // Подтверждение адреса (ADR-008): письмо с кодом уходит только
+            // при первой привязке — повторный апгрейд с тем же адресом не
+            // должен спамить гостя.
+            if !already_upgraded {
+                enqueue_guest_verify_mail(&state, &repo, guest_device_id, &email).await;
+            }
+            (
+                StatusCode::OK,
+                Json(UpgradeResponse {
+                    email,
+                    verified: false,
+                    already_upgraded,
+                }),
+            )
+                .into_response()
+        }
         Ok(dropit_infra_db::requests::UpgradeOutcome::EmailTaken) => envelope(
             StatusCode::CONFLICT,
             "email_taken",
@@ -616,6 +640,131 @@ async fn guest_upgrade(
             auth_error_response(ApiError::Unauthorized)
         }
         Err(_) => api_error(ApiError::Internal, "db error"),
+    }
+}
+
+/// Поставить в очередь письмо с кодом подтверждения e-mail.
+///
+/// Best-effort: апгрейд уже состоялся, письмо — уведомление. Неудача письма
+/// не должна превращать успешную привязку адреса в ошибку; гость сможет
+/// запросить код повторно (повторный апгрейд с новым адресом или `resend`
+/// из админки).
+async fn enqueue_guest_verify_mail(
+    state: &ApiEnv,
+    repo: &dropit_infra_db::IdentityRepo,
+    guest_device_id: Uuid,
+    email: &str,
+) {
+    let Some(mail_repo) = state.mail.as_ref() else {
+        return;
+    };
+    // Аккаунт гостя — через устройство: `upgrade_guest_email` не возвращает
+    // account_id, а связь device → account в этой схеме однозначна.
+    let account: Option<(Uuid,)> =
+        sqlx::query_as("SELECT account_id FROM guest_device WHERE id = $1")
+            .bind(guest_device_id)
+            .fetch_optional(&repo.pool())
+            .await
+            .unwrap_or(None);
+    let Some((account_id,)) = account else {
+        tracing::warn!("mail: у устройства нет аккаунта после апгрейда");
+        return;
+    };
+
+    let verify_repo = dropit_infra_db::GuestVerifyRepo::new(repo.pool());
+    let code = dropit_infra_db::guest_verify::generate_code();
+    let code_hash = dropit_infra_db::guest_verify::hash_code(account_id, &code);
+    let expires_at = match verify_repo.issue_code(account_id, &code_hash).await {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(error = %e, "mail: не сохранить код подтверждения");
+            return;
+        }
+    };
+
+    let vars = json!({
+        "code": code,
+        "expires_at": expires_at.to_rfc3339(),
+    });
+    let to = match dropit_infra_mail::MailAddress::parse(email) {
+        Ok(addr) => addr,
+        Err(e) => {
+            tracing::warn!(error = %e, "mail: адрес гостя не разобран");
+            return;
+        }
+    };
+    crate::mail_routes::enqueue_best_effort(
+        mail_repo.as_ref(),
+        crate::mail_routes::MailIntent {
+            template: dropit_infra_mail::TemplateKey::GuestVerify,
+            to: &to,
+            vars,
+            // Ключ включает срок: повторный запрос кода через 15 минут — это
+            // новое письмо, а не дубликат (иначе идемпотентность заперла бы
+            // гостя навсегда).
+            idempotency_key: format!("guest_verify:{account_id}:{}", expires_at.timestamp()),
+            aggregate_type: Some("guest_account"),
+            aggregate_id: Some(account_id),
+        },
+    )
+    .await;
+}
+
+/// POST /v1/guest/verify — подтверждение e-mail кодом из письма.
+///
+/// Успех выставляет `guest_account.verified = TRUE`. Пять неверных попыток
+/// гасят код (нужен новый), просроченный код — `410 code_expired`.
+async fn guest_verify(
+    State(state): State<ApiEnv>,
+    headers: HeaderMap,
+    Json(req): Json<VerifyRequest>,
+) -> Response {
+    let repo = match state.repo.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let guest_device_id = match resolve_guest_device_id(&headers, &state.keys) {
+        Ok(id) => id,
+        Err(r) => return r,
+    };
+    let account: Option<(Uuid,)> =
+        sqlx::query_as("SELECT account_id FROM guest_device WHERE id = $1")
+            .bind(guest_device_id)
+            .fetch_optional(&repo.pool())
+            .await
+            .unwrap_or(None);
+    let Some((account_id,)) = account else {
+        return auth_error_response(ApiError::Unauthorized);
+    };
+
+    let verify_repo = dropit_infra_db::GuestVerifyRepo::new(repo.pool());
+    match verify_repo.verify(account_id, &req.code).await {
+        Ok(dropit_infra_db::VerifyOutcome::Verified) => {
+            (StatusCode::OK, Json(json!({ "verified": true }))).into_response()
+        }
+        Ok(dropit_infra_db::VerifyOutcome::CodeMismatch { attempts_left }) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "code": "invalid_code",
+                "message": "Verification code does not match.",
+                "details": { "attempts_left": attempts_left },
+            })),
+        )
+            .into_response(),
+        Ok(dropit_infra_db::VerifyOutcome::CodeNotFound) => envelope(
+            StatusCode::GONE,
+            "code_expired",
+            "Verification code is unknown, expired, or was invalidated.",
+        ),
+        Err(e) => {
+            tracing::warn!(error = %e, "guest verify: db error");
+            api_error(ApiError::Internal, "db error")
+        }
     }
 }
 

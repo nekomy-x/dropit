@@ -266,13 +266,11 @@ async fn e2e_push_token_register_idempotent_transfer() {
     assert_eq!(body["registered"], true);
 
     // В БД ровно одна строка токена.
-    let (cnt,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM guest_push_token WHERE token = $1",
-    )
-    .bind(push_token)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (cnt,): (i64,) = sqlx::query_as("SELECT count(*) FROM guest_push_token WHERE token = $1")
+        .bind(push_token)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 1, "single token row after re-register");
 
     // 3. Перевод токена другому гостю (B) → 201, guest_id обновлён.
@@ -285,13 +283,12 @@ async fn e2e_push_token_register_idempotent_transfer() {
     )
     .await;
     assert_eq!(s, StatusCode::CREATED, "transfer: {body}");
-    let (owner,): (Uuid,) = sqlx::query_as(
-        "SELECT guest_id FROM guest_push_token WHERE token = $1",
-    )
-    .bind(push_token)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let (owner,): (Uuid,) =
+        sqlx::query_as("SELECT guest_id FROM guest_push_token WHERE token = $1")
+            .bind(push_token)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(owner, guest_b, "token transferred to guest B");
 
     // 4. Мусор: короткий токен → 400; невалидная платформа → 400.

@@ -433,11 +433,7 @@ impl PayoutRepo {
     /// инцидент админу и возврат сплитов в `pending` при переходе
     /// в `on_hold` (деньги payee не пропали — следующий разбор их
     /// увидит). Ключ обновления — `id` строки (а не transfer_id).
-    async fn apply_failure(
-        &self,
-        row: PayoutRow,
-        reason: &str,
-    ) -> Result<PayoutRow, PayoutError> {
+    async fn apply_failure(&self, row: PayoutRow, reason: &str) -> Result<PayoutRow, PayoutError> {
         let current = row
             .payout_status()
             .ok_or(PayoutError::Db(sqlx::Error::Decode(
