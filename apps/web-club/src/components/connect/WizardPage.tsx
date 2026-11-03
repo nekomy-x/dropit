@@ -36,7 +36,7 @@ export default function WizardPage({
   const { t } = useLocale();
   const steps = [t('wizardClub'), t('wizardVenue'), t('wizardQr')];
   return (
-    <div className="connect-root flex min-h-screen flex-col bg-drop-bg">
+    <div className="connect-root wizard-root flex min-h-screen flex-col bg-drop-bg">
       <ConnectNav variant="wizard" />
 
       <main key={step} className="wizard-main mx-auto w-full max-w-[1440px] flex-1 animate-step-in px-4 pb-8 sm:px-6 lg:px-12">

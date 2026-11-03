@@ -20,7 +20,7 @@ use crate::api::StripeApi;
 use crate::error::StripeError;
 use crate::form::{
     account_link_body, account_path, capture_body, capture_path, connect_account_body,
-    payment_intent_body, refund_body, transfer_body,
+    payment_intent_body, payment_intent_path, refund_body, transfer_body,
 };
 use crate::json::{
     decode_json, parse_account_link, parse_api_error, parse_connected_account, parse_intent,
@@ -219,6 +219,11 @@ impl LiveStripe {
 
 #[async_trait::async_trait]
 impl StripeApi for LiveStripe {
+    async fn retrieve_payment_intent(&self, intent_id: &str) -> Result<IntentResult, StripeError> {
+        let json = self.get(&payment_intent_path(intent_id)?).await?;
+        parse_intent(&json)
+    }
+
     async fn create_payment_intent(&self, req: CreateIntent) -> Result<IntentResult, StripeError> {
         let form = payment_intent_body(&req)?;
         let key = req.idempotency_key.trim().to_string();

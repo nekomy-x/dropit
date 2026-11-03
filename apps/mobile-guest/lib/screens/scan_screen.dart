@@ -41,6 +41,16 @@ class _ScanScreenState extends State<ScanScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _scanLine.stop();
+    } else if (!_scanLine.isAnimating) {
+      _scanLine.repeat(reverse: true);
+    }
+  }
+
+  @override
   void dispose() {
     _scanLine.dispose();
     super.dispose();
@@ -54,8 +64,9 @@ class _ScanScreenState extends State<ScanScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => const _RoomCodeSheet(),
+      builder: (_) => const DropSheet(child: _RoomCodeSheet()),
     ).then((code) {
+      if (!mounted) return;
       if (code is String && code.trim().isNotEmpty) {
         if (widget.onCode != null) {
           widget.onCode!(code.trim());
@@ -106,184 +117,203 @@ class _ScanScreenState extends State<ScanScreen>
               ),
             ),
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 24),
+          LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight,
+                          maxHeight: constraints.maxHeight.clamp(
+                              680 * MediaQuery.textScalerOf(context).scale(1),
+                              double.infinity)),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 24),
 
-                  // ── Навигация сканера ──
-                  SizedBox(
-                    height: 44,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const BrandLockup(markColor: DropTokens.text),
-                        GhostCircleButton(
-                          icon: Icons.close,
-                          size: 44,
-                          fill: const Color(0x80121212),
-                          bordered: false,
-                          onPressed: widget.onClose,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 38),
+                            // ── Навигация сканера ──
+                            SizedBox(
+                              height: 44,
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const BrandLockup(markColor: DropTokens.text),
+                                  GhostCircleButton(
+                                    icon: Icons.close,
+                                    size: 44,
+                                    fill: const Color(0x80121212),
+                                    bordered: false,
+                                    onPressed: widget.onClose,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 38),
 
-                  // ── Вводная часть ──
-                  const Text('Scan in. Tune in.', style: DropType.screenTitle),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Point your camera at the club’s QR code.',
-                    style: DropType.bodySm.copyWith(
-                      fontSize: 13,
-                      height: 1.5,
-                      color: DropTokens.scanHint,
-                    ),
-                  ),
+                            // ── Вводная часть ──
+                            const Text('Scan in. Tune in.',
+                                style: DropType.screenTitle),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Point your camera at the club’s QR code.',
+                              style: DropType.bodySm.copyWith(
+                                fontSize: 13,
+                                height: 1.5,
+                                color: DropTokens.scanHint,
+                              ),
+                            ),
 
-                  // ── Рамка сканера (масштабируется на маленьких экранах) ──
-                  Expanded(
-                    child: Center(
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: SizedBox(
-                          width: 310,
-                          height: 300,
-                          child: Stack(
-                            children: [
-                              Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(32),
-                                  border: Border.all(
-                                    color: const Color(0xB3FFFFFF),
-                                    width: 2,
+                            // ── Рамка сканера (масштабируется на маленьких экранах) ──
+                            Expanded(
+                              child: Center(
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: SizedBox(
+                                    width: 310,
+                                    height: 300,
+                                    child: Stack(
+                                      children: [
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            borderRadius:
+                                                BorderRadius.circular(32),
+                                            border: Border.all(
+                                              color: const Color(0xB3FFFFFF),
+                                              width: 2,
+                                            ),
+                                          ),
+                                        ),
+                                        // Бегущая линия сканирования.
+                                        AnimatedBuilder(
+                                          animation: _scanLine,
+                                          builder: (context, _) {
+                                            return Align(
+                                              alignment: Alignment(
+                                                  0,
+                                                  -0.85 +
+                                                      _scanLine.value * 1.7),
+                                              child: Container(
+                                                height: 2,
+                                                margin:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 12),
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    colors: [
+                                                      DropTokens.accent
+                                                          .withValues(alpha: 0),
+                                                      DropTokens.accent,
+                                                      DropTokens.accent
+                                                          .withValues(alpha: 0),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
-                              // Бегущая линия сканирования.
-                              AnimatedBuilder(
-                                animation: _scanLine,
-                                builder: (context, _) {
-                                  return Align(
-                                    alignment: Alignment(
-                                        0, -0.85 + _scanLine.value * 1.7),
-                                    child: Container(
-                                      height: 2,
-                                      margin: const EdgeInsets.symmetric(
-                                          horizontal: 12),
-                                      decoration: BoxDecoration(
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            DropTokens.accent
-                                                .withValues(alpha: 0),
-                                            DropTokens.accent,
-                                            DropTokens.accent
-                                                .withValues(alpha: 0),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // ── Подсказка видоискателя ──
-                  Center(
-                    child: Text(
-                      'Scanning automatically',
-                      style: DropType.bodySm.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: DropTokens.text,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Center(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.door_front_door_outlined,
-                            size: 13, color: DropTokens.muted),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Just hold steady. No photo needed.',
-                          style: DropType.caption
-                              .copyWith(color: DropTokens.scanHintDim),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-
-                  // ── Инструменты камеры ──
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _CameraTool(
-                        icon: _flash ? Icons.flash_on : Icons.flash_off,
-                        label: _flash ? 'Flash on' : 'Flash',
-                        onTap: () => setState(() => _flash = !_flash),
-                      ),
-                      const SizedBox(width: 32),
-                      _CameraTool(
-                        icon: Icons.photo_library_outlined,
-                        label: 'From photos',
-                        onTap: () {
-                          if (widget.onCode != null) {
-                            widget.onCode!('gallery');
-                          } else {
-                            widget.onJoined(_roomForCode('gallery'));
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 44),
-
-                  // ── Ручной ввод ──
-                  const Text(
-                    'Can’t scan the code?',
-                    style: DropType.caption,
-                  ),
-                  const SizedBox(height: 10),
-                  InkWell(
-                    onTap: _openManualEntry,
-                    borderRadius: BorderRadius.circular(999),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.keyboard_outlined,
-                              size: 18, color: DropTokens.scanHintDim),
-                          const SizedBox(width: 10),
-                          Text(
-                            'Type room code manually',
-                            style: DropType.bodySm.copyWith(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              color: DropTokens.scanHint,
                             ),
-                          ),
-                        ],
+
+                            // ── Подсказка видоискателя ──
+                            Center(
+                              child: Text(
+                                'Scanning automatically',
+                                style: DropType.bodySm.copyWith(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: DropTokens.text,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Center(
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.door_front_door_outlined,
+                                      size: 13, color: DropTokens.muted),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                      child: Text(
+                                    'Just hold steady. No photo needed.',
+                                    style: DropType.caption.copyWith(
+                                        color: DropTokens.scanHintDim),
+                                  )),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 30),
+
+                            // ── Инструменты камеры ──
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _CameraTool(
+                                  icon:
+                                      _flash ? Icons.flash_on : Icons.flash_off,
+                                  label: _flash ? 'Flash on' : 'Flash',
+                                  onTap: () => setState(() => _flash = !_flash),
+                                ),
+                                const SizedBox(width: 32),
+                                _CameraTool(
+                                  icon: Icons.photo_library_outlined,
+                                  label: 'From photos',
+                                  onTap: () {
+                                    if (widget.onCode != null) {
+                                      widget.onCode!('gallery');
+                                    } else {
+                                      widget.onJoined(_roomForCode('gallery'));
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 44),
+
+                            // ── Ручной ввод ──
+                            const Text(
+                              'Can’t scan the code?',
+                              style: DropType.caption,
+                            ),
+                            const SizedBox(height: 10),
+                            InkWell(
+                              onTap: _openManualEntry,
+                              borderRadius: BorderRadius.circular(999),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.keyboard_outlined,
+                                        size: 18,
+                                        color: DropTokens.scanHintDim),
+                                    const SizedBox(width: 10),
+                                    Flexible(
+                                        child: Text(
+                                      'Type room code manually',
+                                      style: DropType.bodySm.copyWith(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        color: DropTokens.scanHint,
+                                      ),
+                                    )),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
-          ),
+                  )),
         ],
       ),
     );
@@ -345,11 +375,7 @@ class _RoomCodeSheetState extends State<_RoomCodeSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        left: 44,
-        right: 44,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
+      padding: const EdgeInsets.only(left: 20, right: 20, bottom: 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,7 +395,8 @@ class _RoomCodeSheetState extends State<_RoomCodeSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Enter room code', style: DropType.sheetTitle),
+              const Expanded(
+                  child: Text('Enter room code', style: DropType.sheetTitle)),
               IconButton(
                 onPressed: () => Navigator.of(context).pop(),
                 icon:

@@ -617,8 +617,8 @@ export default function MailPage() {
             </div>
           </header>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12, marginBottom: 16 }}>
-            <div style={{ flex: '0 1 200px', minWidth: 160 }}>
+          <div className="admin-filter-row">
+            <div className="admin-filter">
               <Select
                 id="mail-status"
                 label={t('mail.statusLabel')}
@@ -633,7 +633,7 @@ export default function MailPage() {
                 ]}
               />
             </div>
-            <div style={{ flex: '1 1 260px', maxWidth: 380, minWidth: 0 }}>
+            <div className="admin-filter-search">
               <label htmlFor="mail-search" className="field-label">
                 {t('mail.searchLabel')}
               </label>
@@ -680,7 +680,11 @@ export default function MailPage() {
 
           {items.length > 0 ? (
             <div className="table-wrap">
-              <table className="data-table" aria-label={t('mail.tableLabel')} style={{ minWidth: 860 }}>
+              <table
+                className="data-table data-table--stack"
+                aria-label={t('mail.tableLabel')}
+                style={{ minWidth: 860 }}
+              >
                 <thead>
                   <tr>
                     <th scope="col">{t('mail.created')}</th>
@@ -699,21 +703,27 @@ export default function MailPage() {
                       onClick={() => setSelected(message)}
                       style={{ cursor: 'pointer' }}
                     >
-                      <td className="is-mono is-muted" style={{ whiteSpace: 'nowrap' }}>
+                      {/* The stacked row opens with the moment it was queued:
+                          the mail list is a queue, ordered newest first, and
+                          that stamp is what an operator scans for.
+                          `data-label=""` is the contract's "no column label"
+                          marker; without the attribute the shared stack block
+                          keeps the label-column inset on the record line. */}
+                      <td data-label="" className="cell-primary is-mono" style={{ whiteSpace: 'nowrap' }}>
                         {shortStamp(message.created_at, locale)}
                       </td>
-                      <td style={{ overflowWrap: 'anywhere' }}>{message.to}</td>
-                      <td className="is-strong" style={{ overflowWrap: 'anywhere' }}>
+                      <td data-label={t('mail.colTo')} style={{ overflowWrap: 'anywhere' }}>{message.to}</td>
+                      <td data-label={t('mail.colSubject')} className="is-strong" style={{ overflowWrap: 'anywhere' }}>
                         {message.subject || t('mail.noSubject')}
                       </td>
-                      <td className="is-mono is-muted">{message.template}</td>
-                      <td>
+                      <td data-label={t('mail.template')} className="is-mono is-muted">{message.template}</td>
+                      <td data-label={t('mail.statusLabel')}>
                         <StatusBadge status={message.status} />
                       </td>
-                      <td className="is-num">
+                      <td data-label={t('mail.attempts')} className="is-num">
                         {message.attempts}/{message.max_attempts}
                       </td>
-                      <td className="is-num">
+                      <td data-label="" className="cell-actions">
                         <button
                           type="button"
                           className="panel-icon-button"

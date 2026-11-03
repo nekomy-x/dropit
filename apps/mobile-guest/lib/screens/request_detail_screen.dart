@@ -217,7 +217,7 @@ class RequestDetailScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -275,7 +275,8 @@ class RequestDetailScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => Padding(
+      builder: (_) => DropSheet(
+          child: Padding(
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -311,7 +312,7 @@ class RequestDetailScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -337,14 +338,16 @@ class _ReceiptValueRow extends StatelessWidget {
       child: Row(
         children: [
           Text(label, style: DropType.caption),
-          const Spacer(),
-          Text(
+          const SizedBox(width: 12),
+          Expanded(
+              child: Text(
             value,
+            textAlign: TextAlign.end,
             style: DropType.caption.copyWith(
               fontWeight: FontWeight.w600,
               color: DropTokens.text,
             ),
-          ),
+          )),
         ],
       ),
     );

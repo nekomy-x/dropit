@@ -1,6 +1,6 @@
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { clearTokens, getProfile, isAuthenticated } from '../api/client';
+import { clearTokens, consoleHandoffMeta, getProfile, isAuthenticated, leaveDjConsole } from '../api/client';
 import Icon from './Icon';
 import BrandLogo from './BrandLogo';
 import { AccountMenu, AccountSettings, type AccountFact } from '../account';
@@ -93,6 +93,7 @@ const NAV_GROUPS: ReadonlyArray<{ labelKey: string; items: ReadonlyArray<NavItem
     labelKey: 'nav.tools',
     items: [
       { to: '/qr', labelKey: 'nav.qrStudio', icon: 'lucide:qr-code' },
+      { to: '/developers', labelKey: 'nav.developers', icon: 'lucide:code-2' },
       { to: '/dj', labelKey: 'nav.djConsole', icon: 'lucide:disc-3' },
     ],
   },
@@ -101,10 +102,18 @@ const NAV_GROUPS: ReadonlyArray<{ labelKey: string; items: ReadonlyArray<NavItem
 const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items);
 
 /** DJ console views. `key` is the hash the console page answers to. */
-type DjTab = 'queue' | 'room' | 'session';
+type DjTab = 'requests' | 'room' | 'session';
+
+/** `#requests` (and the older `#queue`) both open the processing surface. */
+function djTabFromHash(hash: string): DjTab {
+  const value = hash.replace(/^#/, '');
+  if (value === 'room') return 'room';
+  if (value === 'session' || value === 'history') return 'session';
+  return 'requests';
+}
 
 const DJ_NAV_ITEMS: ReadonlyArray<{ key: DjTab; labelKey: string; icon: `lucide:${string}` }> = [
-  { key: 'queue', labelKey: 'nav.requestQueue', icon: 'lucide:list-music' },
+  { key: 'requests', labelKey: 'nav.requestQueue', icon: 'lucide:list-music' },
   { key: 'room', labelKey: 'nav.roomControl', icon: 'lucide:radio-tower' },
   { key: 'session', labelKey: 'nav.sessionDetails', icon: 'lucide:history' },
 ];
@@ -179,8 +188,12 @@ function DjNavGroups({ activeTab, onSelect, closeOnNavigate = false }: {
       </div>
       <div className="panel-nav-group">
         <p className="panel-nav-label">{t('nav.queueMonitor')}</p>
+        {/* The note states how the list stays current. In the demo build there
+            is no server to stay current with, and the note said "every five
+            seconds" while nothing refreshed at all — so it answers the demo
+            case with the word demo instead of a promise. */}
         <div className="dj-rail-note">
-          <span>{t('nav.refreshNote')}</span>
+          <span>{IS_DEMO ? t('common.demo') : t('nav.refreshNote')}</span>
         </div>
       </div>
     </>
@@ -448,6 +461,16 @@ export default function Layout() {
         facts={identity.account.facts}
         onClose={() => setSettingsOpen(false)}
         onSignOut={signOut}
+        developerAccess={{
+          hint: t('account.developerHint'),
+          actionLabel: t('account.developerAction'),
+          onOpen: () => {
+            // One subject, one place: the settings dialog closes and the page
+            // that owns keys and documentation opens.
+            setSettingsOpen(false);
+            navigate('/developers');
+          },
+        }}
       />
     </div>
   );
@@ -459,17 +482,9 @@ export function DjLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Hash is the small integration contract with DjConsolePage: the shell owns
   // navigation state, while the page maps requests/queue/history to its view.
-  const [activeTab, setActiveTab] = useState<DjTab>(() => {
-    const value = window.location.hash.slice(1);
-    return value === 'room' ? 'room' : value === 'session' || value === 'history' ? 'session' : 'queue';
-  });
+  const [activeTab, setActiveTab] = useState<DjTab>(() => djTabFromHash(window.location.hash));
   useEffect(() => {
-    const syncHash = () => {
-      const value = window.location.hash.slice(1);
-      if (value === 'room') setActiveTab('room');
-      else if (value === 'session' || value === 'history') setActiveTab('session');
-      else if (value === 'queue' || value === 'requests') setActiveTab('queue');
-    };
+    const syncHash = () => setActiveTab(djTabFromHash(window.location.hash));
     window.addEventListener('hashchange', syncHash);
     return () => window.removeEventListener('hashchange', syncHash);
   }, []);
@@ -479,23 +494,48 @@ export function DjLayout() {
     if (window.location.hash !== `#${tab}`) window.history.pushState(null, '', `#${tab}`);
     window.dispatchEvent(new Event('hashchange'));
   };
+  // Открыта ли консоль клубом, а не самим диджеем. Это две разные сессии:
+  // DJ-логин — единственная, handoff оставляет клубную в памяти, поэтому
+  // выход из второй возвращает в панель, а не на экран логина диджея.
+  const handoff = consoleHandoffMeta();
+  // Two different exits share one control. A DJ who signed in leaves the
+  // console (their account ends here). A club that opened the console is still
+  // signed in at the panel — signing the club out from inside the console
+  // would be a surprise, so "sign out" means "leave the console" and the real
+  // sign-out stays where the club account lives.
   const signOut = () => {
-    clearTokens();
+    if (handoff) {
+      leaveDjConsole();
+      navigate('/dashboard', { replace: true });
+      return;
+    }
+    clearTokens('dj');
     navigate(IS_DEMO ? '/dj' : '/dj/login', { replace: true });
   };
 
   // No workspace badge: the DJ console is one DJ on one shift, and the page
   // head already says which. A block that names the only possible workspace,
   // and cannot switch to another, only reads as a broken account picker.
+  //
+  // When the club opened this console, the account block names the DJ the
+  // console is working as: two people are involved (the club at the panel and
+  // the DJ on the shift), and "DJ account / Tonight's shift" would hide which
+  // one is acting.
   const identity: ShellIdentity = {
     account: {
-      initials: 'DJ',
-      name: t('account.djName'),
-      meta: t('shell.tonightShift'),
-      facts: [
-        { label: t('account.role'), value: t('account.djName') },
-        { label: t('account.workspace'), value: t('shell.workspaceDj') },
-      ],
+      initials: handoff ? initialsOf(handoff.dj.displayName) : 'DJ',
+      name: handoff ? handoff.dj.displayName : t('account.djName'),
+      meta: handoff ? t('console.identityMeta') : t('shell.tonightShift'),
+      facts: handoff
+        ? [
+            { label: t('account.role'), value: t('account.djName') },
+            { label: t('account.workspace'), value: t('shell.workspaceDj') },
+            { label: t('sessions.shiftId'), value: handoff.session.id },
+          ]
+        : [
+            { label: t('account.role'), value: t('account.djName') },
+            { label: t('account.workspace'), value: t('shell.workspaceDj') },
+          ],
     },
   };
 
@@ -548,6 +588,30 @@ export function DjLayout() {
             </span>
           </div>
         </header>
+
+        {/* Which session this is, and the one way back. A club that walked in
+            through the handoff must be able to look at the screen and know
+            they are working as the DJ of the shift, not as themselves. */}
+        {handoff ? (
+          <div className="dj-handoff-band" role="status">
+            <Icon name="lucide:key-round" size={15} />
+            <span className="dj-handoff-copy">
+              <strong>{t('console.handoffTitle')}</strong>
+              <span>{t('console.handoffBody', { dj: handoff.dj.displayName })}</span>
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                leaveDjConsole();
+                navigate('/dashboard', { replace: true });
+              }}
+            >
+              {t('console.returnToPanel')}
+            </button>
+          </div>
+        ) : null}
+
         <main className="panel-content"><Outlet /></main>
       </div>
 

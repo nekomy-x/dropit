@@ -1,0 +1,135 @@
+/* Public pages share one outer gutter on phones and tablets. Group padding
+   stays compact so forms and download choices can use the available width. */
+@media (max-width: 1023px) {
+  .connect-root.download-root .dl-shell,
+  .connect-root.wizard-root .wizard-main,
+  .connect-root.hub-root .hub-intro > div,
+  .connect-root.hub-root .hub-copy,
+  .connect-root.hub-root > footer > div,
+  .public-bar > div {
+    padding-inline: 16px;
+  }
+
+  .connect-root.download-root .dl-copy {
+    max-width: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .wizard-root .wizard-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+  }
+
+  /* Each step owns a third of the available width; the final label must not
+     disappear in the old max-content horizontal scroller. */
+  .wizard-root .wizard-stepper-wrap {
+    padding: 12px;
+  }
+
+  .wizard-root .wizard-stepper-wrap ol {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-width: 0;
+    align-items: start;
+    gap: 12px;
+  }
+
+  .wizard-root .wizard-stepper-wrap li {
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .wizard-root .wizard-stepper-wrap li > span[aria-hidden] {
+    display: none;
+  }
+
+  .wizard-root .wizard-stepper-wrap li > span {
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .wizard-root .wizard-stepper-wrap li > span:last-child {
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 640px) {
+  .connect-root.download-root .dl-shell,
+  .connect-root.wizard-root .wizard-main,
+  .connect-root.hub-root .hub-intro > div,
+  .connect-root.hub-root .hub-copy,
+  .connect-root.hub-root > footer > div,
+  .public-bar > div {
+    padding-inline: 12px;
+  }
+
+  .wizard-root .wizard-body > section:first-child,
+  .wizard-root .wizard-body > aside {
+    min-width: 0;
+    padding: 20px 14px;
+  }
+
+  .wizard-root .wizard-inset {
+    padding: 14px;
+  }
+
+  .wizard-root .wizard-zone-entry {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wizard-root .wizard-zone-entry input {
+    flex: none;
+    width: 100%;
+  }
+
+  .download-root .dl-stores-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .download-root .dl-seg {
+    width: 100%;
+    max-width: none;
+  }
+
+  .download-root .dl-seg-btn {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  /* The file size is metadata, so it goes below the copy instead of taking
+     width away from the download title and installation note. */
+  .download-root .dl-apk {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 14px;
+    column-gap: 12px;
+    row-gap: 4px;
+  }
+
+  .download-root .dl-apk-icon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .download-root .dl-apk-copy {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .download-root .dl-apk-size {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .download-root .dl-apk > svg {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocale } from '../../locale';
+import Icon from '../Icon';
 
 export type ConsoleRole = 'Platform admin' | 'Club manager' | 'DJ' | 'Support';
 export type ConsolePermission = 'Manage users' | 'Manage venues' | 'Issue refunds' | 'Edit queue' | 'View audit log';
@@ -87,11 +88,28 @@ export default function RolePermissionMatrix() {
           <h2 id="permission-matrix-heading" className="panel-card-title">{t('roleMatrix.title')}</h2>
           <p className="panel-card-sub">{t('roleMatrix.subtitle')}</p>
         </div>
-        <p role="status" style={{ margin: 0, color: 'var(--c-accent-quiet)', fontSize: 'var(--fs-11)' }}>{message}</p>
+        <div className="panel-card-tools">
+          {/* Scroll affordance: on a phone the grid continues past the card
+              edge, so the head carries the one cue that says so. Decorative —
+              the scroller itself is a labelled, keyboard-reachable region. */}
+          <span className="admin-matrix-cue" aria-hidden="true">
+            <Icon name="lucide:chevron-right" size={16} />
+          </span>
+          <p role="status" style={{ margin: 0, color: 'var(--c-accent-quiet)', fontSize: 'var(--fs-11)' }}>{message}</p>
+        </div>
       </header>
 
-      <div className="admin-matrix-scroll table-wrap">
-        <table className="data-table" style={{ minWidth: 680 }}>
+      {/* A matrix cannot become a stack of cards: the cell only means something
+        * in its column. On a phone it stays a real grid inside a sideways
+        * scroller whose permission column is pinned and whose scrollbar is
+        * always visible, and the scroller is a keyboard stop of its own. */}
+      <div
+        className="admin-matrix-scroll table-wrap"
+        role="region"
+        aria-label={t('roleMatrix.title')}
+        tabIndex={0}
+      >
+        <table className="data-table" data-mobile="scroll" style={{ minWidth: 680 }}>
           <thead>
             <tr>
               <th scope="col">{t('roleMatrix.permissionColumn')}</th>

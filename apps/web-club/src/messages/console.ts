@@ -1,0 +1,178 @@
+/**
+ * Console entry catalog — the one button that takes the club panel into the
+ * DJ console (`components/DjConsoleEntry.tsx`) and the band that brings it
+ * back (`pages/DjConsolePage.tsx` shell).
+ *
+ * Copy contract:
+ *   - every blocked state names the concrete thing to fix and the page that
+ *     fixes it; "something went wrong" is never the whole message;
+ *   - the panel never claims the console opened before the API confirmed it;
+ *   - `console.handoffBody` names the DJ, because "you are in the console"
+ *     without a name is exactly the ambiguity this feature removes.
+ */
+import type { MessageCatalog } from '../i18n';
+
+export const consoleCatalog: MessageCatalog = {
+  en: {
+    'console.openingTitle': 'Opening the DJ console',
+    'console.openingBody': 'Signing in as the DJ of the open shift. The club panel stays signed in.',
+    'console.noShiftTitle': 'No shift is open',
+    'console.noShiftBody': 'The console runs through the DJ of a shift. Open a shift in the live room first.',
+    'console.pickDjTitle': 'Who is on the decks?',
+    'console.pickDjBody': 'The open shift has no DJ yet. Pick one — the console opens as that DJ and the shift is assigned to them.',
+    'console.pickDjAction': 'Open as {dj}',
+    'console.noDjsTitle': 'No active DJ in the roster',
+    'console.noDjsBody': 'Invite a DJ in the roster, then press the console button again.',
+    'console.djUnavailableTitle': 'The DJ of this shift cannot open the console',
+    'console.djUnavailableBody': 'Their access is suspended, blocked or removed. Check the DJ roster.',
+    'console.failedTitle': 'The DJ console did not open',
+    'console.failedBody': 'The club API did not confirm the handoff. Try again in a moment.',
+    'console.staleTitle': 'This server does not know the console entry yet',
+    'console.staleBody': 'The panel and the club API are different versions: the API predates this button. Update the API and try again — no data was changed.',
+
+    'console.retry': 'Try again',
+    'console.openLiveRoom': 'Open the live room',
+    'console.openRoster': 'Open the DJ roster',
+    'console.backToClub': 'Back to the club panel',
+
+    'console.handoffTitle': 'Console opened from the club panel',
+    'console.handoffBody': 'You are working as {dj}. The club stays signed in.',
+    'console.identityMeta': 'Opened from the club panel',
+    'console.returnToPanel': 'Return to the club panel',
+  },
+  es: {
+    'console.openingTitle': 'Abriendo la consola del DJ',
+    'console.openingBody': 'Entrando como el DJ del turno abierto. El panel del club sigue con la sesión abierta.',
+    'console.noShiftTitle': 'No hay turno abierto',
+    'console.noShiftBody': 'La consola funciona con el DJ de un turno. Abre primero un turno en la sala en vivo.',
+    'console.pickDjTitle': '¿Quién está en la cabina?',
+    'console.pickDjBody': 'El turno abierto aún no tiene DJ. Elige uno: la consola se abre como ese DJ y el turno queda asignado.',
+    'console.pickDjAction': 'Abrir como {dj}',
+    'console.noDjsTitle': 'No hay DJ activos en la plantilla',
+    'console.noDjsBody': 'Invita a un DJ en la plantilla y vuelve a pulsar el botón de la consola.',
+    'console.djUnavailableTitle': 'El DJ de este turno no puede abrir la consola',
+    'console.djUnavailableBody': 'Su acceso está suspendido, bloqueado o retirado. Revisa la plantilla de DJ.',
+    'console.failedTitle': 'La consola del DJ no se abrió',
+    'console.failedBody': 'La API del club no confirmó el traspaso. Inténtalo de nuevo en un momento.',
+    'console.staleTitle': 'Este servidor aún no conoce la entrada a la consola',
+    'console.staleBody': 'El panel y la API del club son versiones distintas: la API es anterior a este botón. Actualiza la API y vuelve a intentarlo; no se ha cambiado ningún dato.',
+
+    'console.retry': 'Reintentar',
+    'console.openLiveRoom': 'Abrir la sala en vivo',
+    'console.openRoster': 'Abrir la plantilla de DJ',
+    'console.backToClub': 'Volver al panel del club',
+
+    'console.handoffTitle': 'Consola abierta desde el panel del club',
+    'console.handoffBody': 'Trabajas como {dj}. El club sigue con la sesión abierta.',
+    'console.identityMeta': 'Abierta desde el panel del club',
+    'console.returnToPanel': 'Volver al panel del club',
+  },
+  fr: {
+    'console.openingTitle': 'Ouverture de la console DJ',
+    'console.openingBody': 'Connexion en tant que DJ du service ouvert. Le panneau du club reste connecté.',
+    'console.noShiftTitle': 'Aucun service n’est ouvert',
+    'console.noShiftBody': 'La console fonctionne avec le DJ d’un service. Ouvrez d’abord un service dans la salle en direct.',
+    'console.pickDjTitle': 'Qui est aux platines ?',
+    'console.pickDjBody': 'Le service ouvert n’a pas encore de DJ. Choisissez-en un : la console s’ouvre en son nom et le service lui est attribué.',
+    'console.pickDjAction': 'Ouvrir en tant que {dj}',
+    'console.noDjsTitle': 'Aucun DJ actif dans l’équipe',
+    'console.noDjsBody': 'Invitez un DJ dans l’équipe, puis appuyez à nouveau sur le bouton de la console.',
+    'console.djUnavailableTitle': 'Le DJ de ce service ne peut pas ouvrir la console',
+    'console.djUnavailableBody': 'Son accès est suspendu, bloqué ou retiré. Vérifiez l’équipe DJ.',
+    'console.failedTitle': 'La console DJ ne s’est pas ouverte',
+    'console.failedBody': 'L’API du club n’a pas confirmé le transfert. Réessayez dans un instant.',
+    'console.staleTitle': 'Ce serveur ne connaît pas encore l’entrée de la console',
+    'console.staleBody': 'Le panneau et l’API du club sont deux versions différentes : l’API est antérieure à ce bouton. Mettez l’API à jour et réessayez — aucune donnée n’a été modifiée.',
+
+    'console.retry': 'Réessayer',
+    'console.openLiveRoom': 'Ouvrir la salle en direct',
+    'console.openRoster': 'Ouvrir l’équipe DJ',
+    'console.backToClub': 'Retour au panneau du club',
+
+    'console.handoffTitle': 'Console ouverte depuis le panneau du club',
+    'console.handoffBody': 'Vous travaillez en tant que {dj}. Le club reste connecté.',
+    'console.identityMeta': 'Ouverte depuis le panneau du club',
+    'console.returnToPanel': 'Retour au panneau du club',
+  },
+  de: {
+    'console.openingTitle': 'DJ-Konsole wird geöffnet',
+    'console.openingBody': 'Anmeldung als DJ der laufenden Schicht. Das Club-Panel bleibt angemeldet.',
+    'console.noShiftTitle': 'Keine Schicht geöffnet',
+    'console.noShiftBody': 'Die Konsole arbeitet über den DJ einer Schicht. Öffne zuerst eine Schicht im Live-Raum.',
+    'console.pickDjTitle': 'Wer steht an den Decks?',
+    'console.pickDjBody': 'Der offenen Schicht fehlt noch ein DJ. Wähle einen — die Konsole öffnet als dieser DJ, und die Schicht wird ihm zugewiesen.',
+    'console.pickDjAction': 'Als {dj} öffnen',
+    'console.noDjsTitle': 'Kein aktiver DJ im Team',
+    'console.noDjsBody': 'Lade im Team einen DJ ein und drücke den Konsolen-Knopf erneut.',
+    'console.djUnavailableTitle': 'Der DJ dieser Schicht kann die Konsole nicht öffnen',
+    'console.djUnavailableBody': 'Der Zugang ist gesperrt, blockiert oder entzogen. Prüfe die DJ-Liste.',
+    'console.failedTitle': 'Die DJ-Konsole wurde nicht geöffnet',
+    'console.failedBody': 'Die Club-API hat die Übergabe nicht bestätigt. Versuche es gleich noch einmal.',
+    'console.staleTitle': 'Dieser Server kennt den Konsolen-Einstieg noch nicht',
+    'console.staleBody': 'Panel und Club-API haben verschiedene Versionen: die API ist älter als dieser Knopf. Aktualisiere die API und versuche es erneut — es wurden keine Daten geändert.',
+
+    'console.retry': 'Erneut versuchen',
+    'console.openLiveRoom': 'Live-Raum öffnen',
+    'console.openRoster': 'DJ-Liste öffnen',
+    'console.backToClub': 'Zurück zum Club-Panel',
+
+    'console.handoffTitle': 'Konsole aus dem Club-Panel geöffnet',
+    'console.handoffBody': 'Du arbeitest als {dj}. Der Club bleibt angemeldet.',
+    'console.identityMeta': 'Aus dem Club-Panel geöffnet',
+    'console.returnToPanel': 'Zurück zum Club-Panel',
+  },
+  pt: {
+    'console.openingTitle': 'A abrir a consola do DJ',
+    'console.openingBody': 'A entrar como o DJ do turno aberto. O painel do clube continua com sessão aberta.',
+    'console.noShiftTitle': 'Nenhum turno aberto',
+    'console.noShiftBody': 'A consola funciona com o DJ de um turno. Abre primeiro um turno na sala ao vivo.',
+    'console.pickDjTitle': 'Quem está na cabine?',
+    'console.pickDjBody': 'O turno aberto ainda não tem DJ. Escolhe um — a consola abre como esse DJ e o turno fica atribuído.',
+    'console.pickDjAction': 'Abrir como {dj}',
+    'console.noDjsTitle': 'Sem DJs ativos na equipa',
+    'console.noDjsBody': 'Convida um DJ na equipa e volta a premir o botão da consola.',
+    'console.djUnavailableTitle': 'O DJ deste turno não pode abrir a consola',
+    'console.djUnavailableBody': 'O acesso está suspenso, bloqueado ou removido. Verifica a equipa de DJ.',
+    'console.failedTitle': 'A consola do DJ não abriu',
+    'console.failedBody': 'A API do clube não confirmou a passagem. Tenta novamente daqui a pouco.',
+    'console.staleTitle': 'Este servidor ainda não conhece a entrada da consola',
+    'console.staleBody': 'O painel e a API do clube são versões diferentes: a API é anterior a este botão. Atualiza a API e tenta novamente — nenhum dado foi alterado.',
+
+    'console.retry': 'Tentar novamente',
+    'console.openLiveRoom': 'Abrir a sala ao vivo',
+    'console.openRoster': 'Abrir a equipa de DJ',
+    'console.backToClub': 'Voltar ao painel do clube',
+
+    'console.handoffTitle': 'Consola aberta a partir do painel do clube',
+    'console.handoffBody': 'Estás a trabalhar como {dj}. O clube continua com sessão aberta.',
+    'console.identityMeta': 'Aberta a partir do painel do clube',
+    'console.returnToPanel': 'Voltar ao painel do clube',
+  },
+  ru: {
+    'console.openingTitle': 'Открываем консоль диджея',
+    'console.openingBody': 'Входим как диджей открытой смены. Панель клуба остаётся активной.',
+    'console.noShiftTitle': 'Смена не открыта',
+    'console.noShiftBody': 'Консоль работает от диджея смены. Сначала откройте смену в «Живой комнате».',
+    'console.pickDjTitle': 'Кто за пультом?',
+    'console.pickDjBody': 'На открытой смене ещё нет диджея. Выберите — консоль откроется от его имени, и смена закрепится за ним.',
+    'console.pickDjAction': 'Открыть как {dj}',
+    'console.noDjsTitle': 'В составе нет активных диджеев',
+    'console.noDjsBody': 'Пригласите диджея в состав и нажмите кнопку консоли ещё раз.',
+    'console.djUnavailableTitle': 'Диджей этой смены не может открыть консоль',
+    'console.djUnavailableBody': 'Доступ приостановлен, заблокирован или снят. Проверьте состав диджеев.',
+    'console.failedTitle': 'Консоль диджея не открылась',
+    'console.failedBody': 'API клуба не подтвердил передачу. Попробуйте ещё раз через момент.',
+    'console.staleTitle': 'Сервер ещё не знает про вход в консоль',
+    'console.staleBody': 'Панель и API клуба — разных версий: API старше этой кнопки. Обновите API и попробуйте снова; данные не изменились.',
+
+    'console.retry': 'Попробовать снова',
+    'console.openLiveRoom': 'Открыть «Живую комнату»',
+    'console.openRoster': 'Открыть состав диджеев',
+    'console.backToClub': 'Вернуться в панель клуба',
+
+    'console.handoffTitle': 'Консоль открыта из панели клуба',
+    'console.handoffBody': 'Вы работаете как {dj}. Клуб остаётся в системе.',
+    'console.identityMeta': 'Открыта из панели клуба',
+    'console.returnToPanel': 'Вернуться в панель клуба',
+  },
+};

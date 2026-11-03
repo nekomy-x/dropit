@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../data/demo_data.dart';
 import '../data/models.dart';
 import '../api/api_client.dart';
+import '../api/guest_link.dart';
 
 class AppState extends ChangeNotifier {
   /// Доступ к состоянию из любого экрана: `AppState.of(context)`.
@@ -26,6 +27,9 @@ class AppState extends ChangeNotifier {
 
   final ApiClient? _api;
   _PendingCheckout? _pendingCheckout;
+  bool _checkoutSubmitting = false;
+
+  bool get hasPendingCheckout => _pendingCheckout != null;
 
   /// Доступен ли бэкенд (проверяется device-token при старте).
   bool backendAvailable = false;
@@ -126,8 +130,14 @@ class AppState extends ChangeNotifier {
     if (api == null) {
       throw ApiException.of('api_unavailable', 'API is unavailable');
     }
+    final token = guestQrToken(qrToken);
+    if (token == null) {
+      throw ApiException.of('qr_invalid', 'Scan a current DROP IT room QR.');
+    }
     await api.ensureDeviceToken();
-    final joined = await api.joinByQr(qrToken);
+    final joined = await api.joinByQr(token);
+    backendAvailable = true;
+    _selectedTrack = null;
     final room = Room(
       id: joined.sessionId,
       name: joined.clubName,
@@ -142,6 +152,7 @@ class AppState extends ChangeNotifier {
       room: room,
       dj: room.dj,
       priceLabel: joined.priceLabel,
+      testPayments: joined.testPayments,
     );
     notifyListeners();
     return room;
@@ -181,87 +192,111 @@ class AppState extends ChangeNotifier {
     Room room, {
     Future<void> Function(PaymentIntent intent)? onPaymentIntent,
   }) async {
-    if (backendAvailable && _api != null) {
-      if (!_looksLikeUuid(track.id)) {
-        throw ApiException.of(
-          'track_not_synced',
-          'Search the live catalog before sending a request.',
-        );
-      }
-      var pending = _pendingCheckout;
-      if (pending != null &&
-          (pending.trackId != track.id || pending.sessionId != room.id)) {
-        throw ApiException.of(
-          'checkout_in_progress',
-          'Finish or retry the pending checkout before starting another request.',
-        );
-      }
-      if (pending == null) {
-        final key = 'guest-request-${DateTime.now().microsecondsSinceEpoch}';
-        final request = await _api.createRequest(
-          trackId: track.id,
-          idempotencyKey: key,
-        );
-        final intent = await _api.createPaymentIntent(
-          requestId: request.requestId,
-          idempotencyKey: 'payment-$key',
-        );
-        pending = _PendingCheckout(
+    if (_checkoutSubmitting) {
+      throw ApiException.of(
+          'checkout_in_progress', 'A checkout is already being submitted.');
+    }
+    _checkoutSubmitting = true;
+    try {
+      if (backendAvailable && _api != null) {
+        if (!_looksLikeUuid(track.id)) {
+          throw ApiException.of(
+            'track_not_synced',
+            'Search the live catalog before sending a request.',
+          );
+        }
+        var pending = _pendingCheckout;
+        if (pending != null &&
+            (pending.trackId != track.id || pending.sessionId != room.id)) {
+          throw ApiException.of(
+            'checkout_in_progress',
+            'Finish or retry the pending checkout before starting another request.',
+          );
+        }
+        if (onPaymentIntent == null) {
+          throw ApiException.of(
+            'payment_method_required',
+            'A secure payment method is required to send this request.',
+          );
+        }
+        pending ??= _PendingCheckout(
           trackId: track.id,
           sessionId: room.id,
-          requestId: request.requestId,
-          paymentIntent: intent,
-          idempotencyKey: key,
+          idempotencyKey:
+              'guest-request-${DateTime.now().microsecondsSinceEpoch}',
         );
+        // Keep the same keys and completed stages after an ambiguous network error.
         _pendingCheckout = pending;
-      }
-      if (onPaymentIntent == null) {
-        throw ApiException.of(
-          'payment_method_required',
-          'A secure payment method is required to send this request.',
+        final requestId = pending.requestId ??= (await _api.createRequest(
+          trackId: track.id,
+          idempotencyKey: pending.idempotencyKey,
+        ))
+            .requestId;
+        final intent = pending.paymentIntent ??= await _api.createPaymentIntent(
+          requestId: requestId,
+          idempotencyKey: 'payment-${pending.idempotencyKey}',
         );
+        if (!pending.paymentAuthorized) {
+          await onPaymentIntent(intent);
+          pending.paymentAuthorized = true;
+        }
+        final confirmation = await _api.confirmPayment(
+          paymentId: intent.paymentId,
+          idempotencyKey: 'confirm-${pending.idempotencyKey}',
+          testMode: intent.testMode,
+        );
+        final created = GuestRequest(
+          id: '#${requestId.substring(0, 8).toUpperCase()}',
+          track: track,
+          room: room.name,
+          status: confirmation.status == 'processing' || intent.testMode
+              ? RequestStatus.awaiting
+              : RequestStatus.queue,
+          timeLabel: _nowLabel(),
+          priceLabel: _formatMinor(intent.amountMinor),
+          paymentLabel: intent.testMode
+              ? 'Test payment · Not charged'
+              : switch (confirmation.status) {
+                  'processing' => 'Processing',
+                  'captured' || 'succeeded' => 'Paid',
+                  _ => confirmation.status,
+                },
+        );
+        _pendingCheckout = null;
+        _requests = [created, ..._requests];
+        notifyListeners();
+        return created;
       }
-      if (!pending.paymentAuthorized) {
-        await onPaymentIntent(pending.paymentIntent);
-        pending.paymentAuthorized = true;
-      }
-      final confirmation = await _api.confirmPayment(
-        paymentId: pending.paymentIntent.paymentId,
-        idempotencyKey: 'confirm-${pending.idempotencyKey}',
-      );
+
       final created = GuestRequest(
-        id: '#${pending.requestId.substring(0, 8).toUpperCase()}',
+        id: '#DI-${(285 + _requests.length).toString().padLeft(4, '0')}',
         track: track,
         room: room.name,
-        status: confirmation.status == 'processing'
-            ? RequestStatus.awaiting
-            : RequestStatus.queue,
+        status: RequestStatus.queue,
         timeLabel: _nowLabel(),
-        priceLabel: _formatMinor(pending.paymentIntent.amountMinor),
-        paymentLabel: switch (confirmation.status) {
-          'processing' => 'Processing',
-          'captured' || 'succeeded' => 'Paid',
-          _ => confirmation.status,
-        },
+        priceLabel: track.priceLabel,
+        paymentLabel: 'Not charged · demo',
       );
-      _pendingCheckout = null;
       _requests = [created, ..._requests];
       notifyListeners();
       return created;
+    } on ApiException catch (error) {
+      final status = error.statusCode;
+      // A definite rejection before creation can be abandoned. Keep the key
+      // for timeouts, conflicts, throttling and server errors with unknown outcome.
+      if (_pendingCheckout?.requestId == null &&
+          status != null &&
+          status >= 400 &&
+          status < 500 &&
+          status != 408 &&
+          status != 409 &&
+          status != 429) {
+        _pendingCheckout = null;
+      }
+      rethrow;
+    } finally {
+      _checkoutSubmitting = false;
     }
-
-    final created = GuestRequest(
-      id: '#DI-${(285 + _requests.length).toString().padLeft(4, '0')}',
-      track: track,
-      room: room.name,
-      status: RequestStatus.queue,
-      timeLabel: _nowLabel(),
-      priceLabel: track.priceLabel,
-      paymentLabel: 'Not charged · demo',
-    );
-    _requests = [created, ..._requests];
-    notifyListeners();
-    return created;
   }
 
   static String _formatMinor(int minor) =>
@@ -313,15 +348,13 @@ class _PendingCheckout {
   _PendingCheckout({
     required this.trackId,
     required this.sessionId,
-    required this.requestId,
-    required this.paymentIntent,
     required this.idempotencyKey,
   });
 
   final String trackId;
   final String sessionId;
-  final String requestId;
-  final PaymentIntent paymentIntent;
+  String? requestId;
+  PaymentIntent? paymentIntent;
   final String idempotencyKey;
   bool paymentAuthorized = false;
 }

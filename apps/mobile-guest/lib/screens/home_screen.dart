@@ -41,63 +41,35 @@ class HomeScreen extends StatelessWidget {
           ),
           const SizedBox(height: 18),
 
-          // ── Hero: фотография + контрастный слой + живой заголовок ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(DropTokens.rSm),
-              child: SizedBox(
-                height: 184,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 184),
                 child: Stack(
-                  fit: StackFit.expand,
                   children: [
-                    Image.asset('assets/images/hero_night.jpg',
-                        fit: BoxFit.cover),
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [Color(0xD9090909), Color(0x05090909)],
-                        ),
-                      ),
-                    ),
+                    Positioned.fill(
+                        child: Image.asset('assets/images/hero_night.jpg',
+                            fit: BoxFit.cover)),
+                    const Positioned.fill(
+                        child: ColoredBox(color: DropTokens.scrim)),
                     Padding(
-                      padding: const EdgeInsets.only(left: 16, top: 45),
+                      padding: const EdgeInsets.all(16),
                       child: Column(
+                        mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text('Your track.\nTheir next move.',
                               style: DropType.screenTitle),
                           const SizedBox(height: 8),
-                          Text(
-                            'Join a club. Request a track. Own the night.',
-                            style: DropType.caption.copyWith(
-                                fontSize: 12, color: DropTokens.caption),
-                          ),
+                          Text('Join a club. Request a track. Own the night.',
+                              style: DropType.caption.copyWith(
+                                  fontSize: 12, color: DropTokens.caption)),
+                          const SizedBox(height: 12),
+                          const Text('12 ROOMS LIVE TONIGHT',
+                              style: DropType.labelTight),
                         ],
-                      ),
-                    ),
-                    // Живая подпись поверх hero (слой 04 брендбука 11).
-                    Positioned(
-                      left: 16,
-                      bottom: 14,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0x33000000),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: const Text(
-                          '12 ROOMS LIVE TONIGHT',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
                       ),
                     ),
                   ],
@@ -110,7 +82,9 @@ class HomeScreen extends StatelessWidget {
           // ── Парный блок действий: карта + QR ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
+            child: IntrinsicHeight(
+                child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // Nearby map action [12,278 183x136]
                 Expanded(
@@ -124,7 +98,7 @@ class HomeScreen extends StatelessWidget {
                   child: _QrActionTile(onTap: onScan),
                 ),
               ],
-            ),
+            )),
           ),
           const SizedBox(height: 26),
 
@@ -146,8 +120,11 @@ class HomeScreen extends StatelessWidget {
               children: [
                 const SectionLabel('YOUR NIGHT STARTS HERE'),
                 const SizedBox(height: 10),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 8,
                   children: [
                     Text('Set the mood',
                         style: DropType.sectionTitle.copyWith(
@@ -155,6 +132,7 @@ class HomeScreen extends StatelessWidget {
                     InkWell(
                       onTap: onScan,
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text('Browse all',
                               style: DropType.caption.copyWith(
@@ -185,16 +163,17 @@ class HomeScreen extends StatelessWidget {
                   children: [
                     Icon(Icons.info_outline, size: 12, color: DropTokens.muted),
                     SizedBox(width: 6),
-                    Text(
+                    Expanded(
+                        child: Text(
                       'Join a room to send your pick to the DJ.',
                       style: DropType.caption,
-                    ),
+                    )),
                   ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -213,13 +192,15 @@ class _MapActionTile extends StatelessWidget {
       onTap: onTap,
       child: ClipRRect(
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(28)),
-        child: SizedBox(
-          height: 136,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 136),
           child: Stack(
-            fit: StackFit.expand,
             children: [
-              Image.asset('assets/images/map_home.jpg', fit: BoxFit.cover),
-              const DecoratedBox(
+              Positioned.fill(
+                  child: Image.asset('assets/images/map_home.jpg',
+                      fit: BoxFit.cover)),
+              const Positioned.fill(
+                  child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -227,13 +208,14 @@ class _MapActionTile extends StatelessWidget {
                     colors: [Color(0x00101016), Color(0xE6101016)],
                   ),
                 ),
-              ),
+              )),
               const Padding(
                 padding: EdgeInsets.all(14),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Spacer(),
+                    SizedBox(height: 52),
                     Text('Nearby rooms',
                         style: TextStyle(
                           fontFamily: 'Inter',
@@ -270,20 +252,21 @@ class _QrActionTile extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 136,
+        constraints: const BoxConstraints(minHeight: 136),
         decoration: const BoxDecoration(
           color: DropTokens.accent,
           borderRadius: BorderRadius.horizontal(right: Radius.circular(28)),
         ),
         padding: const EdgeInsets.all(14),
         child: const Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Align(
               alignment: Alignment.topRight,
               child: _QrBadge(),
             ),
-            Spacer(),
+            SizedBox(height: 12),
             Text('Scan to enter',
                 style: TextStyle(
                   fontFamily: 'Inter',
@@ -332,8 +315,8 @@ class _NearbyVenueRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      constraints: const BoxConstraints(minHeight: 72),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       decoration: BoxDecoration(
         color: DropTokens.surface,
         borderRadius: BorderRadius.circular(DropTokens.rMd),

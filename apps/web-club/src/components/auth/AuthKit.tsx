@@ -1,15 +1,16 @@
 /**
- * Auth kit — the two skins the auth screens share.
+ * Auth kit — one shell for every auth screen.
  *
- *   AuthScreen   skin A: signing in. One narrow card, no reading required.
- *   AuthWizard   skin B: creating an account / resetting a password. A step
- *                rail that says where the person is, the form beside it.
+ *   AuthScreen   brand lockup, optional title caption, the form, and the links
+ *                that lead out of it. Sign-in, the club application, invitation
+ *                activation and password recovery all use it: one narrow card,
+ *                no side rail to read.
  *
- * The split is a job split, not a style choice: a returning operator wants two
- * fields and a button; someone creating an account needs to know what is
- * expected of them and what this stand does and does not do. Sharing one layout
- * for both produced the old screen — a registration form's worth of explanation
- * wrapped around a login form.
+ * An auth screen states the job and the fields. The subtitle is optional and is
+ * used only for a fact the form cannot show (which account the two-factor code
+ * belongs to); it is not a paragraph explaining the product. Invitation screens
+ * repeat the approved application in `AuthSummary` rows, so the person never
+ * retypes what the club already sent.
  *
  * Styling lives in styles/auth.css (canonical: packages/ui/auth.css) and reads
  * the same tokens as the panels. Nothing here declares a colour or a radius.
@@ -35,13 +36,13 @@ import '../../styles/auth.css';
 /* Shells                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** Corner cluster shared by both skins: the "not production" pill and the theme
- *  control. The pill is the product-wide indicator the owner asked for (a small
- *  orange-outlined label in the corner of every screen); the bottom band carries
- *  maintenance only. */
-function AuthCorner({ fixedClass }: { fixedClass: string }) {
+/** Corner cluster shared by every auth screen: the "not production" pill and
+ *  the theme control. The pill is the product-wide indicator the owner asked for
+ *  (a small orange-outlined label in the corner of every screen); the bottom
+ *  band carries maintenance only. */
+function AuthCorner() {
   return (
-    <div className={fixedClass}>
+    <div className="auth-screen-top">
       <DeploymentPill demoBuild={IS_DEMO} />
       <ThemeToggle />
     </div>
@@ -55,128 +56,71 @@ export function AuthScreen({
   children,
   links,
   footer,
+  media,
 }: {
-  /** Shown beside the wordmark: "Club panel", "DJ console", … */
+  /** Shown beside the wordmark: "Club panel", "DJ console", "Recovery". */
   role: string;
   title: string;
-  subtitle: string;
+  /** A single fact the form cannot show (e.g. which account gets the 2FA code).
+   *  Not an introduction: the screens do not carry marketing copy. */
+  subtitle?: string;
   children: ReactNode;
   links?: ReactNode;
   footer?: ReactNode;
+  /**
+   * Optional photograph column on the left (the club application is the only
+   * screen that uses it). Rendered after the card in the DOM — the form is the
+   * job, the photo is context — and placed in the first column above 1100px;
+   * below that width it is not rendered at all (`.auth-media` is `display:
+   * none`), so a phone keeps the same centred card with the brand lockup on it.
+   */
+  media?: ReactNode;
 }) {
   return (
-    <div className="auth-screen">
-      <AuthCorner fixedClass="auth-screen-top" />
+    <div className={`auth-screen${media ? ' auth-screen-split' : ''}`}>
+      <AuthCorner />
       <div className="auth-card">
-        <Link to="/connect" className="auth-brand auth-card-brand" aria-label="DROP IT — public site">
+        {/* The lockup is its own accessible name ("DROP IT" from the wordmark
+            plus the role label). An aria-label here overrode that name with a
+            sentence the visible text did not contain, which fails WCAG 2.5.3 —
+            the rule is that the name starts from what is on screen. */}
+        <Link to="/connect" className="auth-brand auth-card-brand">
           <BrandLogo size="small" />
           <span className="auth-brand-role">{role}</span>
         </Link>
         <div className="auth-head">
           <h1 className="auth-title auth-title-sm">{title}</h1>
-          <p className="auth-sub">{subtitle}</p>
+          {subtitle ? <p className="auth-sub">{subtitle}</p> : null}
         </div>
-        {children}
+        <div className="auth-card-body">{children}</div>
         {links ? <div className="auth-links">{links}</div> : null}
         {footer ? <p className="auth-card-foot">{footer}</p> : null}
       </div>
+      {media ? (
+        <aside className="auth-media">
+          <div className="auth-media-inner">{media}</div>
+        </aside>
+      ) : null}
     </div>
   );
-}
-
-export interface WizardStep {
-  title: string;
-  note?: string;
 }
 
 /**
- * Skin B shell. `step` is 1-based; steps before it read as done, so the rail is
- * a position indicator rather than a set of navigation controls — jumping
- * around a credential flow is never what the person wants.
+ * Read-only rows under an invitation title: the facts the application already
+ * carries. A definition list, not a card and not disabled inputs — nothing here
+ * is editable, so it must not look like a field.
  */
-export function AuthWizard({
-  role,
-  steps,
-  step,
-  title,
-  subtitle,
-  children,
-  footer,
-  asideFooter,
+export function AuthSummary({
+  rows,
 }: {
-  role: string;
-  steps: ReadonlyArray<WizardStep>;
-  step: number;
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-  footer?: ReactNode;
-  asideFooter?: ReactNode;
+  rows: ReadonlyArray<{ label: string; value: ReactNode }>;
 }) {
-  const { t } = useLocale();
   return (
-    <div className="auth-wizard">
-      <AuthCorner fixedClass="auth-wizard-top" />
-      <aside className="auth-aside">
-        <Link to="/connect" className="auth-brand" aria-label="DROP IT — public site">
-          <BrandLogo size="small" />
-          <span className="auth-brand-role">{role}</span>
-        </Link>
-        <ol className="auth-steps" aria-label={t('auth.progress')}>
-          {steps.map((item, index) => {
-            const position = index + 1;
-            const state = position === step ? 'is-current' : position < step ? 'is-done' : '';
-            return (
-              <li
-                key={item.title}
-                className={`auth-step ${state}`.trim()}
-                aria-current={position === step ? 'step' : undefined}
-              >
-                <span className="auth-step-mark" aria-hidden="true">
-                  {position < step ? <CircleCheck size={12} strokeWidth={2.4} /> : String(position).padStart(2, '0')}
-                </span>
-                <span>
-                  <span className="auth-step-title">{item.title}</span>
-                  {item.note ? <span className="auth-step-note">{item.note}</span> : null}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-        <div className="auth-aside-fill" />
-        {asideFooter}
-      </aside>
-
-      <main className="auth-main">
-        <div className="auth-wizard-card">
-          <div className="auth-progress" aria-hidden="true">
-            {steps.map((item, index) => (
-              <span
-                key={item.title}
-                className={`auth-progress-seg ${index + 1 <= step ? 'is-done' : ''}`.trim()}
-              />
-            ))}
-          </div>
-          <div className="auth-head">
-            <h1 className="auth-title">{title}</h1>
-            <p className="auth-sub">{subtitle}</p>
-          </div>
-          {children}
-          {footer ? <p className="auth-foot">{footer}</p> : null}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-/** Facts block for the wizard's step rail — what this stand actually does. */
-export function AuthFacts({ facts }: { facts: ReadonlyArray<{ label: string; value: string }> }) {
-  return (
-    <dl className="auth-facts">
-      {facts.map((fact) => (
-        <div key={fact.label} className="auth-fact">
-          <dt>{fact.label}</dt>
-          <dd>{fact.value}</dd>
+    <dl className="auth-summary">
+      {rows.map((row) => (
+        <div key={row.label} className="auth-summary-row">
+          <dt className="auth-summary-label">{row.label}</dt>
+          <dd className="auth-summary-value">{row.value}</dd>
         </div>
       ))}
     </dl>

@@ -20,9 +20,12 @@ import { djsCatalog } from './djs';
 import { pricingCatalog } from './pricing';
 import { earningsCatalog } from './earnings';
 import { djConsoleCatalog } from './dj-console';
+import { djRequestsCatalog } from './dj-requests';
 import { authCatalog } from './auth';
 import { deploymentCatalog } from './deployment';
 import { qrStudioCatalog } from './qr-studio';
+import { consoleCatalog } from './console';
+import { developersCatalog } from './developers';
 
 const AREAS: ReadonlyArray<{ name: string; catalog: MessageCatalog }> = [
   // The shared shell first: navigation, account menu, common vocabulary.
@@ -33,8 +36,14 @@ const AREAS: ReadonlyArray<{ name: string; catalog: MessageCatalog }> = [
   { name: 'pricing', catalog: pricingCatalog },
   { name: 'earnings', catalog: earningsCatalog },
   { name: 'dj-console', catalog: djConsoleCatalog },
+  // The requests workspace: the DJ's live processing surface.
+  { name: 'dj-requests', catalog: djRequestsCatalog },
   { name: 'auth', catalog: authCatalog },
   { name: 'qr-studio', catalog: qrStudioCatalog },
+  // API v1: scoped keys, the generated reference and the guides.
+  { name: 'developers', catalog: developersCatalog },
+  // The club → DJ console entry and its return band.
+  { name: 'console', catalog: consoleCatalog },
   // The fixed bottom strip: what this deployment is (test / maintenance).
   { name: 'deployment', catalog: deploymentCatalog },
 ];

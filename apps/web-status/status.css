@@ -1,0 +1,628 @@
+/* ============================================================================
+   DROP IT — public service status page
+   ----------------------------------------------------------------------------
+   Static page: no bundler, no build step, no external request. The token block
+   below is copied verbatim from `packages/ui/tokens.css` (the canonical layer)
+   so this page speaks the same colours, radii and type as the panels without
+   linking an application build.
+
+   Theme contract here differs from the panels on purpose: this page has no
+   theme switch and no `data-theme` boot script, so the OS preference selects
+   the theme — dark by default, light under `prefers-color-scheme: light`.
+
+   Everything outside the token block reads `var(--…)`. No raw colour, radius or
+   font size appears below it.
+   ========================================================================== */
+
+/* --- tokens (copied from packages/ui/tokens.css) --------------------------- */
+:root {
+  /* radii */
+  --r-surface: 16px;
+  --r-tile: 12px;
+  --r-control: 10px;
+  --r-mark: 4px;
+  --r-chip: 999px;
+
+  /* type */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --fs-28: 28px;
+  --fs-20: 20px;
+  --fs-15: 15px;
+  --fs-13: 13px;
+  --fs-12: 12px;
+  --fs-11: 11px;
+
+  --lh-tight: 1.2;
+  --lh-text: 1.5;
+
+  /* motion */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+
+  /* spacing + hit areas */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --hit-desktop: 36px;
+  --hit-mobile: 44px;
+
+  color-scheme: dark;
+
+  /* dark (default) */
+  --c-canvas: #080808;
+  --c-surface: #181818;
+  --c-raised: #202020;
+  --c-inset: #111111;
+  --c-hairline: rgba(255, 255, 255, .11);
+  --c-hairline-row: rgba(255, 255, 255, .07);
+  --c-hairline-strong: rgba(255, 255, 255, .16);
+  --c-accent: #00FF87;
+  --c-accent-tint: rgba(0, 255, 135, .08);
+  --c-accent-quiet: #7CFFC0;
+  --c-text: #F2F2F2;
+  --c-text-2: #B8B8B8;
+  --c-text-muted: #949494;
+  --c-text-muted-sm: #A2A2A2;
+  --c-hover-strong: #262626;
+  --c-warn: #FFC65B;
+  --c-warn-tint: rgba(255, 198, 91, .10);
+  --c-error: #FF6B6B;
+  --c-error-tint: rgba(255, 107, 107, .10);
+  --c-ok: #00FF87;
+}
+
+/* --- light: the OS preference is the only switch --------------------------- */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --c-canvas: #F5F5F5;
+    --c-surface: #FFFFFF;
+    --c-raised: #F0F0F0;
+    --c-inset: #F7F7F7;
+    --c-hairline: #E4E4E4;
+    --c-hairline-row: #EEEEEE;
+    --c-hairline-strong: #D5D5D5;
+    --c-accent: #087A4C;
+    --c-accent-tint: rgba(8, 122, 76, .08);
+    --c-accent-quiet: #05543A;
+    --c-text: #121212;
+    --c-text-2: #4A4A4A;
+    --c-text-muted: #676767;
+    --c-text-muted-sm: #5B5B5B;
+    --c-hover-strong: #E8E8E8;
+    --c-warn: #8A5A00;
+    --c-warn-tint: rgba(138, 90, 0, .10);
+    --c-error: #B4322C;
+    --c-error-tint: rgba(180, 50, 44, .08);
+    --c-ok: #087A4C;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 1ms;
+    --dur-base: 1ms;
+  }
+}
+
+/* --- base ----------------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--c-canvas);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--c-canvas);
+  color: var(--c-text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-13);
+  line-height: var(--lh-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-mark);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: -60px;
+  left: var(--sp-4);
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--hit-desktop);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  text-decoration: none;
+}
+
+.skip-link:focus-visible {
+  top: var(--sp-4);
+}
+
+/* --- page column ---------------------------------------------------------- */
+.page {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-6) 56px;
+}
+
+/* --- header --------------------------------------------------------------- */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-5);
+  border-bottom: 1px solid var(--c-hairline);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  min-width: 0;
+}
+
+.brand-name {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.brand-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--c-hairline-strong);
+}
+
+.brand-sub {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+.refresh {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--hit-desktop);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.refresh-icon {
+  display: inline-flex;
+  color: var(--c-text-muted);
+}
+
+.refresh[disabled] {
+  cursor: progress;
+  color: var(--c-text-muted);
+}
+
+.refresh[aria-busy='true'] .refresh-icon {
+  animation: refresh-spin 900ms linear infinite;
+}
+
+@keyframes refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refresh[aria-busy='true'] .refresh-icon { animation: none; }
+}
+
+/* --- summary -------------------------------------------------------------- */
+.summary {
+  margin-top: var(--sp-6);
+}
+
+.summary-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.title {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-28);
+  font-weight: 600;
+  letter-spacing: -.01em;
+  line-height: var(--lh-tight);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 3px var(--sp-3);
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: var(--r-chip);
+  background: currentColor;
+}
+
+.pill[data-state='ok'] {
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+.pill[data-state='degraded'] {
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+}
+
+.pill[data-state='down'] {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+.pill[data-state='unknown'] {
+  background: var(--c-raised);
+  color: var(--c-text-2);
+}
+
+/* A snapshot kept after a failed refresh is not the current state. Mute the
+   pill so the page does not assert a state nobody could confirm right now; the
+   text suffix "· stale" alone is easy to miss. Placed after the state rules on
+   purpose: same specificity, and stale must win over any state colour. */
+.pill[data-stale='true'] {
+  background: var(--c-raised);
+  color: var(--c-text-muted);
+}
+
+.pill[data-stale='true'] .pill-dot {
+  background: var(--c-text-muted);
+}
+
+.checked {
+  margin: var(--sp-2) 0 0;
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+/* --- problem banner ------------------------------------------------------- */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-tile);
+  background: var(--c-error-tint);
+  color: var(--c-error);
+  font-size: var(--fs-13);
+}
+
+.banner[hidden] {
+  display: none;
+}
+
+.banner-text {
+  margin: 0;
+  max-width: 62ch;
+  line-height: var(--lh-text);
+  overflow-wrap: anywhere;
+}
+
+.retry {
+  flex: 0 0 auto;
+  min-height: var(--hit-desktop);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--c-hairline-strong);
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.retry:hover {
+  background: var(--c-raised);
+}
+
+/* --- checks --------------------------------------------------------------- */
+.groups {
+  margin-top: var(--sp-6);
+}
+
+.loading {
+  margin: 0;
+  padding: var(--sp-3) 0;
+  color: var(--c-text-muted);
+  font-size: var(--fs-13);
+}
+
+.group + .group {
+  margin-top: var(--sp-8);
+}
+
+.group-title {
+  margin: 0 0 var(--sp-1);
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+
+.checks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check {
+  display: grid;
+  grid-template-columns: 10px 210px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px var(--sp-3);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+
+.check:last-child {
+  border-bottom: 0;
+}
+
+.check-dot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-chip);
+  background: var(--c-text-muted);
+  transform: translateY(-1px);
+}
+
+.check-label {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.check-detail {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  overflow-wrap: anywhere;
+}
+
+.check[data-state='ok'] .check-dot { background: var(--c-ok); }
+.check[data-state='degraded'] .check-dot { background: var(--c-warn); }
+.check[data-state='down'] .check-dot { background: var(--c-error); }
+.check[data-state='unknown'] .check-dot { background: var(--c-text-muted); }
+
+/* --- legend --------------------------------------------------------------- */
+.legend {
+  margin-top: 40px;
+  padding-top: var(--sp-5);
+  border-top: 1px solid var(--c-hairline);
+}
+
+.legend-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-5);
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legend-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: var(--r-chip);
+  background: var(--c-text-muted);
+  transform: translateY(-1px);
+}
+
+.dot[data-state='ok'] { background: var(--c-ok); }
+.dot[data-state='degraded'] { background: var(--c-warn); }
+.dot[data-state='down'] { background: var(--c-error); }
+.dot[data-state='unknown'] { background: var(--c-text-muted); }
+
+.legend-word {
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  font-weight: 500;
+}
+
+.legend-detail {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+/* --- footer --------------------------------------------------------------- */
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+  margin-top: 40px;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--c-hairline);
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+.foot-item {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-chip);
+  background: var(--c-raised);
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip[data-tone='warn'] {
+  background: var(--c-warn-tint);
+  color: var(--c-warn);
+}
+
+.chip[data-tone='error'] {
+  background: var(--c-error-tint);
+  color: var(--c-error);
+}
+
+.foot-note {
+  margin: var(--sp-2) 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* --- motion (state changes only) ------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+  .refresh,
+  .retry {
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+}
+
+/* --- responsive ----------------------------------------------------------- */
+@media (max-width: 640px) {
+  .page {
+    padding: var(--sp-6) var(--sp-3) 40px;
+  }
+
+  .title {
+    font-size: var(--fs-20);
+  }
+
+  .brand-sub {
+    display: none;
+  }
+
+  .brand-divider {
+    display: none;
+  }
+
+  .refresh,
+  .retry,
+  .skip-link {
+    min-height: var(--hit-mobile);
+  }
+
+  /* A phone cannot fit name + note on one line: the note wraps below the
+     name, so a long note never squeezes the service name. */
+  .check {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+
+  .check-dot {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .check-label {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .check-detail {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    margin-top: 2px;
+  }
+
+  .legend-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

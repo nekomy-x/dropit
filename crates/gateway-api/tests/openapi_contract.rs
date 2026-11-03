@@ -30,6 +30,8 @@ const ALLOW_NO_SECURITY: &[&str] = &[
     // Режим эксплуатации стенда для нижнего статус-бара панелей:
     // публичный, без авторизации (те же факты, что у /readyz).
     "/v1/status",
+    // Публичная статус-страница сервисов: без авторизации по определению.
+    "/v1/status/services",
     "/v1/stripe/webhook",
     "/v1/stripe/transfer-webhook",
     "/v1/ws",
@@ -40,9 +42,19 @@ const ALLOW_NO_SECURITY: &[&str] = &[
 
 /// Абсолютный путь к `docs/openapi.yaml` относительно `CARGO_MANIFEST_DIR`
 /// (`crates/gateway-api` → `../../docs/openapi.yaml`).
+///
+/// Второй контракт — публичный Developer API v1 (`/v1/developer/**`,
+/// ADR-010). Он живёт отдельным файлом, потому что это другая аудитория
+/// и другой способ аутентификации; тест сводит оба множества путей, чтобы
+/// ни один не мог отстать от кода.
 fn openapi_path() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     dir.join("../../docs/openapi.yaml")
+}
+
+fn developer_openapi_path() -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    dir.join("../../docs/api/openapi-developer.yaml")
 }
 
 /// Каталог `src` крейта (`crates/gateway-api/src`).
@@ -56,6 +68,15 @@ fn load_openapi() -> Value {
         .unwrap_or_else(|e| panic!("не удалось прочитать {}: {e}", openapi_path().display()));
     serde_yaml::from_str::<Value>(&raw)
         .unwrap_or_else(|e| panic!("docs/openapi.yaml не валидный YAML: {e}"))
+}
+
+/// Разбор публичного контракта Developer API v1.
+fn load_developer_openapi() -> Value {
+    let path = developer_openapi_path();
+    let raw = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("не удалось прочитать {}: {e}", path.display()));
+    serde_yaml::from_str::<Value>(&raw)
+        .unwrap_or_else(|e| panic!("docs/api/openapi-developer.yaml не валидный YAML: {e}"))
 }
 
 /// Извлекает из текста исходников все регистрации `.route("path", method(...))`
@@ -172,6 +193,13 @@ fn normalize_path(p: &str) -> String {
     out
 }
 
+/// Объединение маршрутов обоих контрактов (панель + Developer API v1).
+fn collect_all_spec_routes() -> BTreeSet<(String, String)> {
+    let mut routes = collect_spec_routes(&load_openapi());
+    routes.extend(collect_spec_routes(&load_developer_openapi()));
+    routes
+}
+
 /// Извлекает множество (path, method) из OpenAPI-документа.
 fn collect_spec_routes(doc: &Value) -> BTreeSet<(String, String)> {
     let mut routes = BTreeSet::new();
@@ -209,8 +237,7 @@ fn openapi_yaml_is_valid() {
 
 #[test]
 fn every_code_route_is_described() {
-    let doc = load_openapi();
-    let spec = collect_spec_routes(&doc);
+    let spec = collect_all_spec_routes();
     let code = collect_code_routes();
 
     let mut missing: Vec<_> = code.difference(&spec).collect();
@@ -228,8 +255,7 @@ fn every_code_route_is_described() {
 
 #[test]
 fn no_dead_contract_paths() {
-    let doc = load_openapi();
-    let spec = collect_spec_routes(&doc);
+    let spec = collect_all_spec_routes();
     let code = collect_code_routes();
 
     let mut dead: Vec<_> = spec.difference(&code).collect();
@@ -293,11 +319,96 @@ fn v1_ops_have_security_and_tags() {
     );
 }
 
+/// Каталог скоупов Developer API v1 (зеркало `crates/common/src/api_key.rs`
+/// `Scope::ALL`). Держим список здесь, чтобы контрактный тест читал его как
+/// текст и не тянул зависимость ради девяти строк; расхождение ловит
+/// `node scripts/api-docs-check.mjs` и `cargo test -p dropit-common api_key`.
+const DEVELOPER_SCOPES: &[&str] = &[
+    "docs:read",
+    "profile:read",
+    "sessions:read",
+    "sessions:write",
+    "qr:write",
+    "requests:read",
+    "requests:write",
+    "catalog:read",
+    "stats:read",
+];
+
+/// Публичный контракт обязан объявлять доступ для КАЖДОЙ операции.
+///
+/// Правило (ADR-010): операция либо требует конкретный скоуп
+/// (`x-required-scope: <scope>` из каталога), либо явно объявлена
+/// доступной любому валидному ключу (`x-no-scope: true`). Операция без
+/// того и другого — дыра в контракте: клиент не знает, что ему нужно,
+/// а ревьюер не видит, чем она защищена.
+#[test]
+fn developer_operations_declare_scope() {
+    let doc = load_developer_openapi();
+    let paths = doc
+        .get("paths")
+        .and_then(|v| v.as_object())
+        .expect("developer openapi: paths");
+    let mut problems = Vec::new();
+    for (path, item) in paths {
+        let Some(ops) = item.as_object() else {
+            continue;
+        };
+        for method in METHODS {
+            let Some(op) = ops.get(*method) else { continue };
+            let upper = method.to_uppercase();
+            let declared = op.get("x-required-scope");
+            let no_scope = op
+                .get("x-no-scope")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            match declared {
+                Some(Value::String(scope)) => {
+                    if !DEVELOPER_SCOPES.contains(&scope.as_str()) {
+                        problems.push(format!("{upper} {path}: неизвестный скоуп `{scope}`"));
+                    }
+                    if no_scope {
+                        problems.push(format!(
+                            "{upper} {path}: x-no-scope и x-required-scope одновременно"
+                        ));
+                    }
+                }
+                // `x-required-scope: null` допустим только вместе с x-no-scope.
+                Some(Value::Null) => {
+                    if !no_scope {
+                        problems.push(format!(
+                            "{upper} {path}: `x-required-scope: null` без `x-no-scope: true`"
+                        ));
+                    }
+                }
+                Some(_) => problems.push(format!(
+                    "{upper} {path}: x-required-scope должен быть строкой или null"
+                )),
+                None => {
+                    if !no_scope {
+                        problems.push(format!(
+                            "{upper} {path}: нет ни x-required-scope, ни x-no-scope"
+                        ));
+                    }
+                }
+            }
+            // Скоуп с токеном аутентификации: обе схемы объявлены.
+            if op.get("security").is_none() {
+                problems.push(format!("{upper} {path}: нет security"));
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "контракт Developer API нарушен:\n{}",
+        problems.join("\n")
+    );
+}
+
 #[test]
 fn path_sets_match_exactly() {
     // Сводная сверка множеств путей (без методов) — удобная диагностическая точка.
-    let doc = load_openapi();
-    let spec_paths: BTreeSet<String> = collect_spec_routes(&doc)
+    let spec_paths: BTreeSet<String> = collect_all_spec_routes()
         .into_iter()
         .map(|(p, _)| p)
         .collect();
@@ -311,8 +422,7 @@ fn path_sets_match_exactly() {
 /// Быстрая сводка покрытия — печатается при `--nocapture`, помогает ревьюеру.
 #[test]
 fn print_coverage_summary() {
-    let doc = load_openapi();
-    let spec = collect_spec_routes(&doc);
+    let spec = collect_all_spec_routes();
     let code = collect_code_routes();
     let spec_paths: BTreeSet<&str> = spec.iter().map(|(p, _)| p.as_str()).collect();
     let code_paths: BTreeSet<&str> = code.iter().map(|(p, _)| p.as_str()).collect();
@@ -322,19 +432,21 @@ fn print_coverage_summary() {
         spec_paths.len(),
         spec.len()
     );
-    // Бонус: сводка тегов — сколько операций на каждый тег.
+    // Бонус: сводка тегов — сколько операций на каждый тег (оба контракта).
     let mut by_tag: BTreeMap<String, usize> = BTreeMap::new();
-    if let Some(paths) = doc.get("paths").and_then(|v| v.as_object()) {
-        for item in paths.values() {
-            for method in METHODS {
-                if let Some(tags) = item
-                    .get(*method)
-                    .and_then(|o| o.get("tags"))
-                    .and_then(|t| t.as_array())
-                {
-                    for t in tags {
-                        if let Some(name) = t.as_str() {
-                            *by_tag.entry(name.to_string()).or_insert(0) += 1;
+    for doc in [load_openapi(), load_developer_openapi()] {
+        if let Some(paths) = doc.get("paths").and_then(|v| v.as_object()) {
+            for item in paths.values() {
+                for method in METHODS {
+                    if let Some(tags) = item
+                        .get(*method)
+                        .and_then(|o| o.get("tags"))
+                        .and_then(|t| t.as_array())
+                    {
+                        for t in tags {
+                            if let Some(name) = t.as_str() {
+                                *by_tag.entry(name.to_string()).or_insert(0) += 1;
+                            }
                         }
                     }
                 }

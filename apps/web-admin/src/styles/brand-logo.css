@@ -1,0 +1,67 @@
+/* ============================================================================
+   DROP IT — the brand lockup
+   ----------------------------------------------------------------------------
+   Canonical copy: edit `packages/ui/brand-logo.css`, then run
+       node scripts/sync-ui-tokens.mjs
+   which writes identical copies to
+       apps/web-club/src/styles/brand-logo.css
+       apps/web-admin/src/styles/brand-logo.css
+
+   One wordmark, four sizes. It sits in the club rail, the DJ console entry, the
+   connect header and the phone mockup, and it is the top of every sign-in card
+   (club, DJ, admin) — an operator signing into the admin panel must see the same
+   mark as the club staff signing in beside them.
+
+   No raw colour, radius or font size: the letters read `--c-text`, the bar
+   field runs from the accent to the quiet accent, and the glyph size is the 20px
+   type step (see the transform note below).
+   ========================================================================== */
+
+.brand-logo {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: .375rem;
+  color: var(--c-text);
+  line-height: 1;
+}
+
+/* The wordmark paints from tokens so it is legible in both themes. */
+.brand-logo-letters { fill: var(--c-text); }
+.brand-logo-stop-a { stop-color: var(--c-accent); }
+.brand-logo-stop-b { stop-color: var(--c-accent-quiet); }
+
+.brand-logo-word {
+  display: block;
+  width: 5.1rem;
+  height: auto;
+  overflow: visible;
+}
+
+/* The wordmark's letters are SVG <text> at 23 user units — a glyph size, not
+   UI type. A DOM font-size audit cannot tell the difference and would count a
+   seventh size on every screen, so the size is declared on the type step and
+   compensated with a transform: the mark stays pixel-identical while the
+   computed size sits inside the six-step scale (§4.6). The visible text and
+   the mask copy share x=0,y=22, so one origin serves both. */
+.brand-logo-word text {
+  font-size: var(--fs-20);
+  /* 23/20 = 1.15. The SVG's own letter-spacing (-.8 user units) is scaled by
+     the same factor, so it is divided back out here to keep the tracking
+     identical to the original 23px glyph. */
+  letter-spacing: -.6957px;
+  transform: scale(1.15);
+  transform-origin: 0 22px;
+}
+
+/* The bars stay still: the lockup is a mark, not an equaliser. Motion here
+   would run behind a sign-in form and read as a loading state. */
+.brand-logo-bar {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: none;
+}
+
+.brand-logo-tiny .brand-logo-word { width: 3.1rem; }
+.brand-logo-small .brand-logo-word { width: 4.5rem; }
+.brand-logo-large .brand-logo-word { width: 6.25rem; }

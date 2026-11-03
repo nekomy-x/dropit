@@ -1,5 +1,4 @@
 import Reveal from '../Reveal';
-import Icon from '../Icons';
 import SectionHead from './SectionHead';
 import { useLocale } from '../../../connect/locale';
 import { TrendChart } from './charts';
@@ -71,7 +70,7 @@ export default function StatsSection() {
 
         <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
           <Reveal className="h-full">
-            <div className="flex h-full flex-col rounded-card border border-drop-line bg-drop-surface p-6">
+            <div className="connect-stats-group flex h-full flex-col rounded-card border border-drop-line bg-drop-surface p-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h3 className="text-[15px] font-semibold text-drop-text">{t('chartTitle')}</h3>
@@ -125,7 +124,7 @@ export default function StatsSection() {
           </Reveal>
 
           <Reveal delay={80} className="h-full">
-            <div className="flex h-full flex-col rounded-card border border-drop-line bg-drop-surface p-6">
+            <div className="connect-stats-group flex h-full flex-col rounded-card border border-drop-line bg-drop-surface p-6">
               <h3 className="text-[15px] font-semibold text-drop-text">{t('topRequests')}</h3>
 
               <ul className="mt-2 flex flex-1 flex-col">
@@ -163,8 +162,8 @@ export default function StatsSection() {
           </Reveal>
 
           <Reveal delay={140} className="lg:col-span-2">
-            <div className="rounded-card border border-drop-line bg-drop-surface p-6">
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_auto] lg:items-center lg:gap-10">
+            <div className="connect-stats-group rounded-card border border-drop-line bg-drop-surface p-6">
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)] lg:items-center lg:gap-10">
                 <div>
                   <p className="text-[11px] text-drop-muted">{t('payoutNext')}</p>
                   <p className="mt-2 font-display text-[34px] leading-none text-drop-text tabular">
@@ -199,14 +198,6 @@ export default function StatsSection() {
                     </dd>
                   </div>
                 </dl>
-
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-[10px] border border-drop-line bg-drop-surface2 px-4 text-[12px] font-medium text-drop-text transition-colors duration-200 hover:border-drop-accent/40 hover:text-drop-accent lg:w-auto lg:justify-self-end"
-                >
-                  <Icon name="doc" size={13} />
-                  {t('payoutHistory')}
-                </button>
               </div>
             </div>
           </Reveal>

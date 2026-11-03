@@ -289,46 +289,149 @@ export class NotImplementedStubError extends Error {
 
 // --- in-memory Bearer token store (module scope; NEVER persisted) ------------
 
-let accessToken: string | null = null;
-let refreshToken: string | null = null;
-let expiresAt: number | null = null;
-let refreshPromise: Promise<TokenPair> | null = null;
+/**
+ * One signed-in session, held for whichever role it belongs to.
+ *
+ * The store used to be a single triple of module variables, which meant a
+ * second login silently replaced the first: opening the DJ console from the
+ * club panel would have thrown the club's tokens away and left the panel
+ * signed out. Two separate sessions are now kept, one per role, so the club
+ * stays signed in while the console runs as the DJ of the shift — the two
+ * tokens are different principals and neither is a substitute for the other.
+ */
+interface Session {
+  accessToken: string;
+  refreshToken: string | null;
+  expiresAt: number | null;
+  role: 'club' | 'dj';
+  /** Set when the club opened this DJ session from its own panel. */
+  handoff: boolean;
+}
+
+const sessions: { club: Session | null; dj: Session | null } = { club: null, dj: null };
+
+/** The session the request layer uses: the DJ one when it exists. */
+function currentRole(): 'club' | 'dj' | null {
+  if (sessions.dj) return 'dj';
+  if (sessions.club) return 'club';
+  return null;
+}
+
+function currentSession(): Session | null {
+  const role = currentRole();
+  return role === null ? null : sessions[role];
+}
+
+/** Bumped whenever any session is replaced, so in-flight requests can bail. */
 let authGeneration = 0;
-let authenticatedRole: 'club' | 'dj' | null = null;
+/** `first` is the session name from `POST /v1/auth/refresh`. */
+let refreshPromise: Promise<TokenPair> | null = null;
+let refreshPromiseRole: 'club' | 'dj' | null = null;
 
-/** True after a successful login (password-only or 2FA) or token refresh. */
+/** True when a session exists for this role (a DJ token does not imply a club one). */
 export function isAuthenticated(role?: 'club' | 'dj'): boolean {
-  return accessToken !== null && (role === undefined || authenticatedRole === role);
+  if (role) return sessions[role] !== null;
+  return currentSession() !== null;
 }
 
-/** Exposed for debugging/telemetry only — do NOT log or persist this. */
+/**
+ * Whether the DJ console was opened by the club panel rather than by a DJ
+ * signing in. The console uses it to show whose session this is and the way
+ * back to the club panel; a DJ who signed in never sees that band.
+ */
+export function isConsoleHandoff(): boolean {
+  return sessions.dj?.handoff === true;
+}
+
+/**
+ * Кто именно открыт в консоли, если её открыл клуб.
+ *
+ * Сервер уже назвал диджея и смену в ответе на handoff; экран показывает
+ * эти же строки, чтобы «вы в консоли Ивана» не приходилось угадывать по
+ * обезличенному «DJ account». `null` у настоящего DJ-логина — он не
+ * нуждается в подписи, и придумывать ему чужое имя нельзя.
+ */
+export interface ConsoleHandoffMeta {
+  dj: { id: string; displayName: string };
+  session: { id: string; status: string; timezone: string };
+}
+
+let handoffMeta: ConsoleHandoffMeta | null = null;
+
+export function consoleHandoffMeta(): ConsoleHandoffMeta | null {
+  return sessions.dj?.handoff ? handoffMeta : null;
+}
+
+/** Remaining access-token lifetime, ms; `null` when no session is held. */
 export function accessTokenExpiry(): number | null {
-  return expiresAt;
+  return currentSession()?.expiresAt ?? null;
 }
 
-/** Clears the in-memory tokens ("sign out" — server-side revocation lands with the cookie-session backend). */
-export function clearTokens(): void {
+/**
+ * Clears one session, or both.
+ *
+ * Signing out of the console must leave the club panel usable, so the default
+ * clears only the session the caller means (`dj` for the console's sign-out,
+ * `club` for the panel's). `clearTokens()` with no argument drops everything.
+ */
+export function clearTokens(role?: 'club' | 'dj'): void {
   authGeneration += 1;
-  accessToken = null;
-  refreshToken = null;
-  expiresAt = null;
   refreshPromise = null;
-  authenticatedRole = null;
+  refreshPromiseRole = null;
+  if (role === undefined) {
+    sessions.club = null;
+    sessions.dj = null;
+    handoffMeta = null;
+    return;
+  }
+  sessions[role] = null;
+  if (role === 'dj') handoffMeta = null;
 }
 
-function storeTokens(pair: { access_token: string; refresh_token: string; expires_in: number }, newSession = true, role?: 'club' | 'dj'): void {
+interface StoreOptions {
+  /** Replaces the session and starts a new auth generation (a fresh sign-in). */
+  newSession?: boolean;
+  /** Set when the club panel opened this DJ session (see `isConsoleHandoff`). */
+  handoff?: boolean;
+}
+
+function storeTokens(
+  pair: { access_token: string; refresh_token: string; expires_in: number },
+  role: 'club' | 'dj',
+  options: StoreOptions = {},
+): void {
+  const { newSession = true, handoff = false } = options;
   if (newSession) {
     authGeneration += 1;
     refreshPromise = null;
-    if (role) authenticatedRole = role;
+    refreshPromiseRole = null;
   }
-  accessToken = pair.access_token;
-  refreshToken = pair.refresh_token;
-  expiresAt = Date.now() + pair.expires_in * 1000;
+  sessions[role] = {
+    accessToken: pair.access_token,
+    refreshToken: pair.refresh_token,
+    expiresAt: Date.now() + pair.expires_in * 1000,
+    role,
+    handoff,
+  };
 }
 
-function storePair(pair: TokenPair, newSession = true): void {
-  storeTokens(pair, newSession);
+function storePair(pair: TokenPair, role: 'club' | 'dj', newSession = true): void {
+  const handoff = sessions[role]?.handoff === true;
+  storeTokens(pair, role, { newSession, handoff });
+}
+
+/**
+ * Which signed-in principal an endpoint belongs to.
+ *
+ * The panel can hold two sessions at once (a club account and the DJ console
+ * the club opened). The endpoint prefix is the one fact that decides which
+ * token is right: `/v1/dj/**` is the console's, everything else is the
+ * club's. Sending the club's token to a DJ route (or the reverse) would 403
+ * on the backend, and picking "the newest session" would break the moment
+ * both exist — which is exactly the state the console entry creates.
+ */
+function roleForPath(path: string): 'club' | 'dj' {
+  return path === '/dj' || path.startsWith('/dj/') ? 'dj' : 'club';
 }
 
 /**
@@ -344,15 +447,24 @@ async function request<T>(
     idempotencyKey?: string;
     auth?: boolean;
     retryOn401?: boolean;
+    /** Principal override for a console endpoint that lives outside `/dj/**`
+     *  (the WS ticket). Omitted, the path prefix decides as before. */
+    role?: 'club' | 'dj';
   } = {},
 ): Promise<T> {
-  const { method = 'GET', body, idempotencyKey, auth = true, retryOn401 = true } = init;
+  const { method = 'GET', body, idempotencyKey, auth = true, retryOn401 = true, role: roleOverride } = init;
   const generation = authGeneration;
-  const sentToken = accessToken;
+  // The endpoint's prefix says which signed-in principal it belongs to:
+  // `/v1/dj/**` is the console's DJ session, everything else is the club's.
+  // Without this split a console opened from the panel would send the club's
+  // token to a DJ route (403) or the DJ's token to a club route (403).
+  const role = roleOverride ?? roleForPath(path);
+  const sentSession = sessions[role];
+  const sentToken = sentSession?.accessToken ?? null;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
-  if (auth && accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  if (auth && sentToken) headers['Authorization'] = `Bearer ${sentToken}`;
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
 
   const response = await fetch(`/v1${path}`, {
@@ -366,19 +478,20 @@ async function request<T>(
   }
 
   // Another request may already have rotated this token while this 401 was in flight.
-  if (response.status === 401 && auth && retryOn401 && accessToken && sentToken !== accessToken) {
+  const current = sessions[role]?.accessToken ?? null;
+  if (response.status === 401 && auth && retryOn401 && current && sentToken !== current) {
     return request<T>(path, { ...init, retryOn401: false });
   }
 
-  if (response.status === 401 && auth && retryOn401 && refreshToken) {
+  if (response.status === 401 && auth && retryOn401 && sessions[role]?.refreshToken) {
     // Access token expired (TTL 15 min) — rotate the refresh family once,
     // then replay the original request. A second 401 propagates to the UI
-    // (useAsyncData redirects to /login).
+    // (useAsyncData redirects to that role's login).
     try {
-      await refreshTokens();
+      await refreshTokens(role);
       return request<T>(path, { ...init, retryOn401: false });
     } catch {
-      if (generation === authGeneration) clearTokens();
+      if (generation === authGeneration) clearTokens(role);
     }
   }
 
@@ -396,7 +509,7 @@ async function request<T>(
     } catch {
       // keep the fallback envelope
     }
-    if (response.status === 401 && auth && generation === authGeneration) clearTokens();
+    if (response.status === 401 && auth && generation === authGeneration) clearTokens(role);
     throw new ApiRequestError(response.status, payload);
   }
 
@@ -406,6 +519,28 @@ async function request<T>(
     throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session changed' });
   }
   return result;
+}
+
+/** Options of the shared authenticated transport (see `request`). */
+export interface ApiRequestInit {
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  body?: unknown;
+  idempotencyKey?: string;
+  auth?: boolean;
+  retryOn401?: boolean;
+}
+
+/**
+ * The generic authenticated request, for feature modules that own their own
+ * typed surface (`api/developer.ts`).
+ *
+ * It deliberately delegates to the one transport above instead of adding a
+ * second fetch wrapper: the in-memory token store, the per-role principal
+ * split and the single 401 refresh/replay stay in one place. A feature module
+ * must not read tokens or refresh on its own.
+ */
+export function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  return request<T>(path, init);
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +565,7 @@ export async function login(
     body: payload,
     auth: false,
   });
-  if ('access_token' in result) storeTokens(result, true, 'club');
+  if ('access_token' in result) storeTokens(result, 'club');
   return result;
 }
 
@@ -441,7 +576,7 @@ export async function masterLogin(qrMasterToken: string): Promise<MasterLoginRes
     body: { qr_master_token: qrMasterToken },
     auth: false,
   });
-  storeTokens(result, true, 'club');
+  storeTokens(result, 'club');
   return result;
 }
 
@@ -450,14 +585,14 @@ export async function djLogin(payload: LoginRequest): Promise<TokenPair | TotpCh
   const result = await request<TokenPair | TotpChallenge>('/auth/dj/login', {
     method: 'POST', body: payload, auth: false,
   });
-  if ('access_token' in result) storeTokens(result, true, 'dj');
+  if ('access_token' in result) storeTokens(result, 'dj');
   return result;
 }
 
 /** POST /v1/auth/dj/2fa — second step for DJs with MFA enabled. */
 export async function djLogin2fa(input: { email: string; totp_code: string }): Promise<TokenPair> {
   const pair = await request<TokenPair>('/auth/dj/2fa', { method: 'POST', body: input, auth: false });
-  storeTokens(pair, true, 'dj');
+  storeTokens(pair, 'dj');
   return pair;
 }
 
@@ -500,7 +635,7 @@ export async function registerClub(payload: ClubRegisterRequest): Promise<ClubRe
     body: payload,
     auth: false,
   });
-  storeTokens(result, true, 'club');
+  storeTokens(result, 'club');
   return result;
 }
 
@@ -532,8 +667,139 @@ export async function registerDj(payload: DjRegisterRequest): Promise<DjRegister
     body: payload,
     auth: false,
   });
-  storeTokens(result, true, 'dj');
+  storeTokens(result, 'dj');
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Closed onboarding — application + invitation activation
+// docs/onboarding-contract.md
+// ---------------------------------------------------------------------------
+// Registration is closed: a club leaves an application and receives a one-time
+// link after the platform approves it. No endpoint here takes a password except
+// the two `accept` calls, where the owner sets it for the first time. The UI
+// must not call `registerClub` / `registerDj` any more; they stay for the
+// `DROPIT_OPEN_SIGNUP` stand and for old clients.
+
+/** Body of `POST /v1/club/onboarding/apply` (same shape as the Connect wizard). */
+export interface ClubOnboardingApplication {
+  club: {
+    name: string;
+    city: string;
+    address: string;
+    website: string;
+    contact: string;
+    genres: string[];
+  };
+  venue: {
+    name: string;
+    type: string;
+    address: string;
+    city: string;
+    district: string;
+    capacity: number;
+    seats: number | null;
+    area_m2: number | null;
+  };
+  qr: {
+    /**
+     * Guest price in integer minor units (cents), €1..€1000 — only when the
+     * flow asks for it. The compact `/register` application omits the price:
+     * the club sets it in the panel after activation.
+     */
+    price_minor?: number;
+    zones: string[];
+  };
+}
+
+/** 201 body of `POST /v1/club/onboarding/apply` (200 on an idempotent replay). */
+export interface ClubOnboardingApplicationResponse {
+  application_id: string;
+  status: 'pending_moderation';
+  submitted_at: string;
+}
+
+/**
+ * POST /v1/club/onboarding/apply — public application, no auth.
+ *
+ * Errors travel in the usual envelope: `422 validation_error` names the field
+ * in `details.field`, `429 rate_limited` is the per-address/IP cap.
+ */
+export function applyClubOnboarding(
+  payload: ClubOnboardingApplication,
+): Promise<ClubOnboardingApplicationResponse> {
+  return request<ClubOnboardingApplicationResponse>('/club/onboarding/apply', {
+    method: 'POST',
+    body: payload,
+    auth: false,
+  });
+}
+
+/** 200 body of `GET /v1/club/onboarding/invite/:token` — the approved application. */
+export interface ClubInvitePreview {
+  club_name: string;
+  city: string;
+  email: string;
+  contact?: string;
+  slug?: string;
+  expires_at: string;
+}
+
+/**
+ * GET /v1/club/onboarding/invite/:token — what the invitation link is for.
+ *
+ * Unknown, used and expired tokens all answer `404 invite_not_found`; the page
+ * must not try to explain which of the three it was.
+ */
+export function getClubInvite(inviteToken: string): Promise<ClubInvitePreview> {
+  return request<ClubInvitePreview>(
+    `/club/onboarding/invite/${encodeURIComponent(inviteToken)}`,
+    { auth: false },
+  );
+}
+
+/** 200 body of `POST /v1/club/onboarding/invite/:token/accept`: TokenPair + club. */
+export interface ClubInviteAcceptResponse extends TokenPair {
+  club?: { id: string; name: string; slug: string; email: string };
+}
+
+/**
+ * POST /v1/club/onboarding/invite/:token/accept — the owner sets the password.
+ *
+ * The response is a TokenPair, so a successful activation signs the club in:
+ * the tokens go through the same in-memory store as `login()` and the caller
+ * navigates straight to the panel. `404 invite_not_found` means the link was
+ * already used or expired; `422 validation_failed` names `password`.
+ */
+export async function acceptClubInvite(
+  inviteToken: string,
+  password: string,
+): Promise<ClubInviteAcceptResponse> {
+  const result = await request<ClubInviteAcceptResponse>(
+    `/club/onboarding/invite/${encodeURIComponent(inviteToken)}/accept`,
+    { method: 'POST', body: { password }, auth: false },
+  );
+  storeTokens(result, 'club');
+  return result;
+}
+
+/** 200 body of `GET /v1/dj/invite/:token`. */
+export interface DjInvitePreview {
+  display_name: string;
+  club_name: string;
+  expires_at: string;
+}
+
+/**
+ * GET /v1/dj/invite/:token — the DJ's name and the club that invited them.
+ *
+ * The DJ page needs both before asking for a password: the link is the only
+ * place these facts appear and they cannot be typed in by the DJ.
+ */
+export function getDjInvite(inviteToken: string): Promise<DjInvitePreview> {
+  return request<DjInvitePreview>(`/dj/invite/${encodeURIComponent(inviteToken)}`, {
+    auth: false,
+  });
 }
 
 /** POST /v1/auth/club/2fa — step 2 (6-digit TOTP code) → TokenPair. */
@@ -546,16 +812,28 @@ export async function login2fa(input: {
     body: input,
     auth: false,
   });
-  storeTokens(pair, true, 'club');
+  storeTokens(pair, 'club');
   return pair;
 }
 
-/** POST /v1/auth/refresh — rotate the refresh-token family; reuse on the backend revokes it. */
-export async function refreshTokens(): Promise<TokenPair> {
-  if (!refreshToken) throw new ApiRequestError(401, { code: 'unauthorized', message: 'No refresh token' });
-  if (refreshPromise) return refreshPromise;
+/**
+ * POST /v1/auth/refresh — rotate the refresh-token family; reuse on the backend
+ * revokes it. Refreshes the session of `role` (default: the active one), so a
+ * console left open while its token ages never touches the club's pair.
+ */
+export async function refreshTokens(role?: 'club' | 'dj'): Promise<TokenPair> {
+  const target = role ?? currentRole();
+  if (!target) throw new ApiRequestError(401, { code: 'unauthorized', message: 'No session' });
+  const session = sessions[target];
+  const token = session?.refreshToken;
+  if (!token) {
+    throw new ApiRequestError(401, { code: 'unauthorized', message: 'No refresh token' });
+  }
+  // One rotation in flight per role: joining a rotation of the *other* role
+  // would rotate a different family and the backend would treat the second
+  // use as reuse, revoking it.
+  if (refreshPromise && refreshPromiseRole === target) return refreshPromise;
   const generation = authGeneration;
-  const token = refreshToken;
   const pending = request<TokenPair>('/auth/refresh', {
     method: 'POST',
     body: { refresh_token: token },
@@ -564,12 +842,16 @@ export async function refreshTokens(): Promise<TokenPair> {
     if (generation !== authGeneration) {
       throw new ApiRequestError(401, { code: 'unauthorized', message: 'Session ended' });
     }
-    storePair(pair, false);
+    storePair(pair, target, false);
     return pair;
   }).finally(() => {
-    if (refreshPromise === pending) refreshPromise = null;
+    if (refreshPromise === pending) {
+      refreshPromise = null;
+      refreshPromiseRole = null;
+    }
   });
   refreshPromise = pending;
+  refreshPromiseRole = target;
   return pending;
 }
 
@@ -816,6 +1098,76 @@ export function getDjShift(): Promise<{ session: DjShift | null }> {
   return request<{ session: DjShift | null }>('/dj/shift');
 }
 
+// ---------------------------------------------------------------------------
+// Вход клуба в консоль диджея (одна кнопка в панели клуба)
+// ---------------------------------------------------------------------------
+
+/** Описание сессии, выданной клубом консоли (для баннера в консоли). */
+export interface DjConsoleHandoff {
+  dj: { id: string; displayName: string };
+  session: { id: string; status: SessionStatus; timezone: string };
+}
+
+/**
+ * `POST /v1/club/dj-console/session` — открыть консоль от имени диджея смены.
+ *
+ * Клубный токен остаётся в памяти: вход лишь добавляет DJ-сессию, помеченную
+ * как выданная клубом (`handoff`). Поэтому возврат в панель — это удаление
+ * одной сессии, а не повторный вход, и кнопка «назад» в браузере не выкидывает
+ * из аккаунта.
+ *
+ * Отказ приходит как 409 с кодом `no_open_shift` / `shift_without_dj` /
+ * `dj_unavailable` — вызывающий показывает причину и следующее действие.
+ */
+let handoffInFlight: { key: string; promise: Promise<DjConsoleHandoff> } | null = null;
+
+export function openDjConsole(djId?: string): Promise<DjConsoleHandoff> {
+  // One handoff at a time *per choice of DJ*. React's development StrictMode
+  // mounts effects twice, and a second click while the first is still in
+  // flight would mint a second DJ session — two refresh families and two audit
+  // rows for one intent. Choosing a different person is a different intent and
+  // must go through.
+  const key = djId ?? '';
+  if (handoffInFlight?.key === key) return handoffInFlight.promise;
+  const promise = performHandoff(djId).finally(() => {
+    if (handoffInFlight?.promise === promise) handoffInFlight = null;
+  });
+  handoffInFlight = { key, promise };
+  return promise;
+}
+
+async function performHandoff(djId?: string): Promise<DjConsoleHandoff> {
+  const raw = await request<{
+    access_token: string;
+    refresh_token: string;
+    expires_in: number;
+    dj: { id: string; display_name: string };
+    session: { id: string; status: SessionStatus; timezone: string };
+  }>('/club/dj-console/session', {
+    method: 'POST',
+    body: djId ? { dj_id: djId } : {},
+  });
+  const handoff: DjConsoleHandoff = {
+    dj: { id: raw.dj.id, displayName: raw.dj.display_name },
+    session: raw.session,
+  };
+  handoffMeta = { dj: handoff.dj, session: handoff.session };
+  storeTokens(raw, 'dj', { handoff: true });
+  return handoff;
+}
+
+/**
+ * Выход из консоли обратно в панель клуба.
+ *
+ * Удаляет только DJ-сессию: клубная остаётся, поэтому панель открывается
+ * без повторного логина. Для диджея, который вошёл сам, это обычный выход —
+ * `clearTokens('dj')` и переход на `/dj/login` делает вызывающий.
+ */
+export function leaveDjConsole(): void {
+  handoffMeta = null;
+  clearTokens('dj');
+}
+
 export async function getDjQueue(sort: 'new' | 'hot' = 'new'): Promise<{ items: DjQueueItem[] }> {
   return request<{ items: DjQueueItem[] }>(`/dj/queue?sort=${sort}`);
 }
@@ -839,6 +1191,113 @@ export function acceptDjInvite(inviteToken: string, password: string): Promise<{
 export async function getDjStats(): Promise<{ requests: number; accepted: number; played: number; rejected: number; earnedMinor: number }> {
   const r = await request<Record<string, unknown>>('/dj/stats/today');
   return { requests: Number(r.requests_today ?? 0), accepted: Number(r.accepted ?? 0), played: Number(r.played ?? 0), rejected: Number(r.rejected ?? 0), earnedMinor: Number(r.earned_total_minor ?? 0) };
+}
+
+// ---------------------------------------------------------------------------
+// Лог смены и счётчики смены (DJ-консоль, вкладка Session)
+// ---------------------------------------------------------------------------
+
+/**
+ * Одна сыгранная заявка из `GET /v1/dj/history`.
+ *
+ * `played_at` and `accepted_at` are nullable on purpose: the server reports
+ * `null` when it does not know the time (a request row has no
+ * `accepted_at` column — the value comes from the `request.accepted` event),
+ * and the console must render "unavailable" rather than invent a clock.
+ */
+export interface DjHistoryItem {
+  id: string;
+  title: string;
+  artist: string;
+  style: string | null;
+  played_at: string | null;
+  accepted_at: string | null;
+  same_track_count: number;
+  cover_url: string | null;
+}
+
+/**
+ * `GET /v1/dj/history?limit=&cursor=` — the shift's played requests.
+ *
+ * Keyset pagination: `next_cursor` is opaque, `null` on the last page. The
+ * route answers `200 {items: [], next_cursor: null}` when the DJ has no open
+ * shift, so "no shift" and "nothing played yet" look the same here — the
+ * shift itself comes from `getDjShift()`.
+ */
+export function getDjHistory(params: { limit?: number; cursor?: string | null } = {}): Promise<{ items: DjHistoryItem[]; nextCursor: string | null }> {
+  const query = new URLSearchParams();
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.cursor) query.set('cursor', params.cursor);
+  const suffix = query.toString();
+  return request<{ items?: DjHistoryItem[]; next_cursor?: string | null }>(
+    `/dj/history${suffix ? `?${suffix}` : ''}`,
+  ).then((r) => ({ items: r.items ?? [], nextCursor: r.next_cursor ?? null }));
+}
+
+/**
+ * Shift-scoped counters from `GET /v1/dj/stats/session`.
+ *
+ * These are the numbers the Session tab shows: unlike `/v1/dj/stats/today`
+ * (a rolling 24-hour window) and its `earned_total_minor` (the DJ's whole
+ * history), every figure here belongs to the open shift, which is what the
+ * screen claims. `session === null` means the DJ has no open shift.
+ */
+export interface DjSessionStats {
+  session: { id: string; status: string; timezone: string } | null;
+  requests: number;
+  accepted: number;
+  played: number;
+  rejected: number;
+  earnedMinor: number;
+}
+
+export function getDjSessionStats(): Promise<DjSessionStats> {
+  return request<{
+    session?: { id: string; status: string; timezone: string } | null;
+    requests?: number;
+    accepted?: number;
+    played_session?: number;
+    rejected?: number;
+    earned_session_minor?: number;
+  }>('/dj/stats/session').then((r) => ({
+    session: r.session ?? null,
+    requests: Number(r.requests ?? 0),
+    accepted: Number(r.accepted ?? 0),
+    played: Number(r.played_session ?? 0),
+    rejected: Number(r.rejected ?? 0),
+    earnedMinor: Number(r.earned_session_minor ?? 0),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Live updates — the one-shot ticket for GET /v1/ws (техкарта, часть IV)
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /v1/ws/ticket` — one-shot ticket for `GET /v1/ws` (TTL 30 s).
+ *
+ * The ticket must be minted for the console's **DJ** session: the server stores
+ * the bearer subject in the ticket and, on `{"subscribe":"queue"}`, compares it
+ * with the shift's `dj_id` (`crates/gateway-api/src/ws.rs`). `roleForPath` maps
+ * every path outside `/v1/dj/**` to the club principal, and `/v1/ws/ticket` is
+ * one of those — a club ticket would open a socket that is refused at
+ * subscription, so the principal is stated here explicitly.
+ */
+export function getWsTicket(): Promise<{ ticket: string; expiresInSeconds: number }> {
+  return request<{ ticket: string; expires_in: number }>('/ws/ticket', { method: 'POST', role: 'dj' })
+    .then((result) => ({ ticket: result.ticket, expiresInSeconds: result.expires_in }));
+}
+
+/**
+ * Absolute URL of the live channel for a ticket.
+ *
+ * The server takes the ticket from the query string (`ws.rs` `WsQuery`), never
+ * the long-lived JWT — the ticket is the only credential that may appear in a
+ * URL, and it dies with the handshake.
+ */
+export function wsUrl(ticket: string): string {
+  const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${scheme}://${window.location.host}/v1/ws?ticket=${encodeURIComponent(ticket)}`;
 }
 
 /**

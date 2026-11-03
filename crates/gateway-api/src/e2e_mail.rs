@@ -33,6 +33,7 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use uuid::Uuid;
 
+use crate::auth;
 use crate::e2e::{app_env, call, call_with_headers, test_repo};
 use dropit_infra_db::mail::NewMail;
 use dropit_infra_db::SessionRepo;
@@ -623,6 +624,52 @@ async fn e2e_dj_invite_queues_mail() {
         "ключ идемпотентности: {}",
         detail.mail.idempotency_key
     );
+    // Ссылка — path-форма маршрута панели `/dj/invite/:token`, а не старая
+    // `/dj/invite?token=…` (страница принимает её как fallback, письмо — нет).
+    assert!(
+        detail
+            .mail
+            .html
+            .contains(&format!("https://app.dropit.test/dj/invite/{invite_token}")),
+        "path-форма ссылки: {}",
+        detail.mail.html
+    );
+    assert!(
+        !detail.mail.html.contains("token="),
+        "в письме не должно быть query-формы"
+    );
+
+    // Публичный превью: DJ видит имя и клуб до задания пароля.
+    let url = format!("/v1/dj/invite/{invite_token}");
+    let (status, preview) = call(&env, "GET", &url, None, None).await;
+    assert_eq!(status, StatusCode::OK, "превью приглашения: {preview}");
+    assert_eq!(preview["display_name"], "Invited DJ");
+    assert_eq!(preview["club_name"], "Mail Club");
+    assert!(preview["expires_at"].as_str().is_some());
+
+    // Битый и неизвестный токен — один и тот же 404.
+    let (status, response) = call(&env, "GET", "/v1/dj/invite/deadbeef", None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(response["code"], "invite_not_found");
+    let unknown = auth::generate_refresh_token();
+    let (status, response) =
+        call(&env, "GET", &format!("/v1/dj/invite/{unknown}"), None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(response["code"], "invite_not_found");
+
+    // После принятия приглашения ссылка перестаёт показывать превью.
+    let (status, accepted) = call(
+        &env,
+        "POST",
+        "/v1/dj/invite/accept",
+        Some(json!({ "invite_token": invite_token, "password": "dj-pass-12345" })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "accept: {accepted}");
+    let (status, response) = call(&env, "GET", &url, None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "принятая ссылка: {response}");
+    assert_eq!(response["code"], "invite_not_found");
 
     // Повторный инвайт того же адреса → 409, второго письма нет.
     let (status, _) = call(
@@ -643,6 +690,162 @@ async fn e2e_dj_invite_queues_mail() {
         .expect("list")
         .0;
     assert_eq!(rows.len(), 1, "отказ не порождает письмо");
+}
+
+/// Approve заявки и перевыпуск ссылки ставят в очередь `club_invite`.
+///
+/// Проверяется HTTP-граница: письмо уходит на e-mail из заявки (fallback),
+/// `mail_queued` в ответе честный, ссылка ведёт на `/club/invite/<token>`,
+/// а перевыпуск создаёт ВТОРОЕ письмо с другим ключом идемпотентности.
+#[tokio::test]
+async fn e2e_club_invite_queues_mail() {
+    let _env = with_mail_env().await;
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e почты пропущен");
+            return;
+        }
+    };
+    let pool = repo.pool();
+    clean_mail(&pool).await;
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(pool.clone())),
+        None,
+    )
+    .await;
+
+    // Заявка сеется напрямую: этот тест про почту, а не про apply
+    // (онбординг-флоу целиком покрыт e2e_onboarding).
+    let application_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club_application \
+         (id, club, venue, qr, club_name, city, contact, email, price_minor, \
+          status, source_ip) \
+         VALUES ($1, $2, $3, $4, 'Invite Mail Club', 'Madrid', \
+                 'owner@club-invite.test', 'owner@club-invite.test', 200, \
+                 'pending_moderation', $5::inet)",
+    )
+    .bind(application_id)
+    .bind(json!({ "name": "Invite Mail Club" }))
+    .bind(json!({ "name": "Sala", "capacity": 100 }))
+    .bind(json!({ "price_minor": 200 }))
+    .bind("203.0.113.90")
+    .execute(&pool)
+    .await
+    .expect("заявка-фикстура");
+
+    let admin_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO admin_user \
+         (id, email, password_hash, totp_secret_enc, totp_confirmed_at, role, status) \
+         VALUES ($1, $2, 'x', $3, now(), 'superadmin', 'active')",
+    )
+    .bind(admin_id)
+    .bind(format!("mail-admin-{admin_id}@dropit.test"))
+    .bind(b"JBSWY3DPEHPK3PXP".to_vec())
+    .execute(&pool)
+    .await
+    .expect("админ-фикстура");
+    let admin = env
+        .keys
+        .issue_access(admin_id, dropit_common::Role::Admin, Uuid::now_v7())
+        .expect("admin jwt");
+
+    // Approve без пароля и без явного e-mail: адрес берётся из заявки.
+    let approve_uri = format!("/v1/admin/onboarding-applications/{application_id}/approve");
+    let (status, approved) = call(&env, "POST", &approve_uri, Some(json!({})), Some(&admin)).await;
+    assert_eq!(status, StatusCode::OK, "approve: {approved}");
+    assert_eq!(approved["mail_queued"], true, "письмо поставлено в очередь");
+    assert_eq!(approved["email"], "owner@club-invite.test");
+    let club_id: Uuid = approved["club_id"]
+        .as_str()
+        .expect("club_id")
+        .parse()
+        .expect("uuid");
+    let token = approved["invite_url"]
+        .as_str()
+        .expect("invite_url")
+        .rsplit('/')
+        .next()
+        .expect("токен в ссылке")
+        .to_string();
+    assert_eq!(token.len(), 64);
+
+    let mail = env.mail.as_ref().expect("mail repo").clone();
+    let rows = mail
+        .list(dropit_infra_db::mail::MailFilter {
+            limit: 10,
+            ..Default::default()
+        })
+        .await
+        .expect("list")
+        .0;
+    assert_eq!(rows.len(), 1, "одно письмо на approve");
+    assert_eq!(rows[0].template, "club_invite");
+    assert_eq!(rows[0].to_email, "owner@club-invite.test");
+    assert_eq!(rows[0].status, "queued");
+    assert_eq!(rows[0].aggregate_type.as_deref(), Some("club"));
+    assert_eq!(rows[0].aggregate_id, Some(club_id));
+
+    let detail = mail.get(rows[0].id).await.unwrap().expect("письмо есть");
+    let expected_url = format!("https://app.dropit.test/club/invite/{token}");
+    assert!(
+        detail.mail.html.contains(&expected_url),
+        "ссылка активации в письме: {}",
+        detail.mail.html
+    );
+    assert!(
+        detail.mail.text.contains(&expected_url),
+        "ссылка и в тексте"
+    );
+    assert!(
+        detail.mail.html.contains("Invite Mail Club"),
+        "в письме название клуба"
+    );
+    assert_eq!(
+        detail.mail.idempotency_key,
+        format!("club_invite:{club_id}:{}", &token[..8]),
+        "ключ идемпотентности: club_invite:<club_id>:<token prefix>"
+    );
+
+    // Перевыпуск: новое письмо с новым токеном и своим ключом.
+    let reissue_uri = format!("/v1/admin/onboarding-applications/{application_id}/invite");
+    let (status, reissued) = call(&env, "POST", &reissue_uri, None, Some(&admin)).await;
+    assert_eq!(status, StatusCode::OK, "перевыпуск: {reissued}");
+    assert_eq!(reissued["mail_queued"], true);
+    let new_token = reissued["invite_url"]
+        .as_str()
+        .expect("invite_url")
+        .rsplit('/')
+        .next()
+        .expect("токен")
+        .to_string();
+    assert_ne!(new_token, token, "перевыпуск меняет токен");
+
+    let rows = mail
+        .list(dropit_infra_db::mail::MailFilter {
+            limit: 10,
+            ..Default::default()
+        })
+        .await
+        .expect("list")
+        .0;
+    assert_eq!(rows.len(), 2, "второе письмо на перевыпуск");
+    // Список отдаётся новыми первыми: [reissue, approve]. Ключи различаются
+    // префиксом токена — иначе второе письмо считалось бы дублем первого.
+    let mut keys = Vec::new();
+    for row in &rows {
+        let detail = mail.get(row.id).await.unwrap().expect("письмо есть");
+        keys.push(detail.mail.idempotency_key);
+    }
+    assert_ne!(keys[0], keys[1], "у писем разные ключи идемпотентности");
+    assert!(
+        keys[1].starts_with(&format!("club_invite:{club_id}:{}", &token[..8])),
+        "ключ approve: {}",
+        keys[1]
+    );
 }
 
 /// Апгрейд гостя ставит письмо с кодом, а `/v1/guest/verify` подтверждает адрес.

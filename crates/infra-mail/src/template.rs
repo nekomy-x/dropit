@@ -19,6 +19,8 @@ use crate::error::MailError;
 /// Ключ шаблона (он же `mail_message.template`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TemplateKey {
+    /// Активация клуба после одобрения заявки (одноразовая ссылка).
+    ClubInvite,
     /// Приглашение DJ в клуб.
     DjInvite,
     /// Код подтверждения e-mail гостя.
@@ -34,6 +36,7 @@ impl TemplateKey {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::ClubInvite => "club_invite",
             Self::DjInvite => "dj_invite",
             Self::GuestVerify => "guest_verify",
             Self::PayoutPaid => "payout_paid",
@@ -49,6 +52,7 @@ impl TemplateKey {
     #[must_use]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.trim() {
+            "club_invite" => Some(Self::ClubInvite),
             "dj_invite" => Some(Self::DjInvite),
             "guest_verify" => Some(Self::GuestVerify),
             "payout_paid" => Some(Self::PayoutPaid),
@@ -60,6 +64,12 @@ impl TemplateKey {
     /// Тексты шаблона.
     fn parts(self) -> Template {
         match self {
+            Self::ClubInvite => Template {
+                subject: "Приглашение в {{club_name}}",
+                preheader: "Заявка клуба одобрена — задайте пароль владельца",
+                body: CLUB_INVITE_BODY,
+                text: CLUB_INVITE_TEXT,
+            },
             Self::DjInvite => Template {
                 subject: "Приглашение в {{club_name}}",
                 preheader: "Клуб приглашает вас в консоль диджея DROP IT",
@@ -234,6 +244,47 @@ fn layout(preheader: &str, body: &str) -> String {
     out.push_str("</p>\n</td></tr>\n</table>\n</body>\n</html>\n");
     out
 }
+
+/// Текстовая версия активации клуба.
+///
+/// Пароль не приходит в письме и не задаётся админом: ссылка — единственный
+/// секрет, поэтому письмо прямо говорит, что пароль выбирает владелец, а
+/// просроченная/использованная ссылка просто перестаёт работать.
+const CLUB_INVITE_TEXT: &str = "\
+Здравствуйте!
+
+Заявка клуба {{club_name}} одобрена. Аккаунт создан, но пароль ещё не задан:
+его выбирает владелец, а не администратор платформы.
+
+Активировать аккаунт и задать пароль: {{invite_url}}
+Ссылка одноразовая и действует до {{expires_at}}.
+
+Если вы не отправляли заявку, просто проигнорируйте письмо: без этой ссылки
+аккаунт останется неактивированным.
+";
+
+/// HTML-версия активации клуба.
+const CLUB_INVITE_BODY: &str = "\
+<h1 style=\"margin:0 0 16px;font-size:24px;line-height:32px;font-weight:700;color:#f2f2f5;\">\
+Заявка одобрена</h1>
+<p style=\"margin:0 0 12px;font-size:15px;line-height:24px;color:#c9c9d1;\">\
+Клуб <strong style=\"color:#f2f2f5;\">{{club_name}}</strong> прошёл модерацию. \
+Аккаунт создан, осталось задать пароль владельца — это единственный шаг, \
+который нельзя сделать за вас.</p>
+<p style=\"margin:0 0 24px;font-size:15px;line-height:24px;color:#c9c9d1;\">\
+Ссылка одноразовая и действует до {{expires_at}}.</p>
+<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin:0 0 24px;\">\
+<tr><td style=\"background:#00ff87;border-radius:10px;\">\
+<a href=\"{{invite_url}}\" style=\"display:inline-block;padding:13px 22px;font-size:15px;\
+font-weight:600;color:#06110b;text-decoration:none;\">Активировать аккаунт</a>\
+</td></tr></table>
+<p style=\"margin:0 0 8px;font-size:13px;line-height:20px;color:#8a8a94;\">\
+Если кнопка не открывается, скопируйте ссылку в браузер:</p>
+<p style=\"margin:0 0 20px;font-size:13px;line-height:20px;color:#c9c9d1;word-break:break-all;\">\
+{{invite_url}}</p>
+<p style=\"margin:0;font-size:13px;line-height:20px;color:#8a8a94;\">\
+Если вы не отправляли заявку, просто проигнорируйте письмо: без этой ссылки \
+аккаунт останется неактивированным.</p>";
 
 /// Текстовая версия приглашения DJ.
 const DJ_INVITE_TEXT: &str = "\

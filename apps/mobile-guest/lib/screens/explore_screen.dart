@@ -147,8 +147,10 @@ class _ExploreScreenState extends State<ExploreScreen> {
           // ── Сводка и сортировка ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 Text(
                     rooms.length == 1
@@ -162,6 +164,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(Icons.swap_vert,
                             size: 12, color: DropTokens.accent),
@@ -198,7 +201,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 onOpen: () => widget.onOpenRoom(room),
               ),
             ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -218,7 +221,7 @@ class _FeaturedRoomCard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(DropTokens.rSm),
         child: SizedBox(
-          height: 132,
+          height: 132 + (MediaQuery.textScalerOf(context).scale(12) - 12) * 14,
           child: Stack(
             fit: StackFit.expand,
             children: [

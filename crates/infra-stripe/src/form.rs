@@ -248,6 +248,12 @@ pub(crate) fn transfer_body(req: &TransferReq) -> Result<FormBody, StripeError> 
     Ok(form)
 }
 
+/// Retrieve the existing PaymentIntent by its escaped provider id.
+pub(crate) fn payment_intent_path(intent_id: &str) -> Result<String, StripeError> {
+    let id = escape_path_segment(intent_id)?;
+    Ok(format!("/v1/payment_intents/{id}"))
+}
+
 /// Путь запроса захвата: `/v1/payment_intents/{id}/capture`.
 pub(crate) fn capture_path(intent_id: &str) -> Result<String, StripeError> {
     let id = escape_path_segment(intent_id)?;
@@ -457,6 +463,9 @@ mod tests {
 
     #[test]
     fn paths_escape_ids() {
+        assert_eq!(payment_intent_path("pi_abc").unwrap(), "/v1/payment_intents/pi_abc");
+        assert_eq!(payment_intent_path("a/b").unwrap(), "/v1/payment_intents/a%2Fb");
+        assert!(payment_intent_path("  ").is_err());
         assert_eq!(
             capture_path("pi_abc").unwrap(),
             "/v1/payment_intents/pi_abc/capture"

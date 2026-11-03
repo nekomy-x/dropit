@@ -92,6 +92,36 @@
   gap: 8px;
 }
 
+/* The management page's own action group (Quick actions / Export CSV / Export
+ * JSON / Add user). On a phone the four triggers form one compact block of two
+ * even rows: the block fills the head width, every trigger keeps its 44px
+ * target, and a longer label wraps inside its button instead of being clipped. */
+.admin-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 767px) {
+  .admin-page-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .admin-page-actions > .btn {
+    min-height: var(--hit-mobile);
+    padding: 0 10px;
+    font-size: var(--fs-12);
+    line-height: 1.15;
+    white-space: normal;
+    text-align: center;
+  }
+  /* ⌘K is a keyboard affordance; on a touch screen there is no keyboard to
+   * press it, so the hint gives its width to the row. */
+  .admin-page-actions kbd { display: none; }
+}
+
 /* ---------------------------------------------------------------------------
    Feature-flag switch
    ------------------------------------------------------------------------ */
@@ -173,6 +203,20 @@
   border-bottom: 1px solid var(--c-hairline);
 }
 
+.power-table-search { flex: 1; min-width: 220px; }
+
+/* Filters use the available row rather than a desktop-sized, 200px column. */
+.admin-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.admin-filter { flex: 0 1 200px; min-width: 160px; }
+.admin-filter-search { flex: 1 1 260px; min-width: 0; max-width: 380px; }
+.admin-filter-single { max-width: 260px; margin-bottom: 16px; }
+
 .power-table-scroll {
   margin-top: 4px;
   scrollbar-width: thin;
@@ -242,6 +286,170 @@
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--c-hairline);
+}
+
+/* ---------------------------------------------------------------------------
+   Power table on a phone — one card per record
+   ------------------------------------------------------------------------
+   Below 768px the 720px grid inside a 390px card clipped every column past the
+   fold, so the same filtered and sorted rows are rendered as record cards. A
+   card is a row of this panel, not a card inside a card: a hairline-separated
+   block, the identity column in bold on top, then one `label / value` line per
+   remaining column. The labels are the columns' own translated headers, and the
+   row's edit affordance stays next to the value it changes.
+   ------------------------------------------------------------------------ */
+
+.power-table-mobile {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.power-table-mobile-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+.power-table-mobile-card:last-child { padding-bottom: 0; border-bottom: 0; }
+.power-table-mobile-card.is-selected { background: var(--c-accent-tint); }
+.power-table-mobile-card:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; }
+
+/* The table head's select-all cannot follow the rows into the card layout, so
+ * the same control sits above the list instead of being lost. */
+.power-table-mobile-selectall {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--c-hairline-row);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+
+/* A card's checkbox is a touch target, not a table mark. The shared table rule
+ * (`.data-table input[type='checkbox']`, 16px) is more specific than a bare
+ * class, so both scopes are spelled out here. */
+.power-table-scroll .power-table-mobile input[type='checkbox'],
+.power-table-scroll .power-table-mobile-selectall input[type='checkbox'] {
+  width: var(--hit-mobile);
+  height: var(--hit-mobile);
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--c-accent);
+}
+
+.power-table-mobile-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.power-table-mobile-check {
+  width: var(--hit-mobile);
+  height: var(--hit-mobile);
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--c-accent);
+}
+
+/* The page control under the cards. The list is a page of records, not the
+ * whole filtered set: the count says where the reader is, the button appends
+ * the next page. */
+.power-table-mobile-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-hairline-row);
+}
+.power-table-mobile-more-count {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-weight: 500;
+}
+.power-table-mobile-more .btn { min-height: var(--hit-mobile); }
+
+.power-table-mobile-identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: flex-start;
+  gap: 8px;
+}
+.power-table-mobile-title {
+  min-width: 0;
+  flex: 1;
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* One line per column: the header keeps a reserved label column, the value
+ * owns the rest and wraps instead of being clipped. */
+.power-table-mobile-meta { display: grid; margin: 2px 0 0; padding: 0; }
+.power-table-mobile-row {
+  display: grid;
+  grid-template-columns: var(--stack-label) minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 2px 0;
+}
+.power-table-mobile-row dt {
+  padding-top: 3px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-weight: 500;
+  line-height: 1.5;
+}
+.power-table-mobile-row dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.power-table-mobile-value { min-width: 0; flex: 1; }
+/* An open editor needs the card width, not the value column. */
+.power-table-mobile-row.is-editing { grid-template-columns: minmax(0, 1fr); }
+.power-table-mobile-row.is-editing dd { display: block; }
+
+/* Phone records need their full measure: the reserved 104px label column
+ * squeezed e-mails, workspace names and dates even on 390–430px screens. */
+@media (max-width: 480px) {
+  .power-table-mobile-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .power-table-mobile-row dt { padding-top: 4px; }
+}
+
+/* The card's actions: the same row of labelled triggers the shared stacked
+ * table gives its `.cell-actions` — one button per editable column, named after
+ * the field it opens, instead of a column of identical "Edit" links. */
+.power-table-mobile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.power-table-mobile-actions .btn {
+  min-height: var(--hit-mobile);
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+/* The default inline editor field. Desktop keeps the dense 30px row; touch
+ * gives the field the same 44px target as every other control. */
+.power-table-editor-input { height: 30px; min-width: 0; flex: 1; }
+
+@media (max-width: 767px) {
+  .power-table-editor-input,
+  .power-table-editor .field-input,
+  .power-table-editor .field-select__trigger { height: auto; min-height: var(--hit-mobile); }
+  .power-table-editor .btn-sm { min-height: var(--hit-mobile); }
 }
 
 /* ---------------------------------------------------------------------------
@@ -489,16 +697,75 @@
    Permission matrix (components/admin-console/RolePermissionMatrix.tsx)
    ------------------------------------------------------------------------ */
 
-.admin-matrix-scroll { margin-top: 4px; scrollbar-width: thin; }
+/* A matrix is a grid, not a list: stacking it would strip every cell of the
+ * role column it belongs to. On a phone it therefore stays a real table inside
+ * a sideways scroller. The permission column is pinned so the reader always
+ * knows what a checkbox governs, and the scrollbar is always painted, so the
+ * columns past the fold are discoverable instead of silently cut off. */
+.admin-matrix-scroll {
+  position: relative;
+  margin-top: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* A painted scrollbar, not an overlay one: on a phone the columns past the fold
+ * are only discoverable if the track is part of the layout. `scrollbar-width`
+ * is deliberately not set — Chromium ignores the ::-webkit-scrollbar rules
+ * once it is, and the bar would go back to being an overlay. */
+.admin-matrix-scroll::-webkit-scrollbar { height: 10px; }
+.admin-matrix-scroll::-webkit-scrollbar-track {
+  border-radius: var(--r-chip);
+  background: var(--c-inset);
+}
+.admin-matrix-scroll::-webkit-scrollbar-thumb {
+  border-radius: var(--r-chip);
+  background: var(--c-hairline-strong);
+}
+/* Desktop keeps the dense 16px cell checkbox; on a phone the shared rule gives
+ * every checkbox in a `data-table` the 44px touch target. */
+@media (min-width: 768px) {
+  .admin-matrix-scroll input[type='checkbox'] { width: 16px; height: 16px; }
+}
 .admin-matrix-scroll input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
   flex: 0 0 auto;
   accent-color: var(--c-accent);
 }
 .admin-matrix-meaning {
   color: var(--c-text-muted-sm);
   font-size: var(--fs-11);
+}
+
+/* The scroll cue in the card head. It is only true while the grid is wider than
+ * the card, so it is hidden from 752px up, where the 680px table fits. */
+.admin-matrix-cue { display: none; }
+@media (max-width: 751px) {
+  .admin-matrix-cue {
+    display: inline-flex;
+    align-items: center;
+    color: var(--c-text-muted-sm);
+  }
+}
+
+@media (max-width: 767px) {
+  /* The sticky column paints its own surface, otherwise the scrolling cells
+   * show through it, and a hairline is the only separator it can keep. */
+  .admin-matrix-scroll th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--c-surface);
+    box-shadow: 1px 0 0 var(--c-hairline);
+  }
+  .admin-matrix-scroll td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--c-surface);
+    box-shadow: 1px 0 0 var(--c-hairline);
+  }
+  .admin-matrix-scroll th:first-child,
+  .admin-matrix-scroll td:first-child { padding-left: 0; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -510,6 +777,19 @@
 }
 
 @media (max-width: 640px) {
+  .power-table-search { flex: 1 1 100%; min-width: 0; }
+  .field-select.power-table-status { flex: 1 1 0; min-width: 0; }
+  .admin-filter,
+  .admin-filter-search { flex: 1 1 100%; min-width: 0; max-width: none; }
+  .admin-filter-single { max-width: none; }
+  .admin-dialog,
+  .admin-dialog-wide { width: calc(100vw - 24px); }
+  .admin-dialog > header,
+  .admin-dialog > .admin-dialog-body,
+  .admin-drawer-head,
+  .admin-drawer-body,
+  .admin-drawer-foot { padding: 14px; }
+  .admin-dialog > header h2 { min-width: 0; overflow-wrap: anywhere; }
   .admin-drawer { width: 100%; }
   .admin-drawer-foot { grid-template-columns: minmax(0, 1fr); }
   .admin-page-note { font-size: var(--fs-11); }
@@ -533,6 +813,10 @@
   .admin-toggle span { top: 12px; left: 3px; }
   .admin-toggle.is-on { border-color: transparent; background: transparent; }
   .admin-toggle.is-on::after { border-color: var(--c-accent); background: var(--c-accent-tint); }
+}
+
+@media (max-width: 480px) {
+  .admin-audit-row { grid-template-columns: minmax(0, 1fr); gap: 4px; padding-inline: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

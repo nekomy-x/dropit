@@ -1,13 +1,16 @@
-import { StrictMode } from 'react';
+import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import DeploymentStatusBar, { useDeploymentStatus } from './components/DeploymentStatus';
 import { IS_DEMO } from './app-mode';
 import { LocaleProvider } from './locale';
 import { installPointerSelectionGuard } from './pointer-guard';
 import './index.css';
 import './operations.css';
+
+// A QR guest must not download the club/admin tooling before ordering.
+const App = lazy(() => import('./App'));
+const GuestCheckoutPage = lazy(() => import('./pages/GuestCheckoutPage'));
 
 // A click on a control is a click, not a selection: clear any selection left
 // over from the page before the control runs. See pointer-guard.ts.
@@ -37,7 +40,14 @@ createRoot(rootElement).render(
         {/* "Test stand" is the corner pill on every screen; the bottom band is
             reserved for an announced maintenance window. */}
         <MaintenanceBand demoBuild={IS_DEMO} />
-        <App />
+        <Suspense fallback={<div className="panel-loading" role="status">DROP IT…</div>}>
+          <Routes>
+            <Route path="/join" element={<GuestCheckoutPage />} />
+            <Route path="/room" element={<GuestCheckoutPage />} />
+            <Route path="/guest/payment-return" element={<GuestCheckoutPage />} />
+            <Route path="*" element={<App />} />
+          </Routes>
+        </Suspense>
       </LocaleProvider>
     </BrowserRouter>
   </StrictMode>,

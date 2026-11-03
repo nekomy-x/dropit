@@ -1,16 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ApiRequestError, requestPasswordReset, type ResetRole } from '../api/client';
-import {
-  AuthAlert,
-  AuthFacts,
-  AuthWizard,
-  type WizardStep,
-} from '../components/auth/AuthKit';
-import { useLocale, type Translate } from '../locale';
+import { AuthAlert, AuthScreen } from '../components/auth/AuthKit';
+import { useLocale } from '../locale';
 
 /**
- * Password reset — request a link (skin B, step 1 of 2).
+ * Password reset — request a link.
  *
  * POST /v1/auth/password/reset-request always answers 202 for a well-formed
  * request, whether or not the address exists (no user enumeration), so the
@@ -24,10 +19,6 @@ import { useLocale, type Translate } from '../locale';
  * A 503 means the endpoint is not deployed on this server. That is a state of
  * the stand, not a typo by the person, and it is reported as such.
  */
-const STEPS = (t: Translate): ReadonlyArray<WizardStep> => [
-  { title: t('auth.resetEmailStep'), note: t('auth.resetEmailStepNote') },
-  { title: t('auth.resetLinkStep'), note: t('auth.resetLinkStepNote') },
-];
 
 const ROLE_LABELS: ReadonlyArray<{ value: ResetRole; labelKey: string }> = [
   { value: 'club', labelKey: 'auth.resetRoleClub' },
@@ -88,20 +79,10 @@ export default function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <AuthWizard
+      <AuthScreen
         role={t('auth.recovery')}
-        steps={STEPS(t)}
-        step={2}
         title={t('auth.resetLinkTitle')}
         subtitle={sent.resetUrl ? t('auth.resetLinkShown') : t('auth.resetLinkSent', { email: email.trim() })}
-        asideFooter={
-          <AuthFacts
-            facts={[
-              { label: t('auth.resetLinkLivesLabel'), value: t('auth.resetLinkLivesValue') },
-              { label: t('auth.resetNextLabel'), value: t('auth.resetNextOpen') },
-            ]}
-          />
-        }
         footer={signInLink}
       >
         <div className="auth-form">
@@ -114,26 +95,15 @@ export default function ForgotPasswordPage() {
             {t('auth.useAnotherAddress')}
           </button>
         </div>
-      </AuthWizard>
+      </AuthScreen>
     );
   }
 
   return (
-    <AuthWizard
+    <AuthScreen
       role={t('auth.recovery')}
-      steps={STEPS(t)}
-      step={1}
       title={t('auth.forgotTitle')}
       subtitle={t('auth.forgotSubtitle')}
-      asideFooter={
-        <AuthFacts
-          facts={[
-            { label: t('auth.resetLinkLivesLabel'), value: t('auth.resetLinkLivesValue') },
-            { label: t('auth.resetLimitLabel'), value: t('auth.resetLimitValue') },
-            { label: t('auth.resetAfterLabel'), value: t('auth.resetAfterValue') },
-          ]}
-        />
-      }
       footer={signInLink}
     >
       <form className="auth-form" onSubmit={submit} noValidate>
@@ -176,6 +146,6 @@ export default function ForgotPasswordPage() {
           {submitting ? t('auth.requesting') : t('auth.sendResetLink')}
         </button>
       </form>
-    </AuthWizard>
+    </AuthScreen>
   );
 }

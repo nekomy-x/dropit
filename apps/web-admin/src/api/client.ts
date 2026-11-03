@@ -374,6 +374,26 @@ async function request<T>(
   return result;
 }
 
+/** Options of the shared authenticated transport (see `request`). */
+export interface ApiRequestInit {
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  body?: unknown;
+  auth?: boolean;
+  retryOn401?: boolean;
+}
+
+/**
+ * The generic authenticated request, for feature modules that own their own
+ * typed surface (`api/developer.ts`).
+ *
+ * It delegates to the one transport above instead of adding a second fetch
+ * wrapper, so the in-memory token store and the single 401 refresh/replay stay
+ * in one place. A feature module must not read tokens or refresh on its own.
+ */
+export function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  return request<T>(path, init);
+}
+
 // ---------------------------------------------------------------------------
 // Typed API surface — LIVE endpoints (openapi.yaml 0.5.0, F1 + F6)
 // ---------------------------------------------------------------------------
@@ -668,6 +688,246 @@ export function patchPlatformSettings(
     method: 'PATCH',
     body,
   }).then(mapSettings);
+}
+
+// ---------------------------------------------------------------------------
+// Club onboarding applications (docs/onboarding-contract.md)
+// ---------------------------------------------------------------------------
+// The queue is the only way a club gets an account, and the invite link is the
+// only way its owner gets a password: no screen here sends or stores one.
+// Approve creates the club without a password and answers with the one-time
+// invite; the owner sets the password on the activation page.
+//
+//   GET  /v1/admin/onboarding-applications?status=&limit=&cursor=
+//   GET  /v1/admin/onboarding-applications/:id
+//   POST /v1/admin/onboarding-applications/:id/approve  {email?, slug?}
+//   POST /v1/admin/onboarding-applications/:id/reject   {reason}
+//   POST /v1/admin/onboarding-applications/:id/invite   (reissue)
+
+export type OnboardingApplicationStatus = 'pending_moderation' | 'approved' | 'rejected';
+
+/** Derived by the backend from the club row: `none | pending | accepted | expired`. */
+export type OnboardingInviteState = 'none' | 'pending' | 'accepted' | 'expired';
+
+/** `GET /v1/admin/onboarding-applications` row; also the detail's common part. */
+export interface OnboardingApplicationListItem {
+  id: string;
+  club_name: string;
+  city: string;
+  contact: string;
+  /**
+   * Request price, integer minor units (ADR-003), or null when the applicant
+   * did not name one — the compact `/register` form asks no price; the club
+   * sets it in the panel after activation.
+   */
+  price_minor: number | null;
+  status: OnboardingApplicationStatus;
+  created_at: string;
+  reviewed_at: string | null;
+  /** Null until the application is approved and the club exists. */
+  club_id: string | null;
+  invite_state: OnboardingInviteState;
+}
+
+/** `GET /v1/admin/onboarding-applications/:id` — the list row plus the payload. */
+export interface OnboardingApplicationDetail extends OnboardingApplicationListItem {
+  /** The submitted application blocks, stored as JSON by the backend. */
+  club: Record<string, unknown>;
+  venue: Record<string, unknown>;
+  qr: Record<string, unknown>;
+  email: string | null;
+  reject_reason: string | null;
+  reviewed_by: string | null;
+  source_ip: string | null;
+}
+
+export interface OnboardingApplicationListResponse {
+  items: OnboardingApplicationListItem[];
+  /** Keyset cursor; null on the last page. */
+  next_cursor: string | null;
+}
+
+export interface OnboardingApplicationFilters {
+  /**
+   * `all` merges the three statuses client-side: the endpoint filters by
+   * exactly one status at a time, and the queue still needs the full picture.
+   */
+  status?: OnboardingApplicationStatus | 'all';
+  limit?: number;
+  cursor?: string;
+}
+
+/**
+ * Invite answer of approve and of the reissue call.
+ *
+ * Every field is read defensively: a backend that predates the invite flow
+ * answers without `invite_url`, and the screen must degrade to "no link"
+ * instead of crashing on `undefined`.
+ */
+export interface OnboardingInvite {
+  application_id: string | null;
+  club_id: string | null;
+  status: string | null;
+  email: string | null;
+  invite_url: string | null;
+  invite_expires_at: string | null;
+  mail_queued: boolean;
+  /** Returned by approve only; kept for the operator's own QR access. */
+  qr_master_token: string | null;
+}
+
+export interface OnboardingApprovalInput {
+  /** Defaults to the application e-mail on the backend when omitted. */
+  email?: string;
+  /** Optional slug override; the backend derives one from the club name. */
+  slug?: string;
+}
+
+export const ONBOARDING_STATUSES = [
+  'pending_moderation',
+  'approved',
+  'rejected',
+] as const satisfies ReadonlyArray<OnboardingApplicationStatus>;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function mapInviteState(value: unknown): OnboardingInviteState {
+  return value === 'pending' || value === 'accepted' || value === 'expired' ? value : 'none';
+}
+
+function mapApplicationRow(row: Record<string, unknown>): OnboardingApplicationListItem {
+  const reviewedAt = optionalString(row.reviewed_at);
+  return {
+    id: String(row.id ?? ''),
+    club_name: String(row.club_name ?? ''),
+    city: String(row.city ?? ''),
+    contact: String(row.contact ?? ''),
+    price_minor: typeof row.price_minor === 'number' ? row.price_minor : null,
+    status:
+      row.status === 'approved' || row.status === 'rejected' ? row.status : 'pending_moderation',
+    created_at: String(row.created_at ?? ''),
+    reviewed_at: reviewedAt,
+    club_id: optionalString(row.club_id),
+    invite_state: mapInviteState(row.invite_state),
+  };
+}
+
+function mapApplicationDetail(row: Record<string, unknown>): OnboardingApplicationDetail {
+  return {
+    ...mapApplicationRow(row),
+    club: asRecord(row.club),
+    venue: asRecord(row.venue),
+    qr: asRecord(row.qr),
+    email: optionalString(row.email),
+    reject_reason: optionalString(row.reject_reason),
+    reviewed_by: optionalString(row.reviewed_by),
+    source_ip: optionalString(row.source_ip),
+  };
+}
+
+function mapInvite(row: Record<string, unknown>): OnboardingInvite {
+  return {
+    application_id: optionalString(row.application_id),
+    club_id: optionalString(row.club_id),
+    status: optionalString(row.status),
+    email: optionalString(row.email),
+    invite_url: optionalString(row.invite_url),
+    invite_expires_at: optionalString(row.invite_expires_at),
+    mail_queued: row.mail_queued === true,
+    qr_master_token: optionalString(row.qr_master_token),
+  };
+}
+
+async function fetchOnboardingApplicationPage(filters: {
+  status: OnboardingApplicationStatus;
+  limit?: number;
+  cursor?: string;
+}): Promise<OnboardingApplicationListResponse> {
+  const params = new URLSearchParams();
+  params.set('status', filters.status);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.cursor) params.set('cursor', filters.cursor);
+  const answer = await request<{ items?: Array<Record<string, unknown>>; next_cursor?: string | null }>(
+    `/admin/onboarding-applications?${params.toString()}`,
+  );
+  return {
+    items: (answer.items ?? []).map(mapApplicationRow),
+    next_cursor: answer.next_cursor ?? null,
+  };
+}
+
+/** GET /v1/admin/onboarding-applications — the moderation queue. */
+export async function listOnboardingApplications(
+  filters: OnboardingApplicationFilters = {},
+): Promise<OnboardingApplicationListResponse> {
+  const status = filters.status ?? 'pending_moderation';
+  if (status !== 'all') {
+    return fetchOnboardingApplicationPage({ status, limit: filters.limit, cursor: filters.cursor });
+  }
+  const pages = await Promise.all(
+    ONBOARDING_STATUSES.map((value) =>
+      fetchOnboardingApplicationPage({ status: value, limit: filters.limit }),
+    ),
+  );
+  const items = pages
+    .flatMap((page) => page.items)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
+  // The merged view has no single keyset cursor; the queue is small and the
+  // per-status pages are capped by `limit`.
+  return { items, next_cursor: null };
+}
+
+/** GET /v1/admin/onboarding-applications/:id — the full submitted application. */
+export function getOnboardingApplication(id: string): Promise<OnboardingApplicationDetail> {
+  return request<Record<string, unknown>>(
+    `/admin/onboarding-applications/${encodeURIComponent(id)}`,
+  ).then(mapApplicationDetail);
+}
+
+/**
+ * POST /v1/admin/onboarding-applications/:id/approve — creates the club and a
+ * one-time invite link. Never sends a password: the owner sets it on activation.
+ */
+export function approveOnboardingApplication(
+  id: string,
+  input: OnboardingApprovalInput = {},
+): Promise<OnboardingInvite> {
+  const body: Record<string, unknown> = {};
+  const email = input.email?.trim();
+  const slug = input.slug?.trim();
+  if (email) body.email = email;
+  if (slug) body.slug = slug;
+  return request<Record<string, unknown>>(
+    `/admin/onboarding-applications/${encodeURIComponent(id)}/approve`,
+    { method: 'POST', body },
+  ).then(mapInvite);
+}
+
+/** POST /v1/admin/onboarding-applications/:id/reject — reason 1..500 chars. */
+export function rejectOnboardingApplication(
+  id: string,
+  reason: string,
+): Promise<{ status: string | null }> {
+  return request<Record<string, unknown>>(
+    `/admin/onboarding-applications/${encodeURIComponent(id)}/reject`,
+    { method: 'POST', body: { reason: reason.trim() } },
+  ).then((answer) => ({ status: optionalString(answer.status) }));
+}
+
+/** POST /v1/admin/onboarding-applications/:id/invite — new token and TTL. */
+export function reissueOnboardingInvite(id: string): Promise<OnboardingInvite> {
+  return request<Record<string, unknown>>(
+    `/admin/onboarding-applications/${encodeURIComponent(id)}/invite`,
+    { method: 'POST' },
+  ).then(mapInvite);
 }
 
 // ---------------------------------------------------------------------------

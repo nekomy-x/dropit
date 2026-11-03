@@ -229,6 +229,11 @@
 }
 
 @media (max-width: 640px) {
+  .qr-frame,
+  .qr-side .club-panel { padding: var(--pad-panel-mobile); }
+
+  .qr-page .qr-mode { width: 100%; }
+
   .qr-choice {
     min-height: var(--hit-mobile);
   }

@@ -849,6 +849,11 @@ fn parse_event_empty_to_array_is_none() {
 /// Полный набор переменных шаблона.
 fn vars(key: TemplateKey) -> serde_json::Value {
     match key {
+        TemplateKey::ClubInvite => serde_json::json!({
+            "club_name": "Клуб 12",
+            "invite_url": "https://app.dropit.club/club/invite/abc",
+            "expires_at": "5 ноября, 23:59",
+        }),
         TemplateKey::DjInvite => serde_json::json!({
             "club_name": "Клуб 12",
             "dj_name": "Аня",
@@ -873,6 +878,7 @@ fn vars(key: TemplateKey) -> serde_json::Value {
 #[test]
 fn template_key_roundtrips() {
     for key in [
+        TemplateKey::ClubInvite,
         TemplateKey::DjInvite,
         TemplateKey::GuestVerify,
         TemplateKey::PayoutPaid,
@@ -881,6 +887,7 @@ fn template_key_roundtrips() {
         assert_eq!(TemplateKey::from_str(key.as_str()), Some(key));
     }
     assert_eq!(TemplateKey::from_str("unknown"), None);
+    assert_eq!(TemplateKey::ClubInvite.as_str(), "club_invite");
     assert_eq!(TemplateKey::DjInvite.as_str(), "dj_invite");
     assert_eq!(TemplateKey::GuestVerify.as_str(), "guest_verify");
     assert_eq!(TemplateKey::PayoutPaid.as_str(), "payout_paid");
@@ -889,6 +896,9 @@ fn template_key_roundtrips() {
 
 #[test]
 fn template_subjects_match_contract() {
+    let club_invite =
+        render(TemplateKey::ClubInvite, &vars(TemplateKey::ClubInvite)).expect("render");
+    assert_eq!(club_invite.subject, "Приглашение в Клуб 12");
     let invite = render(TemplateKey::DjInvite, &vars(TemplateKey::DjInvite)).expect("render");
     assert_eq!(invite.subject, "Приглашение в Клуб 12");
     assert_eq!(
@@ -950,6 +960,22 @@ fn template_escapes_html_but_not_text() {
 }
 
 #[test]
+fn club_invite_renders_activation_link_in_both_versions() {
+    let rendered = render(TemplateKey::ClubInvite, &vars(TemplateKey::ClubInvite)).expect("render");
+    for version in [&rendered.html, &rendered.text] {
+        assert!(
+            version.contains("https://app.dropit.club/club/invite/abc"),
+            "нет ссылки активации: {version}"
+        );
+        assert!(version.contains("Клуб 12"), "нет названия клуба: {version}");
+        assert!(version.contains("5 ноября, 23:59"), "нет срока: {version}");
+        assert!(!version.contains("{{"), "остался плейсхолдер");
+    }
+    // Письмо прямо говорит, что пароль выбирает владелец, а не платформа.
+    assert!(rendered.text.contains("его выбирает владелец"));
+}
+
+#[test]
 fn template_missing_var_is_config_error() {
     let mut v = vars(TemplateKey::GuestVerify);
     v.as_object_mut().unwrap().remove("code");
@@ -998,6 +1024,7 @@ fn escape_html_escapes_five_characters() {
 #[test]
 fn every_template_renders_full_document() {
     for key in [
+        TemplateKey::ClubInvite,
         TemplateKey::DjInvite,
         TemplateKey::GuestVerify,
         TemplateKey::PayoutPaid,

@@ -1,0 +1,130 @@
+/* Onboarding queue — page-local layout only.
+ *
+ * Everything visual (card, table, chips, fields, buttons, drawer) comes from
+ * the shared panel kit; this file only places the few groups the kit has no
+ * class for: the queue toolbar, the decision forms and the invite-link block.
+ * Tokens only — no colour literal, no radius outside the four-step scale.
+ */
+
+.onboarding-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.onboarding-toolbar-field {
+  flex: 0 1 220px;
+  min-width: 160px;
+}
+
+.onboarding-muted {
+  color: var(--c-text-muted);
+}
+
+/* Drawer head: the two state chips under the club name. */
+.onboarding-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+/* One titled group in the drawer. Separated by space, not by a box: the drawer
+ * is already a surface, and a second frame inside it would be a nested card. */
+.onboarding-block {
+  margin-top: 20px;
+}
+
+.onboarding-block:first-child {
+  margin-top: 0;
+}
+
+.onboarding-block-title {
+  margin: 0 0 4px;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.admin-meta.onboarding-meta {
+  margin-top: 6px;
+}
+
+.onboarding-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+/* The invite link is the one value an operator copies out of this screen. */
+.onboarding-link {
+  display: block;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--r-tile);
+  background: var(--c-inset);
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.onboarding-meta-line {
+  margin: 6px 0 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.onboarding-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  overflow-wrap: anywhere;
+}
+
+.onboarding-form + .onboarding-form {
+  margin-top: 18px;
+}
+
+.onboarding-form-title {
+  margin: 0 0 4px;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+/* Two decision fields side by side when the drawer is wide enough. */
+.onboarding-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.onboarding-actions > .btn {
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .onboarding-toolbar-field { flex: 1 1 100%; min-width: 0; }
+  .onboarding-fields { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-actions > .btn { flex: 1 1 auto; justify-content: center; }
+}

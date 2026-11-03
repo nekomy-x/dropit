@@ -26,8 +26,10 @@ nginx + Postgres 18, без Docker; бинарники — статически�
 
 Открытая регистрация «в один клик» (клуб/DJ, без подтверждения e-mail)
 включается `DROPIT_OPEN_SIGNUP=1`; контракт — `docs/signup-contract.md`.
-Панели: `/` и `/login` (клуб), `/register` (регистрация), `/dj` (консоль DJ),
-`/admin/` (админка), `/dj-mock/` (статичный прототип для дизайн-ревью).
+Панели: `/` (хаб «гость или клуб»), `/download` (приложение гостя),
+`/connect` (клубный лендинг), `/login` (вход клуба), `/register` (регистрация),
+`/dj` (консоль DJ), `/admin/` (админка), `/dj-mock/` (статичный прототип для
+дизайн-ревью), `/status/` (публичный статус сервисов).
 
 ---
 
@@ -105,6 +107,15 @@ cargo fmt --all -- --check
 Подробнее: `IMPLEMENTATION_STATUS.md` (раздел «Переменные окружения» и
 «Внешние сервисы и деградация»), `docs/BACKEND_COMPLETION_PLAN.md`,
 `docs/openapi.yaml`.
+
+### Developer API v1 (ADR-010)
+
+Публичный API клубов: `/v1/developer/**`, ключ со скоупами (`dit_live_…`), свой
+контракт и лимиты. Гайды (EN) — [`docs/api/README.md`](docs/api/README.md),
+скоупы и решение — [`docs/adr/ADR-010-developer-api-v1.md`](docs/adr/ADR-010-developer-api-v1.md),
+контракт — `docs/api/openapi-developer.yaml` (JSON: `/v1/developer/openapi.json`).
+Доки компилируются в бинарник: `node scripts/build-api-docs.mjs`, гейт —
+`node scripts/api-docs-check.mjs`.
 
 ---
 

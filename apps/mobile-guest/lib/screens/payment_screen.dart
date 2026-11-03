@@ -15,22 +15,27 @@ import '../widgets/ui.dart';
 /// Stripe PaymentSheet owns card and wallet selection. The profile entry
 /// explains where payment methods are managed without collecting card data.
 void showPaymentMethodsSheet(BuildContext context) {
+  final testPayment = AppState.of(context).session?.testPayments ?? false;
   showModalBottomSheet(
     context: context,
     backgroundColor: DropTokens.sheet,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
-    builder: (context) => Padding(
+    builder: (context) => DropSheet(
+        child: Padding(
       padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Payment methods', style: DropType.sheetTitle),
+          Text(testPayment ? 'Test payment' : 'Payment methods',
+              style: DropType.sheetTitle),
           const SizedBox(height: 12),
-          const Text(
-            'Choose a card or supported wallet in Stripe checkout when you send a request.',
+          Text(
+            testPayment
+                ? 'Test payment is enabled for this room. No card is needed and no money is charged. Your request is sent to the DJ as usual.'
+                : 'Choose a card or supported wallet in Stripe checkout when you send a request.',
             style: DropType.bodySm,
           ),
           const SizedBox(height: 24),
@@ -40,7 +45,7 @@ void showPaymentMethodsSheet(BuildContext context) {
           ),
         ],
       ),
-    ),
+    )),
   );
 }
 
@@ -64,6 +69,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   bool _paying = false;
 
   Future<void> _pay() async {
+    if (_paying) return;
     final state = AppState.of(context);
     final track = state.selectedTrack;
     if (track == null) return;
@@ -85,6 +91,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
   Widget build(BuildContext context) {
     final state = AppState.of(context);
     final track = state.selectedTrack ?? DemoData.trackMove;
+    final demo = !state.backendAvailable;
+    final testPayment = !demo && widget.session.testPayments;
     final price = widget.session.priceLabel == '—'
         ? track.priceLabel
         : widget.session.priceLabel;
@@ -165,7 +173,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   const SizedBox(height: 28),
 
                   // Stripe owns payment-method selection and card details.
-                  const SectionLabel('SECURE CHECKOUT'),
+                  SectionLabel(demo
+                      ? 'DEMO REQUEST'
+                      : testPayment
+                          ? 'TEST PAYMENT'
+                          : 'SECURE CHECKOUT'),
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(14),
@@ -174,14 +186,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       borderRadius: BorderRadius.circular(DropTokens.rLg),
                       border: Border.all(color: DropTokens.border),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
-                        Icon(Icons.lock_outline,
+                        const Icon(Icons.lock_outline,
                             size: 20, color: DropTokens.accent),
-                        SizedBox(width: 12),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Choose a card or supported wallet in the secure Stripe checkout.',
+                            demo
+                                ? 'You are trying the demo. This request stays on this device and no payment will be taken.'
+                                : testPayment
+                                    ? 'Test payment. No money is charged and no card is needed. Your request is sent to the DJ as usual.'
+                                    : 'Choose a card or supported wallet in the secure Stripe checkout.',
                             style: DropType.bodySm,
                           ),
                         ),
@@ -201,16 +217,24 @@ class _PaymentScreenState extends State<PaymentScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
               child: PrimaryButton(
-                label: price,
+                label: demo
+                    ? 'Send demo request'
+                    : testPayment
+                        ? 'Test pay $price'
+                        : price,
                 loading: _paying,
-                onPressed: _paying ? null : _pay,
+                onPressed: _paying || state.selectedTrack == null ? null : _pay,
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 20),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20),
               child: Center(
                 child: Text(
-                  'Secure payment · No hidden fees',
+                  demo
+                      ? 'Demo mode · No payment will be taken'
+                      : testPayment
+                          ? 'Test payment · No money charged'
+                          : 'Secure payment · No hidden fees',
                   style: DropType.caption,
                 ),
               ),

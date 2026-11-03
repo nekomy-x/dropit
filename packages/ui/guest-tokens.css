@@ -1,0 +1,5 @@
+/* Guest ordering uses the canonical DROP IT palette from tokens.css.
+   Keep only this compatibility alias; never fork the brand accent here. */
+.guest-checkout {
+  --c-on-accent: var(--c-ink-on-accent);
+}

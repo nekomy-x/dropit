@@ -48,6 +48,14 @@ const FILES = [
   ['packages/ui/account.tsx', 'apps/web-admin/src/account.tsx'],
   ['packages/ui/messages.ts', 'apps/web-club/src/shell-messages.ts'],
   ['packages/ui/messages.ts', 'apps/web-admin/src/shell-messages.ts'],
+  // The brand lockup: the mark and the bar-cut wordmark. It tops every sign-in
+  // card, so both panels must draw it from one component and one stylesheet —
+  // the admin panel used to carry its own tile-and-text version of the same
+  // name, which is exactly what this file exists to prevent.
+  ['packages/ui/BrandLogo.tsx', 'apps/web-club/src/components/BrandLogo.tsx'],
+  ['packages/ui/BrandLogo.tsx', 'apps/web-admin/src/components/BrandLogo.tsx'],
+  ['packages/ui/brand-logo.css', 'apps/web-club/src/styles/brand-logo.css'],
+  ['packages/ui/brand-logo.css', 'apps/web-admin/src/styles/brand-logo.css'],
   // Auth surfaces (two skins). Kept in its own file so a change to the
   // login/registration layout never touches panel.css.
   ['packages/ui/auth.css', 'apps/web-club/src/styles/auth.css'],

@@ -19,7 +19,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_infra_db::{IdentityError, IdentityRepo};
 use serde::{Deserialize, Serialize};
@@ -119,10 +119,25 @@ pub fn router(env: ApiEnv) -> Router {
             .merge(crate::catalog_routes::guest_routes())
     });
 
+    // Developer API v1 (ADR-010): отдельная поверхность с API-ключами,
+    // своим контрактом (`docs/api/openapi-developer.yaml`) и лимитами.
+    // Панельное управление ключами и документацией остаётся JWT-роутами.
+    let developer = crate::developer_api::developer_router(env.clone());
+
     public
         .merge(dj)
         .merge(club)
         .merge(admin)
+        .merge(crate::api_key_routes::api_key_routes())
+        .merge(crate::developer_docs::panel_router())
+        .merge(developer)
+        // Админский каталог пользователей и матрица прав (panel §7.1/§7.6):
+        // авторизация и проверка роли — внутри хендлеров (`AuthContext`).
+        .merge(crate::admin_users_routes::admin_users_router())
+        // Аналитика обзора, фича-флаги и выгрузки (panel §7.7/§7.10/§7.11).
+        .merge(crate::admin_insights_routes::admin_insights_router())
+        // Публичный онбординг клуба + админский разбор заявок.
+        .merge(crate::onboarding_routes::onboarding_router())
         .merge(crate::catalog_routes::public_catalog_routes())
         .merge(guest)
         .merge(crate::sessions_routes::sessions_router())
@@ -490,6 +505,21 @@ async fn issue_pair_components(
     subject_id: Uuid,
     repo: std::sync::Arc<IdentityRepo>,
 ) -> Result<(String, String, i64), Response> {
+    issue_pair_components_with_ttl(state, role, subject_id, repo, refresh_expiry()).await
+}
+
+/// То же, но с явным сроком жизни refresh-токена.
+///
+/// Нужен передаче сессии клубу (`POST /v1/club/dj-console/session`): пара
+/// выдаётся на смену, а не на 30 дней, поэтому срок задаёт вызывающий.
+/// Логин и регистрация продолжают идти через [`issue_pair_components`].
+pub(crate) async fn issue_pair_components_with_ttl(
+    state: &ApiEnv,
+    role: Role,
+    subject_id: Uuid,
+    repo: std::sync::Arc<IdentityRepo>,
+    refresh_expires_at: DateTime<Utc>,
+) -> Result<(String, String, i64), Response> {
     let family = Uuid::now_v7();
     let refresh_plain = generate_refresh_token();
     let refresh_hash = hash_refresh_token(&refresh_plain);
@@ -500,7 +530,7 @@ async fn issue_pair_components(
             role,
             subject_id,
             &refresh_hash,
-            refresh_expiry(),
+            refresh_expires_at,
         )
         .await
     {

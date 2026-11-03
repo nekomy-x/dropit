@@ -184,7 +184,7 @@ class _IdentityScreenState extends State<IdentityScreen> {
               style: DropType.caption.copyWith(height: 1.5),
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -207,9 +207,9 @@ class _DetailRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 52,
+      constraints: const BoxConstraints(minHeight: 52),
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       child: Row(
         children: [
           Icon(icon, size: 18, color: DropTokens.muted),

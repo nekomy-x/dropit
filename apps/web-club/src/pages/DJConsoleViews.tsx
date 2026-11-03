@@ -1,5 +1,9 @@
 /**
- * DJ console views — request queue, room control, session details.
+ * DJ console views — room control and session details.
+ *
+ * The request workspace lives in `components/dj-console/RequestsWorkspace.tsx`:
+ * it is the screen the DJ looks at all night, and it owns its own live strip,
+ * catalog preview and keyboard flow instead of borrowing the monitoring kit.
  *
  * Every surface here is built from the shared kit in `styles/panel.css`
  * (`panel-card`, `stat-card`, `data-table`, `list-row`, `chip`, `btn-*`,
@@ -19,14 +23,12 @@
  *   - room rules and pricing are marked local: the backend has no endpoint that
  *     stores them, and the UI never claims a save that did not happen.
  */
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Link } from 'react-router-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import type { ReactNode } from 'react';
 import Icon from '../components/Icon';
-import StatCard from '../components/ui/StatCard';
-import Select from '../components/ui/Select';
 import { useLocale, type Translate } from '../locale';
 import type {
   DjConnectionStatus,
@@ -36,7 +38,7 @@ import type {
   DjTelemetry,
 } from '../dj-console/types';
 
-export type DjConsoleTab = 'queue' | 'room' | 'session';
+export type DjConsoleTab = 'requests' | 'room' | 'session';
 
 type ViewProps = {
   dj: DjConsoleMockApi;
@@ -81,13 +83,6 @@ const STATUS_KEY: Record<DjRequestStatus, string> = {
   rejected: 'dj.statusRejected',
 };
 
-const STATUS_CHIP: Record<DjRequestStatus, string> = {
-  pending: 'chip chip-warn',
-  accepted: 'chip chip-accent',
-  played: 'chip chip-neutral',
-  rejected: 'chip chip-error',
-};
-
 const CONNECTION_KEY: Record<DjConnectionStatus, string> = {
   connected: 'dj.connectionConnected',
   degraded: 'dj.connectionDegraded',
@@ -121,8 +116,9 @@ const PLURAL_KEYS: Record<string, string> = {
   other: 'dj.requestsForTrackOther',
 };
 
-/** Russian needs one/few/many: `3 запроса`, not `3 запросов`. */
-function trackRequestLabel(count: number, locale: string, t: Translate): string {
+/** Russian needs one/few/many: `3 запроса`, not `3 запросов`.
+ *  Exported: the requests workspace labels the same counter on every row. */
+export function trackRequestLabel(count: number, locale: string, t: Translate): string {
   const category = new Intl.PluralRules(locale).select(count);
   return t(PLURAL_KEYS[category] ?? 'dj.requestsForTrackOther', { count });
 }
@@ -132,11 +128,6 @@ const METRIC_KEYS = {
   analytics: 'dj.metricAnalytics',
   payouts: 'dj.metricPayouts',
 } as const;
-
-function StatusChip({ status }: { status: DjRequestStatus }) {
-  const { t } = useLocale();
-  return <span className={STATUS_CHIP[status]}>{t(STATUS_KEY[status])}</span>;
-}
 
 function Section({ title, detail, tools, children, id }: { title: string; detail?: string; tools?: ReactNode; children: ReactNode; id: string }) {
   return (
@@ -154,240 +145,82 @@ function Section({ title, detail, tools, children, id }: { title: string; detail
 }
 
 /* ---------------------------------------------------------------------------
-   Queue
+   Monitoring cards
    ------------------------------------------------------------------------ */
-export function DjQueueView({ dj, onNotice, live = false, loading = false, sort = 'new', onSortChange }: ViewProps) {
+
+/**
+ * Tips waiting to be acknowledged.
+ *
+ * These two cards used to sit beside the queue, which meant the DJ's work list
+ * shared a screen with the numbers about the work. They live with the session
+ * now: the requests surface is for processing requests, and money that arrived
+ * is a session fact, not a decision to make about a row.
+ */
+export function DjTipsSection({ dj, onNotice, live = false }: ViewProps) {
   const { t, locale } = useLocale();
-  const unavailable = t('common.unavailable');
-  const formatMoney = (minor: number | null | undefined) => money(minor, locale, unavailable);
-  const formatClock = (iso: string | null | undefined) => clock(iso, locale, unavailable);
-  const currencySymbol = useMemo(
-    () => new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' })
-      .formatToParts(0)
-      .find((part) => part.type === 'currency')?.value ?? 'EUR',
-    [locale],
-  );
-  const [filter, setFilter] = useState<'all' | 'pending' | 'accepted'>('all');
-  const [query, setQuery] = useState('');
-  const [genre, setGenre] = useState('all');
-  const [minimumTip, setMinimumTip] = useState(0);
-  const genres = useMemo(() => ['all', ...Array.from(new Set(dj.queue.map((item) => item.style).filter(Boolean) as string[]))], [dj.queue]);
-  const normalizedQuery = query.trim().toLowerCase();
-  const queue = useMemo(
-    () => dj.queue.filter((item) => (filter === 'all' || item.status === filter)
-      && (live || ((genre === 'all' || item.style === genre) && (item.tipMinor ?? 0) >= minimumTip * 100))
-      && `${item.title} ${item.artist} ${live ? '' : `${item.guestName ?? ''} ${item.note ?? ''}`}`.toLowerCase().includes(normalizedQuery)),
-    [dj.queue, filter, genre, live, minimumTip, normalizedQuery],
-  );
+  const formatMoney = (minor: number | null | undefined) => money(minor, locale, t('common.unavailable'));
+  const formatClock = (iso: string | null | undefined) => clock(iso, locale, t('common.unavailable'));
   const receivedTips = dj.tips.filter((tip) => tip.status === 'received');
-  const [queueListRef] = useAutoAnimate({ duration: 180 });
-
-  const stats = dj.state.stats;
-  const kpis = (
-    <section className="stat-grid dj-stat-grid" aria-label={t('dj.kpiRow')}>
-      <StatCard
-        label={t('dj.requests')}
-        source={live ? 'live' : 'preview'}
-        icon="lucide:list-music"
-        value={String(stats.requests)}
-        meta={<span className="chip chip-accent">{live ? t('common.live') : t('common.demo')}</span>}
-        caption={live ? t('dj.requestsCaptionLive') : t('dj.requestsCaptionDemo')}
-      />
-      <StatCard
-        label={t('dj.accepted')}
-        source={live ? 'live' : 'preview'}
-        icon="lucide:circle-check"
-        value={String(stats.accepted)}
-        meta={<span className="chip chip-neutral">{stats.requests ? t('dj.percentOfRequests', { percent: Math.round((stats.accepted / stats.requests) * 100) }) : t('dj.noRequestsYet')}</span>}
-        caption={t('dj.acceptedCaption')}
-      />
-      <StatCard
-        label={t('dj.played')}
-        source={live ? 'live' : 'preview'}
-        icon="lucide:play"
-        value={String(stats.played)}
-        meta={<span className="chip chip-neutral">{t('dj.thisSession')}</span>}
-        caption={t('dj.playedCaption')}
-      />
-      <StatCard
-        label={t('dj.share')}
-        source={live ? 'live' : 'preview'}
-        icon="lucide:wallet-cards"
-        value={formatMoney(stats.earnedMinor)}
-        valueMuted={stats.earnedMinor === 0}
-        meta={<span className="chip chip-neutral">{t('dj.settled')}</span>}
-        caption={live ? t('dj.shareCaptionLive') : t('dj.shareCaptionDemo')}
-      />
-    </section>
-  );
-
+  // Live mode has no tips to show, and it is not "no tips waiting": the club
+  // API has no tips endpoint yet (docs/audit/web-club-gaps.md §6.6), so the
+  // card says so instead of claiming an empty, all-clear evening.
+  const tipsUnavailable = live;
   return (
-    <>
-      {kpis}
+    <Section
+      id="dj-tips-heading"
+      title={t('dj.tips')}
+      detail={tipsUnavailable ? t('common.unavailable') : receivedTips.length ? t('dj.tipsWaiting', { count: receivedTips.length }) : t('dj.allClear')}
+    >
+      {tipsUnavailable ? (
+        <div className="panel-empty">
+          <strong>{t('dj.tipsUnavailableTitle')}</strong>
+          <span>{t('dj.tipsUnavailableBody')}</span>
+        </div>
+      ) : receivedTips.length ? (
+        <div className="list">
+          {receivedTips.map((tip) => (
+            <button
+              type="button"
+              key={tip.id}
+              className="dj-tip-row"
+              onClick={() => { dj.acknowledgeTip(tip.id); onNotice(t('dj.noticeTipAcknowledged', { name: tip.guestName ?? t('dj.guest') })); }}
+            >
+              <span>
+                <span className="dj-tip-name">{tip.guestName ?? t('dj.guest')}</span>
+                <span className="dj-tip-hint">{t('dj.tipReceivedHint', { time: formatClock(tip.receivedAt) })}</span>
+              </span>
+              <span className="dj-tip-amount">{formatMoney(tip.amountMinor)}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="panel-empty"><strong>{t('dj.tipsEmptyTitle')}</strong><span>{t('dj.tipsEmptyBody')}</span></div>
+      )}
+    </Section>
+  );
+}
 
-      <div className="panel-section dj-console-split">
-        <Section
-          id="dj-queue-heading"
-          title={t('dj.guestRequests')}
-          detail={live
-            ? t('dj.activeInQueue', { count: queue.length })
-            : t('dj.visibleOfTotal', { visible: queue.length, total: dj.queue.length })}
-          tools={live ? (
-            <div className="seg" role="group" aria-label={t('dj.sortQueue')}>
-              <button type="button" className={`seg-item ${sort === 'new' ? 'is-active' : ''}`} aria-pressed={sort === 'new'} onClick={() => onSortChange?.('new')}>{t('dj.sortNewest')}</button>
-              <button type="button" className={`seg-item ${sort === 'hot' ? 'is-active' : ''}`} aria-pressed={sort === 'hot'} onClick={() => onSortChange?.('hot')}>{t('dj.sortMostWanted')}</button>
-            </div>
-          ) : undefined}
-        >
-          <div className="dj-queue-toolbar">
-            <label className="field">
-              <span className="field-label">{t('dj.findTrack')}</span>
-              <input
-                className="field-input"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('dj.searchQueuePlaceholder')}
-                aria-label={t('dj.searchQueue')}
-                name="queue-search"
-                autoComplete="off"
-              />
-            </label>
-            {live ? (
-              <Select
-                className="dj-queue-filter"
-                label={t('dj.queueStatus')}
-                value={filter}
-                onChange={(next) => setFilter(next as typeof filter)}
-                options={[
-                  { value: 'all', label: t('dj.allActive') },
-                  { value: 'pending', label: t('dj.awaitingDecision') },
-                  { value: 'accepted', label: t('dj.statusAccepted') },
-                ]}
-              />
-            ) : (
-              <>
-                <Select
-                  className="dj-queue-filter"
-                  label={t('dj.genre')}
-                  value={genre}
-                  onChange={setGenre}
-                  options={genres.map((value) => ({ value, label: value === 'all' ? t('dj.allGenres') : value }))}
-                />
-                <label className="field is-tip">
-                  <span className="field-label">{t('dj.tipFrom', { currency: currencySymbol })}</span>
-                  <input className="field-input" type="number" min="0" value={minimumTip} onChange={(event) => setMinimumTip(Number(event.target.value) || 0)} aria-label={t('dj.minimumTip')} />
-                </label>
-                <div className="seg" role="group" aria-label={t('dj.filterByStatus')}>
-                  {(['all', 'pending', 'accepted'] as const).map((value) => (
-                    <button type="button" key={value} className={`seg-item ${filter === value ? 'is-active' : ''}`} aria-pressed={filter === value} onClick={() => setFilter(value)}>
-                      {value === 'all' ? t('common.all') : value === 'pending' ? t('dj.filterAwaiting') : t('dj.filterQueued')}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          <ul className="dj-queue-list" ref={queueListRef}>
-            {queue.map((item) => (
-              <li key={item.id} className="dj-queue-row">
-                <span className="list-thumb" aria-hidden="true">{item.title.slice(0, 1).toUpperCase()}</span>
-                <div className="dj-queue-main">
-                  <span className="dj-queue-titleline">
-                    <span className="list-title">{item.title}</span>
-                    {item.vip ? <span className="chip chip-accent">{t('dj.vip')}</span> : null}
-                    <StatusChip status={item.status} />
-                  </span>
-                  <span className="list-sub">{item.artist} · {item.style ?? t('dj.openFormat')}{live ? '' : ` · ${item.guestName ?? t('dj.guest')}`}</span>
-                  <span className="dj-queue-meta">
-                    <span>{trackRequestLabel(item.sameTrackCount, locale, t)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{formatClock(item.createdAt)}</span>
-                    {item.priceMinor !== undefined || item.djShareMinor > 0 ? (
-                      <>
-                        <span aria-hidden="true">·</span>
-                        <span className="is-num">{formatMoney(item.priceMinor ?? item.djShareMinor)}</span>
-                      </>
-                    ) : null}
-                  </span>
-                </div>
-                <div className="dj-queue-actions">
-                  {item.status === 'pending' ? (
-                    <>
-                      {live ? null : (
-                        <button type="button" className="btn btn-quiet btn-sm" onClick={() => { dj.pinRequest(item.id); onNotice(t('dj.noticePinned', { title: item.title })); }}>
-                          <Icon name="lucide:trending-up" size={14} />{t('dj.pin')}
-                        </button>
-                      )}
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => { dj.action(item.id, 'reject'); onNotice(t('dj.noticeDeclined')); }}>{t('dj.decline')}</button>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => { dj.action(item.id, 'accept'); onNotice(t('dj.noticeAccepted')); }}>{t('dj.accept')}</button>
-                    </>
-                  ) : (
-                    <button type="button" className="btn btn-primary btn-sm" onClick={() => { dj.action(item.id, 'played'); onNotice(t('dj.noticePlayed')); }}>
-                      <Icon name="lucide:play" size={14} />{t('dj.markPlayed')}
-                    </button>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          {queue.length === 0 && !loading ? (
-            <div className="panel-empty">
-              <strong>{t('dj.emptyFilterTitle')}</strong>
-              <span>{dj.queue.length === 0 ? t('dj.emptyQueueBody') : t('dj.emptyFilterBody')}</span>
-            </div>
-          ) : null}
-          {loading ? <div className="panel-empty"><strong>{t('dj.loadingQueue')}</strong><span>{t('dj.loadingQueueBody')}</span></div> : null}
-        </Section>
-
-        <div className="dj-side-stack">
-          <Section
-            id="dj-tips-heading"
-            title={t('dj.tips')}
-            detail={receivedTips.length ? t('dj.tipsWaiting', { count: receivedTips.length }) : t('dj.allClear')}
-          >
-            {receivedTips.length ? (
-              <div className="list">
-                {receivedTips.map((tip) => (
-                  <button
-                    type="button"
-                    key={tip.id}
-                    className="dj-tip-row"
-                    onClick={() => { dj.acknowledgeTip(tip.id); onNotice(t('dj.noticeTipAcknowledged', { name: tip.guestName ?? t('dj.guest') })); }}
-                  >
-                    <span>
-                      <span className="dj-tip-name">{tip.guestName ?? t('dj.guest')}</span>
-                      <span className="dj-tip-hint">{t('dj.tipReceivedHint', { time: formatClock(tip.receivedAt) })}</span>
-                    </span>
-                    <span className="dj-tip-amount">{formatMoney(tip.amountMinor)}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="panel-empty"><strong>{t('dj.tipsEmptyTitle')}</strong><span>{t('dj.tipsEmptyBody')}</span></div>
-            )}
-          </Section>
-
-          <Section id="dj-queue-health-heading" title={t('dj.queueLoad')} detail={t('dj.queueLoadDetail')}>
-            <div className="dj-bar-row">
-              <div className="bar-row-head">
-                <span className="bar-row-label">{t('dj.requestsReady')}</span>
-                <span className="bar-row-value">{dj.queue.length}</span>
-              </div>
-              <div className="bar-track">
-                <div className="bar-fill" style={{ width: `${Math.min(100, dj.queue.length * 14)}%` }} />
-              </div>
-            </div>
-            <dl className="dj-kv">
-              <div className="dj-kv-row"><dt>{t('dj.awaitingDecision')}</dt><dd>{dj.queue.filter((item) => item.status === 'pending').length}</dd></div>
-              <div className="dj-kv-row"><dt>{t('dj.connection')}</dt><dd>{live ? t(CONNECTION_KEY[dj.telemetry.connection]) : t('common.demo')}</dd></div>
-              <div className="dj-kv-row"><dt>{t('dj.lastSync')}</dt><dd>{live ? formatClock(dj.telemetry.lastSyncedAt) : t('common.unavailable')}</dd></div>
-            </dl>
-          </Section>
+/** Queue load and connection facts — the "why does the list look like this" card. */
+export function DjQueueHealthSection({ dj, live = false }: { dj: DjConsoleMockApi; live?: boolean }) {
+  const { t, locale } = useLocale();
+  const formatClock = (iso: string | null | undefined) => clock(iso, locale, t('common.unavailable'));
+  return (
+    <Section id="dj-queue-health-heading" title={t('dj.queueLoad')} detail={t('dj.queueLoadDetail')}>
+      <div className="dj-bar-row">
+        <div className="bar-row-head">
+          <span className="bar-row-label">{t('dj.requestsReady')}</span>
+          <span className="bar-row-value">{dj.queue.length}</span>
+        </div>
+        <div className="bar-track">
+          <div className="bar-fill" style={{ width: `${Math.min(100, dj.queue.length * 14)}%` }} />
         </div>
       </div>
-    </>
+      <dl className="dj-kv">
+        <div className="dj-kv-row"><dt>{t('dj.awaitingDecision')}</dt><dd>{dj.queue.filter((item) => item.status === 'pending').length}</dd></div>
+        <div className="dj-kv-row"><dt>{t('dj.connection')}</dt><dd>{live ? t(CONNECTION_KEY[dj.telemetry.connection]) : t('common.demo')}</dd></div>
+        <div className="dj-kv-row"><dt>{t('dj.lastSync')}</dt><dd>{live ? formatClock(dj.telemetry.lastSyncedAt) : t('common.unavailable')}</dd></div>
+      </dl>
+    </Section>
   );
 }
 
@@ -559,14 +392,24 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
   const [metric, setMetric] = useState<'overview' | 'analytics' | 'payouts'>('overview');
   const [exported, setExported] = useState(false);
   const [historyListRef] = useAutoAnimate({ duration: 180 });
-  const receivedTips = dj.tips.filter((tip) => tip.status === 'received');
-  const totalTips = receivedTips.reduce((sum, tip) => sum + tip.amountMinor, 0);
-  const played = dj.history.filter((entry) => entry.status === 'played');
+  // Live reads: `liveData` is present only on the live adapter. A read that
+  // failed renders the word `unavailable` — never the last good value, never 0.
+  const liveData = dj.liveData;
+  const statsAvailable = !live || liveData?.stats === 'ok';
+  const historyStatus = live ? (liveData?.history ?? 'loading') : 'ready';
+  // The club API exposes no tips to the console (audit §6.6), so live mode has
+  // no tip figure at all; the demo fixtures still show theirs.
+  const tipsAvailable = !live;
+  const receivedTips = tipsAvailable ? dj.tips.filter((tip) => tip.status === 'received') : [];
+  const totalTips = tipsAvailable ? receivedTips.reduce((sum, tip) => sum + tip.amountMinor, 0) : undefined;
   const stats = dj.state.stats;
   const session = dj.state.session;
+  const playedLabel = statsAvailable ? String(stats.played) : unavailable;
 
   const exportSession = () => {
-    const rows = [['track', 'artist', 'status', 'occurredAt'], ...dj.history.map((entry) => [entry.track.title, entry.track.artist, entry.status, entry.occurredAt])];
+    // Real rows from GET /v1/dj/history: the time is the server's play time,
+    // and a row without one leaves the cell empty instead of inventing a clock.
+    const rows = [['track', 'artist', 'status', 'playedAt'], ...dj.history.map((entry) => [entry.track.title, entry.track.artist, entry.status, entry.occurredAt])];
     const csv = rows.map((row) => row.map((value) => `"${value.replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
@@ -581,7 +424,7 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
   const copySummary = async () => {
     const summary = t('dj.summaryShare', {
       id: session?.id ?? t('dj.unassigned'),
-      played: stats.played,
+      played: statsAvailable ? stats.played : unavailable,
       tips: formatMoney(totalTips),
     });
     try {
@@ -593,6 +436,9 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
   };
 
   const acceptance = stats.requests ? Math.round((stats.accepted / stats.requests) * 100) : null;
+  // Export is a claim ("your shift, on disk"), so it is offered only when the
+  // log was actually read and there is at least one row in it.
+  const canExport = historyStatus === 'ready' && dj.history.length > 0;
 
   return (
     <>
@@ -606,7 +452,7 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => { void copySummary(); }}>
                 <Icon name="lucide:copy" size={14} />{t('dj.copy')}
               </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={exportSession}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={exportSession} disabled={!canExport}>
                 <Icon name="lucide:download" size={14} />{exported ? t('dj.exported') : t('dj.exportCsv')}
               </button>
             </>
@@ -629,18 +475,21 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
 
           {metric === 'overview' ? (
             <div className="stat-grid dj-session-stats">
-              <MiniStat label={t('dj.requestsReceived')} value={String(stats.requests)} />
-              <MiniStat label={t('dj.accepted')} value={String(stats.accepted)} />
-              <MiniStat label={t('dj.played')} value={String(played.length)} />
-              <MiniStat label={t('dj.tipsReceived')} value={formatMoney(totalTips)} />
+              <MiniStat label={t('dj.requestsReceived')} value={statsAvailable ? String(stats.requests) : unavailable} muted={!statsAvailable} />
+              <MiniStat label={t('dj.accepted')} value={statsAvailable ? String(stats.accepted) : unavailable} muted={!statsAvailable} />
+              {/* Played comes from the shift counters, not from the rows on this
+                  page: the log is paginated, so counting it would undercount
+                  every shift longer than one page. */}
+              <MiniStat label={t('dj.played')} value={playedLabel} muted={!statsAvailable} />
+              <MiniStat label={t('dj.tipsReceived')} value={formatMoney(totalTips)} muted={!tipsAvailable} />
             </div>
           ) : metric === 'analytics' ? (
             <>
               <div className="stat-grid dj-session-stats">
-                <MiniStat label={t('dj.acceptanceRate')} value={acceptance === null ? unavailable : `${acceptance}%`} muted={acceptance === null} />
+                <MiniStat label={t('dj.acceptanceRate')} value={acceptance === null || !statsAvailable ? unavailable : `${acceptance}%`} muted={acceptance === null || !statsAvailable} />
                 <MiniStat label={t('dj.requestVelocity')} value={dj.telemetry.requestsPerMinute ? t('dj.perMinute', { value: dj.telemetry.requestsPerMinute }) : unavailable} muted={!dj.telemetry.requestsPerMinute} />
                 <MiniStat label={t('dj.eventsSynced')} value={live ? String(dj.telemetry.eventsReceived) : unavailable} muted={!live} />
-                <MiniStat label={t('dj.playsPerRequest')} value={stats.requests ? ratio(stats.played / stats.requests, locale) : unavailable} muted={!stats.requests} />
+                <MiniStat label={t('dj.playsPerRequest')} value={stats.requests && statsAvailable ? ratio(stats.played / stats.requests, locale) : unavailable} muted={!stats.requests || !statsAvailable} />
               </div>
               {acceptance !== null ? (
                 <div className="dj-bar-row" style={{ marginTop: 16 }}>
@@ -652,12 +501,15 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
           ) : (
             <>
               <div className="stat-grid dj-session-stats">
-                <MiniStat label={t('dj.share')} value={formatMoney(stats.earnedMinor)} />
-                <MiniStat label={t('dj.tipsShort')} value={formatMoney(totalTips)} />
-                <MiniStat label={t('dj.sessionTotal')} value={formatMoney(stats.earnedMinor + totalTips)} />
+                {/* The DJ share is the shift's money (split rows of this
+                    session), not the DJ's lifetime total. */}
+                <MiniStat label={t('dj.share')} value={statsAvailable ? formatMoney(stats.earnedMinor) : unavailable} muted={!statsAvailable} />
+                <MiniStat label={t('dj.tipsShort')} value={formatMoney(totalTips)} muted={!tipsAvailable} />
+                {/* A total that silently drops tips is not a total. */}
+                <MiniStat label={t('dj.sessionTotal')} value={tipsAvailable && statsAvailable ? formatMoney(stats.earnedMinor + (totalTips ?? 0)) : unavailable} muted={!tipsAvailable || !statsAvailable} />
                 <MiniStat label={t('dj.payoutStatus')} value={t('dj.payoutPending')} />
               </div>
-              <p className="panel-card-note">{t('dj.payoutNote')}</p>
+              <p className="panel-card-note">{tipsAvailable ? t('dj.payoutNote') : `${t('dj.payoutNote')} ${t('dj.tipsUnavailableNote')}`}</p>
             </>
           )}
         </Section>
@@ -674,21 +526,40 @@ export function DjSessionDetailsView({ dj, onNotice, live = false }: ViewProps) 
         </Section>
       </div>
 
+      <div className="panel-section dj-console-split">
+        <DjTipsSection dj={dj} onNotice={onNotice} live={live} />
+        <DjQueueHealthSection dj={dj} live={live} />
+      </div>
+
       <div className="panel-section">
-        <Section id="dj-session-history-heading" title={t('dj.playedHistory')} detail={t('dj.loggedCount', { count: dj.history.length })}>
-          {dj.history.length ? (
+        <Section
+          id="dj-session-history-heading"
+          title={t('dj.playedHistory')}
+          detail={historyStatus === 'unavailable' ? unavailable : t('dj.loggedCount', { count: dj.history.length })}
+          tools={live && liveData?.hasMoreHistory ? (
+            <button type="button" className="btn btn-secondary btn-sm" onClick={liveData.loadMoreHistory} disabled={liveData.historyLoading}>
+              <Icon name="lucide:chevron-down" size={14} />{t('dj.loadMoreHistory')}
+            </button>
+          ) : undefined}
+        >
+          {historyStatus === 'unavailable' ? (
+            <div className="panel-empty">
+              <strong>{t('dj.historyUnavailableTitle')}</strong>
+              <span>{t('dj.historyUnavailableBody')}</span>
+            </div>
+          ) : dj.history.length ? (
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table data-table--stack">
                 <thead>
                   <tr><th scope="col">{t('dj.colTrack')}</th><th scope="col">{t('dj.colArtist')}</th><th scope="col">{t('dj.colTime')}</th><th scope="col" className="is-num">{t('dj.statusLabel')}</th></tr>
                 </thead>
                 <tbody ref={historyListRef}>
                   {dj.history.map((entry) => (
                     <tr key={entry.id}>
-                      <td className="is-strong">{entry.track.title}</td>
-                      <td className="is-muted">{entry.track.artist}</td>
-                      <td className="is-mono">{formatClock(entry.occurredAt)}</td>
-                      <td className="is-num">
+                      <td className="is-strong cell-primary">{entry.track.title}</td>
+                      <td className="is-muted" data-label={t('dj.colArtist')}>{entry.track.artist}</td>
+                      <td className="is-mono" data-label={t('dj.colTime')}>{formatClock(entry.occurredAt)}</td>
+                      <td className="is-num" data-label={t('dj.statusLabel')}>
                         <span className={`chip ${entry.status === 'played' ? 'chip-accent' : 'chip-error'}`}>
                           {t(STATUS_KEY[entry.status])}
                         </span>

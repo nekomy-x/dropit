@@ -61,8 +61,8 @@ class _HelpScreenState extends State<HelpScreen> {
                       size: 22, color: DropTokens.text),
                 ),
                 const SizedBox(width: 12),
-                const Text('Help & support', style: DropType.trackTitle),
-                const Spacer(),
+                const Expanded(
+                    child: Text('Help & support', style: DropType.trackTitle)),
                 const CityPill(),
               ],
             ),
@@ -215,7 +215,7 @@ class _HelpScreenState extends State<HelpScreen> {
           const Center(
             child: Text('DROP IT v1.4.2', style: DropType.caption),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -229,7 +229,7 @@ class _HelpScreenState extends State<HelpScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => const _ChatSheet(),
+      builder: (_) => const DropSheet(child: _ChatSheet()),
     );
   }
 }
@@ -322,10 +322,10 @@ class _ChatSheetState extends State<_ChatSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
+      padding: const EdgeInsets.only(
         left: 20,
         right: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+        bottom: 20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

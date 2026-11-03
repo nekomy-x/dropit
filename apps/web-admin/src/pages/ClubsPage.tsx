@@ -134,7 +134,7 @@ export default function ClubsPage() {
             </div>
           ) : (
             <div className="table-wrap">
-              <table className="data-table" style={{ minWidth: 720 }}>
+              <table className="data-table data-table--stack" style={{ minWidth: 720 }}>
                 <thead>
                   <tr>
                     <th scope="col">{t('clubs.colClub')}</th>
@@ -147,14 +147,17 @@ export default function ClubsPage() {
                 <tbody>
                   {data.items.map((club) => (
                     <tr key={club.id}>
-                      <td className="is-strong">
+                      <td data-label="" className="cell-primary">
                         <span style={{ display: 'block' }}>{club.name}</span>
                         <span className="is-mono" style={{ color: 'var(--c-text-muted-sm)' }}>{club.id.slice(0, 8)}</span>
                       </td>
-                      <td>{club.city || '—'}</td>
-                      <td><StatusBadge status={club.stripeOnboardingStatus} /></td>
-                      <td><StatusBadge status={club.status} /></td>
-                      <td>
+                      <td data-label={t('clubs.colCity')}>{club.city || '—'}</td>
+                      <td data-label={t('clubs.colStripe')}><StatusBadge status={club.stripeOnboardingStatus} /></td>
+                      <td data-label={t('clubs.colStatus')}><StatusBadge status={club.status} /></td>
+                      {/* `cell-actions` is the stacked-row contract: on a phone
+                          the cell becomes the row's button strip with no column
+                          label, and the buttons keep their 44px touch height. */}
+                      <td data-label="" className="cell-actions">
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                           {STATUS_ACTIONS.filter((a) => a.to !== club.status).map((action) => (
                             <button

@@ -61,6 +61,19 @@
   gap: var(--sp-2);
 }
 
+/* On a phone the head is a stack, not two columns: a 320px card leaves the copy
+   column ~130px wide beside its chip or button, and a sentence wraps to one word
+   per line. The action takes the row under the title, where it is still the
+   same control. (The page head has its own shared stacking rule.) */
+@media (max-width: 640px) {
+  .club-panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-2);
+  }
+  .club-panel-actions { width: 100%; flex-wrap: wrap; }
+}
+
 /* --- Tile ----------------------------------------------------------------- */
 .club-tile {
   min-width: 0;
@@ -620,7 +633,7 @@ button.club-list-row:hover { background: var(--c-raised); }
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 
-.club-button:hover:not(:disabled) { background: #1D212B; }
+.club-button:hover:not(:disabled) { background: var(--c-hover-strong); }
 .club-button:active:not(:disabled) { transform: scale(.99); }
 .club-button:disabled { cursor: not-allowed; opacity: .55; }
 

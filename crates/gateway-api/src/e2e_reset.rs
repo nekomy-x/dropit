@@ -323,7 +323,7 @@ async fn e2e_reset_rate_limit_after_five() {
     let repo = skip_without_db!();
     clean_reset_tokens(&repo).await;
     let env = app_env(Some(repo.clone()), None, None).await;
-    let _ = std::env::remove_var(REVEAL_ENV);
+    std::env::remove_var(REVEAL_ENV);
 
     let (email, _, _) = create_club(&env).await;
     for i in 0..5 {

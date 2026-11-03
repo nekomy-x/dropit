@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
-/// Guest app theme using the shared graphite surfaces and blue action accent.
+/// Guest app theme using the shared graphite surfaces and DROP IT green action accent.
 ///
 /// Здесь нет ни одного «магического» цвета: всё приходит из [DropTokens],
 /// а шрифты — Inter / Geist Mono, подключённые в `pubspec.yaml`.

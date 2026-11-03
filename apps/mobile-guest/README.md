@@ -51,15 +51,16 @@
 - `assets/fonts/` — Inter (400/500/600/700), Geist Mono, plus legacy display assets.
 - `assets/images/` — изображения макета (hero, фото заведений, обложки,
   карта, сцена сканера) — встроены, работают без сети.
-- `shaders/brand_wave_mint.frag` — фирменный знак «пиксельная волна» в синей палитре.
+- `shaders/brand_wave_mint.frag` — фирменный знак «пиксельная волна» в фирменной зелёной палитре DROP IT.
 
 ## Запуск и сборка
 
 ```bash
 cd apps/mobile-guest
 flutter pub get
-flutter test                 # 7 виджет-тестов (без сети)
+flutter test                 # экраны, адаптивность и сценарии без сети
 flutter run                  # эмулятор/устройство
+flutter test --update-goldens tool/capture_layouts.dart # снимки в output/layouts
 
 # APK для телефона:
 flutter build apk --release
@@ -110,7 +111,33 @@ printf 'sdk.dir=%s\nflutter.sdk=/Users/nekomy/flutter-sdk\nflutter.buildMode=rel
 - При закрытии PaymentSheet или сетевой ошибке после создания PaymentIntent
   backend не предоставляет отмену intent или выдачу исходного `client_secret`;
   может остаться pending request/payment, который требует серверного recovery.
-- Android настроен для Stripe redirect. В текущем репозитории нет iOS
-  `Info.plist`/`Podfile`, поэтому iOS URL scheme, Apple Pay merchant ID и
-  capabilities не проверены/не заданы.
+- Android и iOS используют URL scheme `dropit` для возврата из Stripe.
+  Нативный проект iOS находится в `ios/`: минимум iOS 15, CocoaPods,
+  keychain entitlement для secure storage. Перед запуском на устройстве
+  нужно выбрать свою signing team в Xcode. Apple Pay merchant ID и
+  capabilities пока не настроены; оплата картой использует PaymentSheet.
+  Нативная сборка iOS требует Xcode и установленный iOS Simulator.
 - Push-уведомления и WS-live статусы — прод-задача (каркас API готов).
+
+## Проверка адаптивности
+
+`flutter test` проверяет 16 экранов в режимах Android и iOS: 320×568,
+390×844, 430×932, 844×390, увеличенный текст (150%) и клавиатура.
+Проверяется первый экран и содержимое после прокрутки, отсутствие
+переполнений и пересечений нижней навигации с системной областью.
+Отдельные сценарии проверяют ручной ввод кода, шторки, поиск с запоздавшим
+ответом, показ пароля и демонстрационное оформление без списания.
+HTTP-тесты оформления проверяют повтор после сетевой ошибки, сохранение
+ключей идемпотентности и защиту от параллельных отправок. Незавершённый checkout
+сохраняется в памяти до успешного подтверждения; после перезапуска приложения
+для его восстановления всё ещё нужна поддержка backend.
+
+В Android Studio доступны общие конфигурации `Guest - All tests`,
+`Guest - Responsive UI` и `Guest - Interactions` из `.run/`.
+Результаты прогона и ограничения нативной проверки приведены в
+[отчёте Android Studio](../../docs/audit/mobile-guest-android-studio-2026-10-31.md).
+
+`flutter test --update-goldens tool/capture_layouts.dart` сохраняет 20
+снимков в `output/layouts/`. Это снимки Flutter-виджетов с заданными
+параметрами платформы: они не подтверждают нативную сборку, клавиатуру ОС,
+работу платёжного SDK или запуск на реальном телефоне.

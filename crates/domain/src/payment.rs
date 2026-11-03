@@ -149,6 +149,100 @@ pub enum SplitError {
     BadBasisPoints,
 }
 
+/// Ошибки распределения возврата. Отдельный тип, чтобы вызывающий слой
+/// отвечал `422`, а не `500`, на некорректную сумму/несходящийся сплит.
+#[derive(Debug, Error, PartialEq)]
+pub enum RefundError {
+    #[error("payment amount must be positive")]
+    NonPositiveTotal,
+    #[error("refund amount must be within 1..=total")]
+    RefundOutOfRange,
+    #[error("share amount is negative")]
+    NegativeShare,
+    #[error("shares do not sum to the payment amount")]
+    ShareSumMismatch,
+    #[error("refund allocation does not fit the caller's integers")]
+    Overflow,
+}
+
+/// Распределяет сумму возврата по долям пропорционально их размеру.
+///
+/// Входы — минорные единицы (`i64`), никаких float: возврат — это деньги,
+/// а `0.1 + 0.2` не должен решать, кому уйдёт цент.
+///
+/// Правила (инварианты возврата):
+///   * `0 < refund <= total`, иначе [`RefundError::RefundOutOfRange`];
+///   * `Σ shares == total` — разрез платежа, а не произвольные числа;
+///   * каждая доля возврата `floor(share * refund / total)` — пропорционально
+///     ровно, без перекоса в чью-то пользу;
+///   * остаток от округления (`refund − Σ floor`) раздаётся по одному центу
+///     долям в переданном порядке, пока у доли есть непокрытый остаток.
+///     Вызывающий передаёт доли в каноническом порядке `platform, club, dj`,
+///     поэтому платформа первой забирает дробный цент — так же, как при
+///     [`compute_split`], где остаток бипсис-деления уходит платформе;
+///   * ни одна доля не получает больше, чем по ней осталось вернуть, и
+///     `Σ результата == refund` — сумма возврата не теряется и не
+///     задваивается.
+///
+/// `shares` — именно **остатки** долей (`amount − reversed`), а не исходный
+/// разрез: при втором частичном возврате распределять нужно по тому, что
+/// ещё не возвращено, иначе доля может уйти в минус.
+pub fn allocate_refund(
+    total_minor: i64,
+    refund_minor: i64,
+    shares: &[i64],
+) -> Result<Vec<i64>, RefundError> {
+    if total_minor <= 0 {
+        return Err(RefundError::NonPositiveTotal);
+    }
+    if refund_minor <= 0 || refund_minor > total_minor {
+        return Err(RefundError::RefundOutOfRange);
+    }
+    if shares.iter().any(|share| *share < 0) {
+        return Err(RefundError::NegativeShare);
+    }
+    // i128: произведение долей не должно переполнить i64 даже на граничных
+    // суммах; дальше всё возвращается в i64.
+    let share_sum: i128 = shares.iter().map(|share| i128::from(*share)).sum();
+    if share_sum != i128::from(total_minor) {
+        return Err(RefundError::ShareSumMismatch);
+    }
+
+    let mut allocated = Vec::with_capacity(shares.len());
+    let mut distributed: i64 = 0;
+    for share in shares {
+        let part = (i128::from(*share) * i128::from(refund_minor) / i128::from(total_minor))
+            .try_into()
+            .map_err(|_| RefundError::Overflow)?;
+        // Σ floor ≤ refund, поэтому переполнения здесь нет.
+        distributed += part;
+        allocated.push(part);
+    }
+
+    let mut remainder = refund_minor - distributed;
+    while remainder > 0 {
+        let mut moved = false;
+        for (index, share) in shares.iter().enumerate() {
+            if remainder == 0 {
+                break;
+            }
+            // Доля не может вернуть больше, чем по ней осталось.
+            if allocated[index] < *share {
+                allocated[index] += 1;
+                remainder -= 1;
+                moved = true;
+            }
+        }
+        if !moved {
+            // Недостижимо: Σ shares == total ≥ refund, значит свободного
+            // остатка хватает. Если всё же случилось — не выдаём «почти
+            // распределённый» возврат молча.
+            return Err(RefundError::ShareSumMismatch);
+        }
+    }
+    Ok(allocated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,6 +326,77 @@ mod tests {
         // dj floor(5*5000/10000)=2, club 3. Σ=7 — копейка не теряется.
         let s = compute_split(7, 3000, 5000).unwrap();
         assert_eq!(s.platform_minor + s.dj_minor + s.club_minor, 7);
+    }
+
+    #[test]
+    fn refund_full_returns_every_share_whole() {
+        // 10 €: 300/350/350. Полный возврат — ровно исходные доли.
+        let alloc = allocate_refund(1000, 1000, &[300, 350, 350]).unwrap();
+        assert_eq!(alloc, vec![300, 350, 350]);
+        assert_eq!(alloc.iter().sum::<i64>(), 1000);
+    }
+
+    #[test]
+    fn refund_partial_is_proportional() {
+        // 300 из 10 € → 90/105/105, Σ == 300.
+        let alloc = allocate_refund(1000, 300, &[300, 350, 350]).unwrap();
+        assert_eq!(alloc, vec![90, 105, 105]);
+        assert_eq!(alloc.iter().sum::<i64>(), 300);
+    }
+
+    #[test]
+    fn refund_remainder_goes_to_canonical_order() {
+        // 1 цент из 10 €: floor везде 0, остаток отдаётся платформе первой.
+        let alloc = allocate_refund(1000, 1, &[300, 350, 350]).unwrap();
+        assert_eq!(alloc, vec![1, 0, 0]);
+        // Неровный разрез: 7 центов → 2/2/3, возврат 3 → [1,1,1].
+        let alloc = allocate_refund(7, 3, &[2, 2, 3]).unwrap();
+        assert_eq!(alloc, vec![1, 1, 1]);
+        assert_eq!(alloc.iter().sum::<i64>(), 3);
+    }
+
+    #[test]
+    fn refund_never_exceeds_left_share() {
+        // Остатки долей после первого возврата: 2/2/3 → возврат 4.
+        // Платформа не может получить больше своих 2.
+        let alloc = allocate_refund(7, 4, &[2, 2, 3]).unwrap();
+        assert_eq!(alloc, vec![2, 1, 1]);
+        assert_eq!(alloc.iter().sum::<i64>(), 4);
+        for (part, left) in alloc.iter().zip([2, 2, 3]) {
+            assert!(*part <= left, "refund share exceeds its own remainder");
+        }
+    }
+
+    #[test]
+    fn refund_zero_share_stays_zero() {
+        // DJ не участвует (dj_minor = 0, строки сплита нет): весь возврат
+        // делят платформа и клуб, Σ == 500.
+        let alloc = allocate_refund(1000, 500, &[300, 700, 0]).unwrap();
+        assert_eq!(alloc, vec![150, 350, 0]);
+    }
+
+    #[test]
+    fn refund_validates_inputs() {
+        assert_eq!(
+            allocate_refund(0, 0, &[]),
+            Err(RefundError::NonPositiveTotal)
+        );
+        assert_eq!(
+            allocate_refund(1000, 0, &[300, 350, 350]),
+            Err(RefundError::RefundOutOfRange)
+        );
+        assert_eq!(
+            allocate_refund(1000, 1001, &[300, 350, 350]),
+            Err(RefundError::RefundOutOfRange)
+        );
+        assert_eq!(
+            allocate_refund(1000, 100, &[300, 350]),
+            Err(RefundError::ShareSumMismatch)
+        );
+        assert_eq!(
+            allocate_refund(1000, 100, &[300, 800, -100]),
+            Err(RefundError::NegativeShare)
+        );
     }
 
     #[test]

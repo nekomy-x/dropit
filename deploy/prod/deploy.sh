@@ -89,8 +89,19 @@ if [ "$code" = 200 ]; then ok "api :8080/readyz -> 200"; else bad "api :8080/rea
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1/healthz 2>/dev/null); code=${code:-000}
 if [ "$code" = 200 ]; then ok "nginx /healthz -> 200"; else bad "nginx /healthz -> $code"; fi
 
+# The document the public /status/ page renders. Unlike /readyz (process-level),
+# this route reads the database, so it is the deploy check that reflects the
+# state a visitor actually sees.
+body=$(curl -s --max-time 5 http://127.0.0.1/v1/status/services 2>/dev/null || true)
+# Field order in the JSON is not guaranteed, so test the two keys independently.
+if printf '%s' "$body" | grep -q '"status"' && printf '%s' "$body" | grep -q '"services"'; then
+  ok "/v1/status/services -> status document"
+else
+  bad "/v1/status/services: no status document (API/DB?)"
+fi
+
 # 3. the three front-ends
-for path in / /admin/ /dj /dj/login /dj-mock/; do
+for path in / /admin/ /dj /dj/login /dj-mock/ /status/; do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1$path" 2>/dev/null); code=${code:-000}
   case $code in
     200) ok "nginx $path -> 200" ;;
@@ -158,6 +169,10 @@ preflight() {
     fi
   done
 
+  if [ ! -f "$dir/web/status/index.html" ]; then
+    dc_err "missing $dir/web/status/index.html (public status page)"
+    errs=$((errs + 1))
+  fi
   if [ ! -f "$dir/web/dj/index.html" ]; then
     dc_err "missing $dir/web/dj/index.html"
     errs=$((errs + 1))
@@ -257,6 +272,7 @@ install_config() {
   cp "$DC_PROD_DIR/systemd/dropit.env.example"   "$tmp/systemd/"
   cp "$DC_PROD_DIR/host/apply-config.sh"         "$tmp/host/"
   cp "$DC_PROD_DIR/host/migrate.sh"              "$tmp/host/"
+  cp "$DC_PROD_DIR/host/bootstrap-test-club.py"   "$tmp/host/"
   chmod 755 "$tmp/host/"*.sh
   dc_rsync "$host" /root/dropit-deploy/ -a --delete \
     --exclude 'backup/' --exclude 'state/' --exclude 'secrets.env' "$tmp/" >/dev/null
@@ -302,7 +318,7 @@ preflight "$BUILD_DIR"
 if [ "$DRY_RUN" = 1 ]; then
   dc_step "dry run"
   dc_info "would upload:  $BUILD_DIR/{dropit-api,dropit-workers} -> /srv/dropit/bin/"
-  dc_info "would upload:  $BUILD_DIR/web/{club,admin,dj} -> /srv/dropit/web/"
+  dc_info "would upload:  $BUILD_DIR/web/{club,admin,dj,status} -> /srv/dropit/web/"
   dc_info "would upload:  $BUILD_DIR/migrations/*.sql -> /srv/dropit/data/migrations/"
   dc_info "would install: nginx site + systemd units"
   if [ "$SKIP_MIGRATE" = 1 ]; then

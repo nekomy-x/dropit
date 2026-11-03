@@ -3,6 +3,7 @@
    edit the canonical files there and run `node scripts/sync-ui-tokens.mjs`. */
 @import './styles/club-tokens.css';
 @import './styles/panel.css';
+@import './styles/brand-logo.css';
 @import './styles/test-badge.css';
 @import './styles/status-bar.css';
 
@@ -71,39 +72,19 @@
      .btn-primary / .btn-secondary / .btn-quiet / .btn-outline / .field-input /
      .field-label / .card are defined there once for both panels. */
 
-  /* Role chooser on /register: a radio the label wraps, so the whole tile is
-     one keyboard- and pointer-target and focus stays visible. */
-  .role-option {
-    @apply flex cursor-pointer flex-col rounded-[12px] bg-[#171A22] px-3 py-2.5 transition-colors hover:bg-[#1D212B];
-  }
-
-  .role-option:focus-within {
-    outline: 2px solid var(--c-accent);
-    outline-offset: 2px;
-  }
-
-  .role-option-selected {
-    background: var(--c-accent-tint-strong);
-  }
-
-  .role-option-mark {
-    @apply block h-1.5 w-1.5 shrink-0 rounded-full border border-[#858E9C];
-  }
-
-  .role-option-mark-on {
-    @apply border-[#00FF87] bg-[#00FF87];
-  }
-
   .page-title {
-    @apply text-[20px] font-semibold tracking-tight text-[#F1F4F7];
+    @apply text-[20px] font-semibold tracking-tight;
+    color: var(--c-text);
   }
 
   .page-subtitle {
-    @apply mt-1 max-w-2xl text-[13px] leading-6 text-[#B0B8C3];
+    @apply mt-1 max-w-2xl text-[13px] leading-6;
+    color: var(--c-text-2);
   }
 
   .club-page-heading {
-    @apply font-sans text-[28px] font-semibold leading-[1.15] tracking-tight text-[#F1F4F7];
+    @apply font-sans text-[28px] font-semibold leading-[1.15] tracking-tight;
+    color: var(--c-text);
   }
 
   /* Page eyebrows are a breadcrumb, NOT an uppercase eyebrow: §4.6 allows one
@@ -111,60 +92,18 @@
      header (.club-context-label). Small text uses the 11px muted ramp value
      (7.3:1 on the canvas), not the darker 12px-only token. */
   .club-page-eyebrow {
-    @apply font-sans text-[11px] text-[#9AA3B0];
+    @apply font-sans text-[11px];
+    color: var(--c-text-muted-sm);
     letter-spacing: .01em;
   }
-
-  .brand-logo {
-    @apply inline-flex shrink-0 items-center gap-1.5;
-    color: var(--c-text);
-    line-height: 1;
-  }
-
-  /* The wordmark paints from tokens so it is legible in both themes. */
-  .brand-logo-letters { fill: var(--c-text); }
-  .brand-logo-stop-a { stop-color: var(--c-accent); }
-  .brand-logo-stop-b { stop-color: var(--c-accent-quiet); }
-
-  .brand-logo-word {
-    display: block;
-    width: 5.1rem;
-    height: auto;
-    overflow: visible;
-  }
-
-  /* The wordmark's letters are SVG <text> at 23 user units — a glyph size, not
-     UI type. A DOM font-size audit cannot tell the difference and would count a
-     seventh size on every screen, so the size is declared on the type step and
-     compensated with a transform: the mark stays pixel-identical while the
-     computed size sits inside the six-step scale (§4.6). The visible text and
-     the mask copy share x=0,y=22, so one origin serves both. */
-  .brand-logo-word text {
-    font-size: var(--fs-20);
-    /* 23/20 = 1.15. The SVG's own letter-spacing (-.8 user units) is scaled by
-       the same factor, so it is divided back out here to keep the tracking
-       identical to the original 23px glyph. */
-    letter-spacing: -.6957px;
-    transform: scale(1.15);
-    transform-origin: 0 22px;
-  }
-
-  .brand-logo-bar {
-    transform-box: fill-box;
-    transform-origin: center bottom;
-    animation: none;
-  }
-
-  .brand-logo-tiny .brand-logo-word { width: 3.1rem; }
-  .brand-logo-small .brand-logo-word { width: 4.5rem; }
-  .brand-logo-large .brand-logo-word { width: 6.25rem; }
 
   .app-shell {
     background: var(--c-canvas);
   }
 
   .panel-surface {
-    @apply rounded-[16px] bg-[#11131A];
+    @apply rounded-[16px];
+    background: var(--c-surface);
   }
 }
 
@@ -433,6 +372,18 @@
   }
 }
 
+/* A segmented control is one target, not one target per segment. The theme
+   toggle is a 3px track around 30×30 segments, so the track is already 36px
+   tall and the blanket rule above has nothing to add — applying it stretched
+   each segment from 30×30 to 30×36 and the group to 42px, which is the oval
+   pair that read wrong next to the square icon buttons. The segments keep
+   their own square size and the group keeps the target.
+   `.seg` needs no exemption here: it only appears in `.dj-app-shell` and the
+   admin app, neither of which carries this blanket rule. */
+.club-app-shell .theme-toggle button {
+  min-height: 0;
+}
+
 /* The rail's own controls get the same target in BOTH authenticated shells.
    The rules above are scoped to the club shell, so the DJ rail's workspace
    switcher and account button fell back to their content height while the
@@ -480,7 +431,13 @@
   }
 
   .connect-root {
-    @apply min-w-0 overflow-x-hidden bg-drop-bg font-sans text-drop-text antialiased;
+    /* `clip`, not `hidden`: an axis set to `hidden` turns this element into the
+       page's scroll container (the other axis computes to `auto`), so the sticky
+       header stuck to a box that never scrolls and rolled away with the page.
+       `clip` still trims the wide ticker and the hero bleed, and leaves
+       `position: sticky` attached to the viewport. */
+    @apply min-w-0 bg-drop-bg font-sans text-drop-text antialiased;
+    overflow-x: clip;
   }
 
   /* The public site is a fixed dark surface whatever the panel theme is, but the
@@ -561,12 +518,16 @@
   .connect-select-menu .field-select__option.is-selected { background: rgba(0, 255, 135, .12); color: #ECECEC; font-weight: 500; }
   .connect-select-menu .field-select__option-check { color: #00FF87; }
 
-  /* Language switcher in the Connect nav: a quiet 44px control, not a field. */
+  /* Language switcher in the Connect nav: a quiet 44px control, not a field.
+     It inherits the panel select's underline through `.connect-select`, which
+     in the header reads as a half-drawn input under the label — drop the line
+     in the nav only; the wizard fields keep it. */
   .connect-select-nav { flex: 0 0 auto; }
   .connect-select-nav .field-select__trigger {
     height: 44px;
     max-width: 108px;
     padding: 0 2px;
+    border: 0;
     border-radius: 0;
     background: transparent;
     color: #B4B4B4;
@@ -771,7 +732,13 @@
 }
 .connect-linear-main > header > div { max-width: none; padding: 0 20px; }
 .connect-linear-main > header .brand-logo { display: none; }
-.connect-linear-main > header > div:first-child > nav { display: flex; gap: 18px; }
+/* The inline link set is the DESKTOP menu only: `ConnectNav.tsx` shows it from
+   1280px (`min-[1280px]:flex`) and the burger replaces it everywhere below.
+   This rule used to say `display: flex` unconditionally, which out-ranked
+   Tailwind's `.hidden`: from 1024px the page painted six links AND the burger —
+   two menus side by side on a tablet. Only the gap belongs here; the state is
+   set by the two `@media` blocks below. */
+.connect-linear-main > header > div:first-child > nav { gap: 18px; }
 .connect-linear-main > header > div:first-child > nav > *:first-child { color: var(--sprint-mint); }
 .connect-linear-main > header > div:first-child > nav a,
 .connect-linear-main > header > div:first-child > nav button { font-size: 11px; }
@@ -779,6 +746,10 @@
 .connect-linear-main > header a[href="/login"] { min-height: 30px; }
 .connect-linear-main > header a.connect-nav-join { min-height: 30px; border-radius: var(--r-control); padding-inline: 12px; box-shadow: 0 0 15px rgba(0, 255, 135, .2); }
 .connect-linear-main > header a.connect-nav-signup { min-height: 30px; }
+/* The header sticks now, so every in-page target has to stop below it. `#panel`
+   already declares its own offset in panel-mock.css; the rest of the landing
+   sections only have ids, which is what the nav links to. */
+.connect-sprint-frame .connect-linear-main section[id] { scroll-margin-top: 72px; }
 .connect-linear-main .connect-hero { min-height: 648px; margin-top: -48px; background: var(--sprint-frame); }
 .connect-linear-main .connect-hero > div:first-of-type img { filter: saturate(.62) contrast(1.06) brightness(.7); }
 .connect-linear-main .connect-hero > div:first-of-type > div:first-of-type { background: linear-gradient(90deg, #09090bf2 0%, #09090bb8 48%, #09090b42 100%); }
@@ -1320,8 +1291,459 @@
 }
 
 @media (max-width: 767px) {
-  .connect-sprint-frame .sprint-hero { min-height: 580px; }
+  /* A 580px floor was measured against the desktop hero (770px, three stacked
+     proof columns). A phone hero is the photo, the headline, the copy and two
+     actions; the floor only added up to 190px of empty photo under the actions.
+     The hero keeps its photo bleed and takes its height from the content. */
+  .connect-sprint-frame .sprint-hero { min-height: 0; }
   .connect-sprint-frame .sprint-hero-content { padding-top: 95px; }
   .connect-sprint-frame .sprint-hero-device { top: 440px; right: -22%; opacity: .26; transform: perspective(1400px) rotateX(43deg) rotateZ(-10deg) scale(.62); }
 }
 
+
+/* ---------------------------------------------------------------------------
+   Connect landing — phone and tablet adaptation (≤1279px)
+   ----------------------------------------------------------------------------
+   The sprint layer above compresses the landing for a desktop viewport: 8–11px
+   labels, 34px actions and 52px of chrome. At 390px that reads as a shrunken
+   desktop page — the header loses its gaps, labels drop under the readable
+   floor and nothing on the page is comfortably tappable.
+
+   This block is the phone pass. It only changes sizes and rhythm:
+   - every label is at least 11px (the type floor in DESIGN.md);
+   - every control reachable by thumb is at least 44px tall (PANEL-DESIGN.md);
+   - section gutters 20px (16px under 360px) and a 44px vertical rhythm;
+   - desktop ≥1280px keeps the compact sprint scale unchanged.
+   Nothing here introduces a colour, a radius, a shadow or a new component —
+   the same tokens and classes paint both scales.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 1279px) {
+  /* --- page rhythm ------------------------------------------------------- */
+  .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div {
+    padding: 44px 20px;
+  }
+  .connect-sprint-frame .connect-linear-main section:not(.connect-hero) h2 {
+    font-size: clamp(24px, 6.4vw, 30px);
+    line-height: 1.14;
+  }
+  /* In-page anchors stop below the 60px phone header (see connect-nav.css). */
+  .connect-sprint-frame .connect-linear-main section[id] {
+    scroll-margin-top: 76px;
+  }
+
+  /* --- shared labels and actions ---------------------------------------- */
+  .connect-sprint-frame .connect-linear-main .connect-eyebrow,
+  .connect-sprint-frame .connect-linear-main .connect-mono-label {
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    line-height: 1.5;
+  }
+  .connect-sprint-frame .connect-linear-main .connect-section-note {
+    max-width: none;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .connect-sprint-frame .connect-linear-main .connect-btn-primary,
+  .connect-sprint-frame .connect-linear-main .connect-btn-ghost {
+    height: 44px;
+    min-height: 44px;
+    padding-inline: 16px;
+    font-size: 13px;
+  }
+  .connect-sprint-frame .connect-linear-main .connect-chip {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  /* --- hero ------------------------------------------------------------- */
+  .connect-sprint-frame .sprint-hero-content {
+    padding: 92px 20px 36px;
+  }
+  .connect-sprint-frame .sprint-hero-eyebrow {
+    margin-bottom: 14px;
+    font-size: 11px;
+    letter-spacing: .12em;
+    line-height: 1.5;
+  }
+  .connect-sprint-frame .sprint-hero h1 {
+    font-size: clamp(31px, 8.8vw, 40px);
+    line-height: 1.1;
+  }
+  .connect-sprint-frame .sprint-hero-copy {
+    max-width: none;
+    margin-top: 16px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .connect-sprint-frame .sprint-hero-actions {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin-top: 24px;
+  }
+  .connect-sprint-frame .sprint-hero .connect-btn-primary {
+    height: 46px;
+    min-height: 46px;
+    padding-inline: 18px;
+    font-size: 13px;
+  }
+  .connect-sprint-frame .sprint-hero-secondary {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding-inline: 2px;
+    font-size: 13px;
+  }
+
+  /* --- hero details: proof row + three steps ---------------------------- */
+  .connect-sprint-frame .sprint-hero-details {
+    padding: 24px 20px 34px;
+  }
+  .connect-sprint-frame .sprint-proof-row {
+    gap: 16px 22px;
+    padding: 16px 0 20px;
+  }
+  .connect-sprint-frame .sprint-proof-value {
+    font-size: 21px;
+  }
+  .connect-sprint-frame .sprint-proof-label {
+    font-size: 11px;
+    letter-spacing: .07em;
+  }
+  .connect-sprint-frame .sprint-venue-proof {
+    gap: 10px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .connect-sprint-frame .sprint-avatars > span {
+    width: 24px;
+    height: 24px;
+  }
+  .connect-sprint-frame .sprint-avatars .sprint-avatar-count {
+    width: 34px;
+    font-size: 11px;
+  }
+  .connect-sprint-frame .sprint-how-row {
+    gap: 16px;
+    padding-top: 22px;
+  }
+  .connect-sprint-frame .sprint-how-item {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 10px;
+  }
+  .connect-sprint-frame .sprint-how-number {
+    padding-top: 2px;
+    font-size: 11px;
+  }
+  .connect-sprint-frame .sprint-how-item h2 {
+    font-size: 15px;
+  }
+  .connect-sprint-frame .sprint-how-item p {
+    margin-top: 4px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  /* --- ticker ----------------------------------------------------------- */
+  .connect-sprint-frame .connect-linear-main .ticker-band {
+    height: 44px;
+  }
+
+  /* --- benefits --------------------------------------------------------- */
+  .connect-sprint-frame .connect-linear-main #benefits .mt-12 {
+    margin-top: 32px;
+  }
+  .connect-sprint-frame .connect-linear-main #benefits .group h3 {
+    font-size: 18px;
+    line-height: 1.3;
+  }
+  .connect-sprint-frame .connect-linear-main #benefits .group p {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .connect-sprint-frame .connect-linear-main #benefits .group .rounded-full {
+    padding: 6px 10px;
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+  .connect-sprint-frame .connect-linear-main #benefits .group .font-mono {
+    font-size: 11px;
+  }
+
+  /* --- revenue: copy, fee split, calculator ----------------------------- */
+  .connect-sprint-frame .connect-linear-main #revenue .mt-14 {
+    margin-top: 32px;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .text-\[11px\] {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .text-\[12px\] {
+    font-size: 13px;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .text-\[13px\] {
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .text-\[14px\] {
+    font-size: 15px;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue h3 {
+    font-size: 17px;
+  }
+  /* Steppers and price presets: 32px is a desktop hover target, not a thumb.
+     On a phone both are thumb targets — the square steppers 44×44 and the
+     price presets 46px wide (their own min-width) by 44px tall. */
+  .connect-sprint-frame .connect-linear-main #revenue .h-8 {
+    height: 44px;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .h-8.w-8 {
+    width: 44px;
+    height: 44px;
+  }
+  /* Presets sit 4px apart on a desktop; a thumb needs more air than that.
+     Utility class names are matched with [class~="…"] rather than `.gap-1`:
+     a plain rule that declares a utility name fights Tailwind's @apply
+     resolution (the postcss circular-dependency error this file hit once). */
+  .connect-sprint-frame .connect-linear-main #revenue [class~="flex"][class~="flex-wrap"][class~="gap-1"] {
+    gap: 8px;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue .py-3 {
+    padding-block: 14px;
+  }
+  /* Monthly total: 38px is wider than a 320px card once the currency is long. */
+  .connect-sprint-frame .connect-linear-main #revenue .font-display.text-\[38px\] {
+    font-size: clamp(30px, 9vw, 36px);
+  }
+
+  /* --- steps ------------------------------------------------------------ */
+  .connect-sprint-frame .connect-linear-main #steps .mt-14 {
+    margin-top: 32px;
+  }
+  .connect-sprint-frame .connect-linear-main #steps .p-6 {
+    padding: 20px;
+  }
+  .connect-sprint-frame .connect-linear-main #steps .text-\[9px\] {
+    padding: 4px 8px;
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+  .connect-sprint-frame .connect-linear-main #steps .text-\[11px\] {
+    font-size: 12px;
+  }
+  .connect-sprint-frame .connect-linear-main #steps .text-\[12px\] {
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .connect-sprint-frame .connect-linear-main #steps h3 {
+    font-size: 17px;
+  }
+  .connect-sprint-frame .connect-linear-main #steps .mt-6 {
+    margin-top: 20px;
+  }
+
+  /* --- stats and payouts ------------------------------------------------ */
+  .connect-sprint-frame .connect-linear-main #guest .mt-14 {
+    margin-top: 32px;
+  }
+  .connect-sprint-frame .connect-linear-main #guest .text-\[11px\] {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .connect-sprint-frame .connect-linear-main #guest .text-\[13px\] {
+    font-size: 14px;
+  }
+  .connect-sprint-frame .connect-linear-main #guest .text-\[15px\] {
+    font-size: 16px;
+  }
+  .connect-sprint-frame .connect-linear-main #guest h3 {
+    font-size: 16px;
+  }
+
+  /* --- FAQ -------------------------------------------------------------- */
+  .connect-sprint-frame .connect-linear-main #faq .grid {
+    gap: 32px;
+  }
+  .connect-sprint-frame .connect-linear-main #faq .mt-8 {
+    margin-top: 24px;
+  }
+  .connect-sprint-frame .connect-linear-main #faq .mt-8 > p {
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .connect-sprint-frame .connect-linear-main #faq .mt-8 > a {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    font-size: 14px;
+  }
+  .connect-sprint-frame .connect-linear-main #faq button {
+    min-height: 56px;
+    padding-block: 16px;
+    gap: 16px;
+  }
+  .connect-sprint-frame .connect-linear-main #faq button > span:first-child {
+    font-size: 16px;
+    line-height: 1.4;
+  }
+  .connect-sprint-frame .connect-linear-main #faq button > span:last-child {
+    width: 36px;
+    height: 36px;
+  }
+  .connect-sprint-frame .connect-linear-main #faq button + div p {
+    padding-right: 0;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  /* --- closing CTA ------------------------------------------------------ */
+  .connect-sprint-frame .connect-linear-main section.connect-final-cta > div:last-child {
+    padding: 56px 20px;
+  }
+  .connect-sprint-frame .connect-linear-main section.connect-final-cta h2 {
+    font-size: clamp(27px, 8.2vw, 34px);
+    line-height: 1.14;
+  }
+  .connect-sprint-frame .connect-linear-main section.connect-final-cta p {
+    font-size: 15px;
+    line-height: 1.65;
+  }
+  .connect-sprint-frame .connect-linear-main section.connect-final-cta .text-\[10px\] {
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+  .connect-sprint-frame .connect-final-cta .connect-btn-primary,
+  .connect-sprint-frame .connect-final-cta .connect-btn-ghost {
+    height: 46px;
+    min-height: 46px;
+    font-size: 13px;
+  }
+
+  /* --- footer ----------------------------------------------------------- */
+  .connect-sprint-frame .connect-linear-main > footer > div {
+    padding: 40px 20px 36px;
+  }
+  .connect-footer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 20px;
+  }
+  .connect-footer-brand {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+  .connect-footer-brand > a {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+  }
+  .connect-footer-brand p {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .connect-footer-links {
+    margin-top: 8px;
+    gap: 0;
+  }
+  .connect-footer-link {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    font-size: 15px;
+  }
+  .connect-footer-bottom {
+    margin-top: 32px;
+    gap: 14px;
+  }
+  .connect-footer-legal {
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+  .connect-footer-social {
+    gap: 0 20px;
+  }
+  .connect-footer-social a {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    font-size: 12px;
+    letter-spacing: .08em;
+  }
+}
+
+/* 320px phones: the narrowest gutter in the system. */
+@media (max-width: 359px) {
+  .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div,
+  .connect-sprint-frame .sprint-hero-content,
+  .connect-sprint-frame .sprint-hero-details,
+  .connect-sprint-frame .connect-linear-main > footer > div {
+    padding-inline: 16px;
+  }
+  .connect-sprint-frame .connect-linear-main section.connect-final-cta > div:last-child {
+    padding-inline: 16px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Footer from 360px: five link rows in a half-width column
+   The footer pairs the three link groups two-up under the brand block (see the
+   phone pass above), so each group owns 50% of the gutter minus the column gap
+   — about 155px at 360px. The longest row, "Guest app" / "QR materials", was
+   38–40px wide as an inline link and its 44px row painted past the column; the
+   link now fills its column, which is what a footer row should read as anyway.
+   ------------------------------------------------------------------------ */
+@media (max-width: 1279px) {
+  .connect-footer-grid .connect-footer-links,
+  .connect-footer-grid .connect-footer-links > li {
+    min-width: 0;
+  }
+  .connect-footer-grid .connect-footer-link {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    align-items: center;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Calculator rows and the steps summary on a narrow phone (≤639px)
+   ----------------------------------------------------------------------------
+   Both are two-up rows that the sprint layer sizes for a desktop column.
+
+   The calculator's three stepper rows keep the label on the left and the
+   steppers (− / value / +, 178px together) on the right. Inside the phone card
+   that leaves a 68px label column, so "Цена запроса для гостя" wrapped to one
+   word per line and each row grew to 150px. The label now takes its own line
+   and the steppers sit under it, still left-aligned with the rest of the card.
+
+   The steps summary pairs "≈ 1 день" with the join button. The pair is 285px
+   wide inside a 240px card at 320px, so the button was painted 21px past the
+   card edge (and out of the card's padding at 360/390). The button takes a full
+   row of its own; the number stays on the line above it.
+
+   Both changes stop at 640px, where the calculator has room for the original
+   two-up row and the summary card turns horizontal.
+   ------------------------------------------------------------------------ */
+@media (max-width: 639px) {
+  .connect-sprint-frame .connect-linear-main #revenue [class~="items-center"][class~="justify-between"] {
+    flex-wrap: wrap;
+  }
+  .connect-sprint-frame .connect-linear-main #revenue [class~="items-center"][class~="justify-between"] > [class~="min-w-0"] {
+    flex: 1 1 100%;
+  }
+  /* The stepper group spans the row: minus and plus land on the card edges,
+     where a thumb reaches for them, instead of huddling under the label. */
+  .connect-sprint-frame .connect-linear-main #revenue [class~="items-center"][class~="justify-between"] > [class~="flex"][class~="items-center"][class~="gap-2"] {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .connect-sprint-frame .connect-linear-main #steps [class~="items-center"][class~="gap-6"] {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .connect-sprint-frame .connect-linear-main #steps [class~="items-center"][class~="gap-6"] .connect-btn-primary {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+}

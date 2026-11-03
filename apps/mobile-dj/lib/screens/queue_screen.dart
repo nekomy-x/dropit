@@ -79,8 +79,12 @@ class _QueueScreenState extends State<QueueScreen> {
           // Переключатель сортировки: новые / популярные (§1.4).
           SegmentedButton<String>(
             segments: const [
-              ButtonSegment(value: 'new', icon: Icon(Icons.schedule), label: Text('New')),
-              ButtonSegment(value: 'hot', icon: Icon(Icons.local_fire_department), label: Text('Hot')),
+              ButtonSegment(
+                  value: 'new', icon: Icon(Icons.schedule), label: Text('New')),
+              ButtonSegment(
+                  value: 'hot',
+                  icon: Icon(Icons.local_fire_department),
+                  label: Text('Hot')),
             ],
             selected: {_sort},
             onSelectionChanged: (s) {
@@ -125,8 +129,8 @@ class _QueueScreenState extends State<QueueScreen> {
           SizedBox(height: 160),
           Icon(Icons.music_off, size: 48, color: DjTheme.grey),
           SizedBox(height: 12),
-          Text('No requests yet', textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 22)),
+          Text('No requests yet',
+              textAlign: TextAlign.center, style: TextStyle(fontSize: 22)),
         ],
       );
     }
@@ -167,18 +171,27 @@ class _QueueCard extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Обложка (нет — иконка; кэш обложек — B5).
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: DjTheme.black,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.album, color: DjTheme.grey, size: 32),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: DjTheme.black,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child:
+                        const Icon(Icons.album, color: DjTheme.grey, size: 32),
+                  ),
+                  const SizedBox(height: 8),
+                  _statusChip(item.status),
+                ],
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -189,7 +202,10 @@ class _QueueCard extends StatelessWidget {
                     Text(item.artist,
                         style: TextStyle(color: DjTheme.grey, fontSize: 16)),
                     const SizedBox(height: 4),
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         if (item.sameTrackCount > 1) ...[
                           // ×N — выделить: социальный сигнал (§1.4).
@@ -209,21 +225,20 @@ class _QueueCard extends StatelessWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
                         ],
                         Text(item.timeAgo,
-                            style: TextStyle(color: DjTheme.grey, fontSize: 13)),
+                            style:
+                                TextStyle(color: DjTheme.grey, fontSize: 13)),
                         if (item.style != null) ...[
-                          const SizedBox(width: 8),
                           Text('· ${item.style}',
-                              style: TextStyle(color: DjTheme.grey, fontSize: 13)),
+                              style:
+                                  TextStyle(color: DjTheme.grey, fontSize: 13)),
                         ],
                       ],
                     ),
                   ],
                 ),
               ),
-              _statusChip(item.status),
             ],
           ),
         ),
@@ -240,7 +255,8 @@ class _QueueCard extends StatelessWidget {
       _ => (DjTheme.grey, status.toUpperCase()),
     };
     return Text(label,
-        style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 13));
+        style:
+            TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 13));
   }
 }
 
@@ -262,14 +278,15 @@ class _RequestSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(item.title,
-                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                style:
+                    const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
             Text(item.artist,
                 style: TextStyle(color: DjTheme.grey, fontSize: 18)),
             const SizedBox(height: 8),
@@ -282,12 +299,16 @@ class _RequestSheet extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 16),
                 child: Row(
                   children: [
-                    Text('ISRC: ${item.isrc}',
-                        style: TextStyle(color: DjTheme.grey, fontSize: 12)),
+                    Expanded(
+                      child: Text('ISRC: ${item.isrc}',
+                          style: TextStyle(color: DjTheme.grey, fontSize: 12)),
+                    ),
                     const SizedBox(width: 8),
-                    InkWell(
-                      onTap: () => _copy(context, item.isrc!),
-                      child: const Icon(Icons.copy, size: 14, color: DjTheme.grey),
+                    IconButton(
+                      onPressed: () => _copy(context, item.isrc!),
+                      tooltip: 'Copy ISRC',
+                      icon:
+                          const Icon(Icons.copy, size: 14, color: DjTheme.grey),
                     ),
                   ],
                 ),
@@ -303,11 +324,9 @@ class _RequestSheet extends StatelessWidget {
             const SizedBox(height: 10),
             OutlinedButton.icon(
               icon: const Icon(Icons.close, color: DjTheme.red),
-              label: const Text('Reject',
-                  style: TextStyle(color: DjTheme.red)),
-              onPressed: item.status == 'pending'
-                  ? () => _reject(context)
-                  : null,
+              label: const Text('Reject', style: TextStyle(color: DjTheme.red)),
+              onPressed:
+                  item.status == 'pending' ? () => _reject(context) : null,
             ),
             const SizedBox(height: 10),
             ElevatedButton.icon(

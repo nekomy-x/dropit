@@ -61,6 +61,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _query = value;
       _searchError = null;
+      _loading = false;
     });
     _searchDebounce?.cancel();
     if (value.trim().length < 2) {
@@ -73,16 +74,16 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _loading = true);
       try {
         final tracks = await state.searchTracks(value);
-        if (!mounted) return;
+        if (!mounted || _query != value) return;
         setState(() => _tracks = tracks);
       } catch (_) {
-        if (!mounted) return;
+        if (!mounted || _query != value) return;
         setState(() {
           _tracks = const [];
           _searchError = 'Could not search the catalog. Try again.';
         });
       } finally {
-        if (mounted) setState(() => _loading = false);
+        if (mounted && _query == value) setState(() => _loading = false);
       }
     });
   }
@@ -110,207 +111,221 @@ class _SearchScreenState extends State<SearchScreen> {
     final state = AppState.of(context);
     final selected = state.selectedTrack;
     final tracks = _visible;
+    final media = MediaQuery.of(context);
+    final pinSelection = media.size.height -
+                media.viewInsets.bottom -
+                media.viewPadding.vertical >=
+            650 &&
+        media.textScaler.scale(12) <= 16;
 
     return DropScaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 24),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: BrandCityRow(),
-            ),
-            const SizedBox(height: 18),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: JoinRoomCard(room: widget.session.room),
-            ),
-            const SizedBox(height: 22),
+      bottomBar: selected != null && pinSelection
+          ? SafeArea(top: false, child: _selection(selected))
+          : null,
+      body: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        children: [
+          const SizedBox(height: 24),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: BrandCityRow(),
+          ),
+          const SizedBox(height: 18),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: JoinRoomCard(room: widget.session.room),
+          ),
+          const SizedBox(height: 22),
 
-            // ── Заголовок ──
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          // ── Заголовок ──
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Choose your track.', style: DropType.screenTitle),
+                SizedBox(height: 6),
+                Text(
+                  'Preview a track. Select your next drop.',
+                  style: DropType.caption,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // ── Поле поиска ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Container(
+              height: 54,
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: DropTokens.border),
+                ),
+              ),
+              child: Row(
                 children: [
-                  Text('Choose your track.', style: DropType.screenTitle),
-                  SizedBox(height: 6),
-                  Text(
-                    'Preview a track. Select your next drop.',
-                    style: DropType.caption,
+                  const Icon(Icons.search, size: 20, color: DropTokens.muted),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: _onSearchChanged,
+                      style: DropType.bodySm.copyWith(fontSize: 13),
+                      cursorColor: DropTokens.accent,
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        isCollapsed: true,
+                        filled: false,
+                        hintText: 'Move',
+                        hintStyle: DropType.bodySm
+                            .copyWith(fontSize: 13, color: DropTokens.text),
+                      ),
+                    ),
                   ),
+                  if (_query.isNotEmpty)
+                    GestureDetector(
+                      onTap: () {
+                        _searchController.clear();
+                        _onSearchChanged('');
+                      },
+                      child: const Icon(Icons.close,
+                          size: 18, color: DropTokens.muted),
+                    ),
                 ],
               ),
             ),
-            const SizedBox(height: 18),
+          ),
+          const SizedBox(height: 16),
 
-            // ── Поле поиска ──
-            Padding(
+          // ── Жанровые фильтры ──
+          SizedBox(
+            height: 36,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Container(
-                height: 54,
-                decoration: const BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(color: DropTokens.border),
+              children: [
+                for (final g in _genres) ...[
+                  FilterChipPill(
+                    label: g,
+                    active: _genre == g,
+                    // В макете активный «All» — светлый чип с тёмным текстом.
+                    activeFill: g == 'All' ? DropTokens.text : null,
+                    activeText: g == 'All' ? DropTokens.bg : null,
+                    onTap: () => setState(() => _genre = g),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.search, size: 20, color: DropTokens.muted),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: _onSearchChanged,
-                        style: DropType.bodySm.copyWith(fontSize: 13),
-                        cursorColor: DropTokens.accent,
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                          isCollapsed: true,
-                          filled: false,
-                          hintText: 'Move',
-                          hintStyle: DropType.bodySm
-                              .copyWith(fontSize: 13, color: DropTokens.text),
-                        ),
-                      ),
-                    ),
-                    if (_query.isNotEmpty)
-                      GestureDetector(
-                        onTap: () {
-                          _searchController.clear();
-                          _onSearchChanged('');
-                        },
-                        child: const Icon(Icons.close,
-                            size: 18, color: DropTokens.muted),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Жанровые фильтры ──
-            SizedBox(
-              height: 36,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                children: [
-                  for (final g in _genres) ...[
-                    FilterChipPill(
-                      label: g,
-                      active: _genre == g,
-                      // В макете активный «All» — светлый чип с тёмным текстом.
-                      activeFill: g == 'All' ? DropTokens.text : null,
-                      activeText: g == 'All' ? DropTokens.bg : null,
-                      onTap: () => setState(() => _genre = g),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
+                  const SizedBox(width: 8),
                 ],
-              ),
+              ],
             ),
+          ),
+          const SizedBox(height: 20),
+
+          // ── Результаты ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _loading
+                      ? 'SEARCHING…'
+                      : '${tracks.length} TRACKS · SELECT ONE',
+                  style: DropType.labelTight,
+                ),
+                const SizedBox(height: 12),
+                if (_searchError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      _searchError!,
+                      style: DropType.caption.copyWith(color: DropTokens.red),
+                    ),
+                  ),
+                if (!_loading && tracks.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                        child:
+                            Text('No tracks found.', style: DropType.caption)),
+                  ),
+                for (final track in tracks) ...[
+                  _TrackResultRow(
+                    track: track,
+                    selected: selected?.id == track.id,
+                    previewing: _previewing?.id == track.id,
+                    previewPos: _previewPos,
+                    onSelect: () => state.selectTrack(track),
+                    onPreview: () => _togglePreview(track),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            ),
+          ),
+
+          // ── Подтверждение выбранного трека ──
+          if (selected != null && !pinSelection)
+            _selection(selected)
+          else
             const SizedBox(height: 20),
-
-            // ── Результаты ──
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                children: [
-                  Text(
-                    _loading
-                        ? 'SEARCHING…'
-                        : '${tracks.length} TRACKS · SELECT ONE',
-                    style: DropType.labelTight,
-                  ),
-                  const SizedBox(height: 12),
-                  if (_searchError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        _searchError!,
-                        style: DropType.caption.copyWith(color: DropTokens.red),
-                      ),
-                    ),
-                  if (!_loading && tracks.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
-                      child: Center(
-                          child: Text('No tracks found.',
-                              style: DropType.caption)),
-                    ),
-                  for (final track in tracks) ...[
-                    _TrackResultRow(
-                      track: track,
-                      selected: selected?.id == track.id,
-                      previewing: _previewing?.id == track.id,
-                      previewPos: _previewPos,
-                      onSelect: () => state.selectTrack(track),
-                      onPreview: () => _togglePreview(track),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ],
-              ),
-            ),
-
-            // ── Подтверждение выбранного трека ──
-            if (selected != null)
-              Container(
-                decoration: const BoxDecoration(
-                  color: DropTokens.bg,
-                  border: Border(
-                    top: BorderSide(color: DropTokens.border),
-                  ),
-                ),
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        const SectionLabel('SELECTED TRACK'),
-                        const Spacer(),
-                        Text(selected.priceLabel, style: DropType.caption),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        ArtTile(path: selected.art, size: 50),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(selected.title, style: DropType.trackTitle),
-                              const SizedBox(height: 2),
-                              Text(
-                                selected.artist,
-                                style: DropType.caption.copyWith(height: 1.2),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    PrimaryButton(
-                      label: 'Continue to payment',
-                      onPressed: () => widget.onContinue(selected),
-                    ),
-                  ],
-                ),
-              )
-            else
-              const SizedBox(height: 20),
-          ],
-        ),
+        ],
       ),
     );
   }
+
+  Widget _selection(Track selected) => Container(
+        decoration: const BoxDecoration(
+          color: DropTokens.bg,
+          border: Border(
+            top: BorderSide(color: DropTokens.border),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const SectionLabel('SELECTED TRACK'),
+                const Spacer(),
+                Text(selected.priceLabel, style: DropType.caption),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                ArtTile(path: selected.art, size: 50),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(selected.title, style: DropType.trackTitle),
+                      const SizedBox(height: 2),
+                      Text(
+                        selected.artist,
+                        style: DropType.caption.copyWith(height: 1.2),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            PrimaryButton(
+              label: 'Continue to payment',
+              onPressed: () {
+                FocusManager.instance.primaryFocus?.unfocus();
+                widget.onContinue(selected);
+              },
+            ),
+          ],
+        ),
+      );
 }
 
 class _TrackResultRow extends StatelessWidget {

@@ -17,7 +17,7 @@ PostgreSQL and Redis from the distro, nginx serving pre-built web bundles.
 | `host/provision-host.sh` | the on-host provisioning script, fed in over stdin |
 | `host/apply-config.sh` | installs nginx site + systemd units; checksum-based, self-rollback on `nginx -t` failure |
 | `host/migrate.sh` | psql migration runner with `schema_migrations` bookkeeping |
-| `nginx/dropit.conf` | the site: `/` club SPA, `/admin/` admin SPA, `/dj/` console, `/v1/`+`/healthz`+`/readyz` → API |
+| `nginx/dropit.conf` | the site: `/` club SPA, `/admin/` admin SPA, `/dj/` console, `/status/` public service status, `/v1/`+`/healthz`+`/readyz` → API |
 | `systemd/dropit-api.service` | API unit (`MemoryMax=256M`) |
 | `systemd/dropit-workers.service` | workers unit (`MemoryMax=192M`) |
 | `systemd/dropit.env.example` | runtime env template, rendered to `/srv/dropit/etc/dropit.env` |
@@ -47,6 +47,26 @@ preserved.
 `deploy.sh` reads the host and secrets from `.env.local`, so no arguments are
 needed. Flags: `--dry-run`, `--verify-only`, `--skip-migrate`,
 `--no-restart`, `--skip-config`, `--build-dir DIR`, `--host`.
+
+For a separate host, keep a separate private env file and select it explicitly
+for **both** provisioning and deployment. This leaves the default PROD target
+unchanged:
+
+```sh
+DROPIT_DEPLOY_ENV="$PWD/deploy/prod/.env.15024168204.local" ./deploy/prod/deploy.sh
+```
+
+The test stand at `https://150.241.68.204` is documented in
+[`../servers/test-15024168204.md`](../servers/test-15024168204.md).
+`host/bootstrap-test-club.py` accepts private account JSON over stdin after
+migrations and creates a club, DJ, superadmin with TOTP, and a two-week room QR.
+It refuses a server configured with Stripe credentials. Install
+`python3-argon2 python3-cryptography` before running it.
+
+For a public IP without a domain, `host/enable-ip-tls.sh <IP>` installs an
+isolated current Certbot, requests an IP certificate, enables the optional nginx
+TLS listener, and schedules renewal twice daily. The ACME webroot lives outside
+the deployed web bundles so `rsync --delete` cannot remove challenges.
 
 ## Secrets
 

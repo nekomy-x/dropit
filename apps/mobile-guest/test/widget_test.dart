@@ -94,13 +94,16 @@ void main() {
     // тоже содержит текст «Move», поэтому берём уникальный текст строки).
     await tester.tap(find.text('Adam Port, Stryv · Afro house').first);
     await tester.pump();
+    await tester.scrollUntilVisible(find.text('SELECTED TRACK'), 150,
+        scrollable: find.byType(Scrollable).first);
     expect(find.text('SELECTED TRACK'), findsOneWidget);
     expect(find.text('Continue to payment'), findsOneWidget);
     expect(state.selectedTrack?.title, 'Move');
   });
 
   testWidgets('My requests (06): счётчики статусов и карточки', (tester) async {
-    await tester.pumpWidget(wrap(const RequestsScreen(onOpenRequest: _noopRequest)));
+    await tester
+        .pumpWidget(wrap(const RequestsScreen(onOpenRequest: _noopRequest)));
     await tester.pump();
 
     expect(find.text('My requests'), findsOneWidget);

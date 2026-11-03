@@ -1,3 +1,4 @@
+
 /// DROP IT — приложение гостя.
 ///
 /// Перенос 1:1 макета pen.dev (Guest 01–15): Listen (Home), Explore,
@@ -10,11 +11,15 @@
 /// когда он доступен).
 library;
 
+import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'api/api_client.dart';
+import 'api/guest_link.dart';
 import 'data/models.dart';
 import 'screens/auth_screens.dart';
 import 'screens/explore_screen.dart';
@@ -42,6 +47,7 @@ const _stripePublishableKey = String.fromEnvironment(
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppLinks(); // Capture cold-start links before Stripe initialization.
   if (_stripePublishableKey.isNotEmpty) {
     Stripe.publishableKey = _stripePublishableKey;
     Stripe.urlScheme = 'dropit';
@@ -60,11 +66,63 @@ class DropItApp extends StatefulWidget {
 class _DropItAppState extends State<DropItApp> {
   AppState? _state;
   final AppState _placeholder = AppState();
+  StreamSubscription<Uri>? _linkSubscription;
+  final _navigator = GlobalKey<NavigatorState>();
+  String? _pendingLink;
+  bool _openingLink = false;
 
   @override
   void initState() {
     super.initState();
+    _linkSubscription = AppLinks().uriLinkStream.listen((uri) {
+      _pendingLink = uri.toString();
+      _openPendingLink();
+    }, onError: (_) {/* Invalid platform links cannot interrupt checkout. */});
     _init();
+  }
+
+  Future<void> _openPendingLink() async {
+    final state = _state;
+    final navigator = _navigator.currentState;
+    if (state == null || navigator == null || _openingLink) return;
+    final link = _pendingLink;
+    if (link == null) return;
+    _pendingLink = null;
+    final token = guestQrToken(link);
+    if (token == null) return; // Includes the Stripe return URL.
+    if (state.hasPendingCheckout) {
+      ScaffoldMessenger.of(navigator.context).showSnackBar(const SnackBar(
+        content:
+            Text('Finish your current payment before joining another room.'),
+      ));
+      return;
+    }
+    _openingLink = true;
+    try {
+      await state.joinByQr(token);
+      if (!mounted) return;
+      navigator.popUntil((route) => route.isFirst);
+      navigator.push(MaterialPageRoute(
+        builder: (_) =>
+            SearchRoute(session: state.session!, quickCheckout: true),
+      ));
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(navigator.context).showSnackBar(SnackBar(
+          content: const Text(
+              'Could not open this room. Check your connection or ask for the current QR.'),
+          action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                _pendingLink = link;
+                _openPendingLink();
+              }),
+        ));
+      }
+    } finally {
+      _openingLink = false;
+      if (_pendingLink != null && mounted) _openPendingLink();
+    }
   }
 
   Future<void> _init() async {
@@ -72,8 +130,20 @@ class _DropItAppState extends State<DropItApp> {
     final api = ApiClient(secureStorage);
     final state = AppState(api: api);
     await state.probeBackend();
-    if (!mounted) return;
+    if (!mounted) {
+      state.dispose();
+      return;
+    }
     setState(() => _state = state);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPendingLink());
+  }
+
+  @override
+  void dispose() {
+    _linkSubscription?.cancel();
+    _state?.dispose();
+    _placeholder.dispose();
+    super.dispose();
   }
 
   @override
@@ -84,6 +154,7 @@ class _DropItAppState extends State<DropItApp> {
     return AppStateScope(
       state: state ?? _placeholder,
       child: MaterialApp(
+        navigatorKey: _navigator,
         title: 'DROP IT',
         debugShowCheckedModeBanner: false,
         theme: DropTheme.theme(),
@@ -109,19 +180,34 @@ class _Splash extends StatelessWidget {
 /// Корневой экран: 4 таба (Listen · Explore · Requests · Profile)
 /// и флоу запроса трека в навигационном стеке. Плавающий таб-бар — как
 /// в макете (12 px от краёв, 64 px высота).
-class RootScreen extends StatelessWidget {
+class RootScreen extends StatefulWidget {
   const RootScreen({super.key});
+
+  @override
+  State<RootScreen> createState() => _RootScreenState();
+}
+
+class _RootScreenState extends State<RootScreen> {
+  DateTime? _lastBack;
 
   @override
   Widget build(BuildContext context) {
     final state = AppState.of(context);
     return PopScope(
-      canPop: false,
+      canPop:
+          state.tab == 0 && Theme.of(context).platform == TargetPlatform.iOS,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (state.tab != 0) {
           state.setTab(0);
         } else {
+          final now = DateTime.now();
+          if (_lastBack != null &&
+              now.difference(_lastBack!) < const Duration(seconds: 2)) {
+            SystemNavigator.pop();
+            return;
+          }
+          _lastBack = now;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Press back again to exit')),
           );
@@ -129,53 +215,44 @@ class RootScreen extends StatelessWidget {
       },
       child: Scaffold(
         backgroundColor: DropTokens.bg,
-        body: Stack(
+        body: IndexedStack(
+          index: state.tab,
           children: [
-            Positioned.fill(
-              child: IndexedStack(
-                index: state.tab,
-                children: [
-                  HomeScreen(
-                    onScan: () => _push(context, const ScanRoute()),
-                    onExplore: () => state.setTab(1),
-                    onOpenRoom: (room) => _join(context, room),
-                    onRequestTrack: (track) => _requestFromHome(context, track),
-                  ),
-                  ExploreScreen(
-                    onOpenRoom: (room) => _openRoom(context, room),
-                  ),
-                  RequestsScreen(
-                    onOpenRequest: (request) =>
-                        _push(context, RequestDetailRoute(request: request)),
-                  ),
-                  state.signedIn
-                      ? ProfileScreen(
-                          onOpenIdentity: () =>
-                              _push(context, const IdentityRoute()),
-                          onOpenHelp: () => _push(context, const HelpRoute()),
-                          onOpenPrivacy: () => _showPrivacy(context),
-                          onOpenPaymentMethods: () =>
-                              showPaymentMethodsSheet(context),
-                        )
-                      : ProfileGuestScreen(
-                          onSignIn: () => _push(context, const SignInRoute()),
-                          onCreateAccount: () =>
-                              _push(context, const CreateAccountRoute()),
-                        ),
-                ],
-              ),
+            HomeScreen(
+              onScan: () => _push(context, const ScanRoute()),
+              onExplore: () => state.setTab(1),
+              onOpenRoom: (room) => _join(context, room),
+              onRequestTrack: (track) => _requestFromHome(context, track),
             ),
-            Positioned(
-              left: 12,
-              right: 12,
-              bottom: 12,
-              child: DropTabBar(
-                current: state.tab,
-                onChanged: (index) => state.setTab(index),
-              ),
+            ExploreScreen(
+              onOpenRoom: (room) => _openRoom(context, room),
             ),
+            RequestsScreen(
+              onOpenRequest: (request) =>
+                  _push(context, RequestDetailRoute(request: request)),
+            ),
+            state.signedIn
+                ? ProfileScreen(
+                    onOpenIdentity: () => _push(context, const IdentityRoute()),
+                    onOpenHelp: () => _push(context, const HelpRoute()),
+                    onOpenPrivacy: () => _showPrivacy(context),
+                    onOpenPaymentMethods: () =>
+                        showPaymentMethodsSheet(context),
+                  )
+                : ProfileGuestScreen(
+                    onSignIn: () => _push(context, const SignInRoute()),
+                    onCreateAccount: () =>
+                        _push(context, const CreateAccountRoute()),
+                  ),
           ],
         ),
+        bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+            ? null
+            : SafeArea(
+                top: false,
+                minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                child: DropTabBar(current: state.tab, onChanged: state.setTab),
+              ),
       ),
     );
   }
@@ -290,9 +367,11 @@ class ScanRoute extends StatelessWidget {
 }
 
 class SearchRoute extends StatelessWidget {
-  const SearchRoute({super.key, required this.session});
+  const SearchRoute(
+      {super.key, required this.session, this.quickCheckout = false});
 
   final JoinSession session;
+  final bool quickCheckout;
 
   @override
   Widget build(BuildContext context) {
@@ -302,7 +381,9 @@ class SearchRoute extends StatelessWidget {
       onContinue: (_) {
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => TermsRoute(session: session),
+            builder: (_) => quickCheckout
+                ? PaymentRoute(session: session)
+                : TermsRoute(session: session),
           ),
         );
       },
@@ -347,17 +428,28 @@ class _PaymentRouteState extends State<PaymentRoute> {
       session: widget.session,
       onBack: () => Navigator.of(context).maybePop(),
       onPaid: (track) async {
-        if (_stripePublishableKey.isEmpty) {
+        final state = AppState.of(context);
+        if (state.backendAvailable &&
+            !widget.session.testPayments &&
+            _stripePublishableKey.isEmpty) {
           throw ApiException.of(
             'stripe_unavailable',
             'Secure card payments are not configured for this environment.',
           );
         }
-        final state = AppState.of(context);
         final created = await state.submitRequest(
           track,
           widget.session.room,
           onPaymentIntent: (intent) async {
+            if (widget.session.testPayments && !intent.testMode) {
+              throw ApiException.of('payment_mode_changed',
+                  'Payment mode changed. Reopen the room before continuing.');
+            }
+            if (intent.testMode) return;
+            if (_stripePublishableKey.isEmpty) {
+              throw ApiException.of('stripe_unavailable',
+                  'Secure card payments are not configured for this environment.');
+            }
             if (intent.clientSecret.isEmpty ||
                 intent.clientSecret.contains('_mock')) {
               throw ApiException.of(

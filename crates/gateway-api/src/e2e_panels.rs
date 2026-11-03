@@ -45,6 +45,26 @@ fn sfield(v: &Value, k: &str) -> String {
     v[k].as_str().unwrap_or_default().to_string()
 }
 
+/// Заводит строку `admin_user` для токена админа.
+///
+/// `crate::rbac::require_admin_write` читает `admin_user.role` из БД:
+/// `readonly` → 403 на мутациях, отсутствие строки — тоже 403. Поэтому
+/// каждый админский токен, который что-то пишет, должен иметь строку в
+/// `admin_user` (роль `superadmin`/`operator`).
+async fn seed_admin_user(pool: &sqlx::PgPool, id: Uuid, role: &str) {
+    sqlx::query(
+        "INSERT INTO admin_user \
+         (id, email, password_hash, totp_secret_enc, totp_confirmed_at, role, status) \
+         VALUES ($1, $2, 'x', '\\x00'::bytea, now(), $3, 'active')",
+    )
+    .bind(id)
+    .bind(format!("{id}@admin.dropit.test"))
+    .bind(role)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn e2e_panel_routes() {
     let repo = match test_repo().await {
@@ -86,6 +106,9 @@ async fn e2e_panel_routes() {
         .execute(&pool)
         .await
         .unwrap();
+
+    // Гейт записи: PATCH ниже проходит только для не-readonly админа.
+    seed_admin_user(&pool, admin_id, "superadmin").await;
 
     // --- platform-settings: NULL-семантика + roundtrip --------------
     let (s, body) = call(
@@ -735,14 +758,17 @@ async fn e2e_admin_clubs_create() {
     )
     .await;
     let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
     let admin_tok = env
         .keys
-        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
         .unwrap();
     let club_tok = env
         .keys
         .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
         .unwrap();
+    // `POST /v1/admin/clubs` проходит гейт записи (`admin_user.role`).
+    seed_admin_user(&pool, admin_id, "superadmin").await;
 
     // Успех.
     let (s, body) = call(
@@ -1169,10 +1195,13 @@ async fn e2e_club_master_login() {
     // предшествующей неудачной попытки (без XFF → бакет 0.0.0.0). Гард
     // восстанавливает env после теста.
     let _trust = crate::e2e::EnvGuard::set("TRUST_PROXY", "1");
+    let admin_id = Uuid::now_v7();
     let admin_tok = env
         .keys
-        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
         .unwrap();
+    // Клуб создаётся админской мутацией → нужен не-readonly admin_user.
+    seed_admin_user(&pool, admin_id, "superadmin").await;
 
     // --- Создаём клуб админом → получаем qr_master_token (один раз) ---
     let (s, body) = call(
@@ -1925,10 +1954,13 @@ async fn e2e_status_runtime_mode() {
     let sessions = SessionRepo::new(repo.pool());
     let env = app_env(Some(repo.clone()), Some(sessions), None).await;
     let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
     let admin = env
         .keys
-        .issue_access(Uuid::now_v7(), Role::Admin, Uuid::now_v7())
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
         .unwrap();
+    // PATCH platform-settings идёт через гейт записи.
+    seed_admin_user(&pool, admin_id, "superadmin").await;
 
     // Публичный статус без токена: стартовое значение — auto, факты стенда
     // в e2e всегда тестовые (open_signup = true).
@@ -2018,4 +2050,1399 @@ async fn e2e_status_runtime_mode() {
         ),
         other => panic!("unexpected source after auto: {other:?} ({body})"),
     }
+}
+
+// ============================================================
+// task-6: поля и мутации админ-панели (клубы, DJ, платежи, аудит, гости)
+// ============================================================
+
+/// Клуб: карточка `GET /:id`, расширенные поля списка, PATCH контактов и
+/// slug/e-mail с конфликтами, мягкое удаление и его запрет при смене.
+///
+/// Закрывает аудит §4.1 (8 полей были константами), §7.3 (GET → 405,
+/// PATCH умел только status, DELETE отсутствовал).
+#[tokio::test]
+async fn e2e_admin_club_card_mutations() {
+    let repo = maybe_skip!(test_repo().await);
+    let sessions = SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
+    let admin = env
+        .keys
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, admin_id, "superadmin").await;
+    let club_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
+        .unwrap();
+
+    let club_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash, address, country, phone, \
+         logo_url, stripe_account_id, stripe_onboarding_status, city, status) \
+         VALUES ($1, 'Card Club', 'card-club', 'card@club.test', 'x', 'Calle 1', 'ES', \
+         '+34 600 000 000', 'https://cdn.test/logo.png', 'acct_card_1', 'verified', \
+         'Madrid', 'active')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let other_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1, 'Other Club', 'other-club', 'other@club.test', 'x')",
+    )
+    .bind(other_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- список: поля, которые UI раньше подставлял константами ---------
+    let (s, body) = call(&env, "GET", "/v1/admin/clubs", None, Some(&admin)).await;
+    assert_eq!(s, StatusCode::OK, "clubs list: {body}");
+    let items = body["items"].as_array().expect("items");
+    let card = items
+        .iter()
+        .find(|i| i["id"] == club_id.to_string())
+        .expect("club row");
+    assert_eq!(card["slug"], "card-club");
+    assert_eq!(card["address"], "Calle 1");
+    assert_eq!(card["country"], "ES");
+    assert_eq!(card["phone"], "+34 600 000 000");
+    assert_eq!(card["email"], "card@club.test");
+    assert_eq!(card["logo_url"], "https://cdn.test/logo.png");
+    assert_eq!(card["stripe_account_id"], "acct_card_1");
+    assert_eq!(
+        card["stripe_onboarding_status"], "verified",
+        "статус Stripe из БД, не константа 'pending': {card}"
+    );
+    assert!(
+        card["created_at"].is_string(),
+        "created_at приходит: {card}"
+    );
+    assert_eq!(card["turnover_minor"], 0);
+
+    // --- карточка: тот же набор полей, а не 405 -------------------------
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/clubs/{club_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club card: {body}");
+    assert_eq!(body["name"], "Card Club");
+    assert_eq!(body["city"], "Madrid");
+    assert_eq!(body["stripe_onboarding_status"], "verified");
+    assert!(body["created_at"].is_string(), "card carries created_at");
+
+    let (s, body) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/clubs/{}", Uuid::now_v7()),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "unknown club card: {body}");
+    assert_eq!(body["code"], "club_not_found");
+
+    // --- PATCH: расширенные поля ----------------------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{club_id}"),
+        Some(json!({
+            "name": "Renamed Club",
+            "slug": "renamed-club",
+            "email": "renamed@club.test",
+            "city": "Barcelona",
+            "address": "Calle 2",
+            "phone": "+34 611",
+            "country": "PT",
+            "status": "suspended",
+        })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club patch: {body}");
+    assert_eq!(body["name"], "Renamed Club");
+    assert_eq!(body["slug"], "renamed-club");
+    assert_eq!(body["email"], "renamed@club.test");
+    assert_eq!(body["city"], "Barcelona");
+    assert_eq!(body["address"], "Calle 2");
+    assert_eq!(body["phone"], "+34 611");
+    assert_eq!(body["country"], "PT");
+    assert_eq!(body["status"], "suspended");
+
+    // Аудит: before/after (раньше писался только club.status_change).
+    let (diff,): (String,) = sqlx::query_as(
+        "SELECT diff::text FROM audit_log WHERE action = 'club.update' \
+         ORDER BY at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(diff.contains("\"slug\": \"card-club\""), "before: {diff}");
+    assert!(diff.contains("\"slug\": \"renamed-club\""), "after: {diff}");
+
+    // null и пустая строка стирают nullable-поле в NULL.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{club_id}"),
+        Some(json!({ "phone": null, "address": "   " })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "clear nullable: {body}");
+    assert!(body["phone"].is_null(), "phone cleared: {body}");
+    assert!(body["address"].is_null(), "blank address → NULL: {body}");
+
+    // --- валидация и конфликты уникальности -----------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{club_id}"),
+        Some(json!({ "slug": "Bad Slug" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad slug: {body}");
+
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{club_id}"),
+        Some(json!({ "slug": "other-club" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "slug taken: {body}");
+    assert_eq!(body["code"], "slug_taken");
+
+    // e-mail — CITEXT: регистр не спасает от конфликта.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{club_id}"),
+        Some(json!({ "email": "OTHER@club.test" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "email taken (citext): {body}");
+    assert_eq!(body["code"], "email_taken");
+
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/clubs/{}", Uuid::now_v7()),
+        Some(json!({ "name": "Ghost Club" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "patch unknown club");
+
+    // --- DELETE: открытая смена запрещает -------------------------------
+    let session = sessions
+        .create_session(club_id, None, None, "Europe/Madrid")
+        .await
+        .unwrap();
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/clubs/{club_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::CONFLICT,
+        "active session blocks delete: {body}"
+    );
+    assert_eq!(body["code"], "club_has_active_session");
+
+    // Смена закрыта → мягкое удаление + отзыв refresh-токена субъекта.
+    sqlx::query("UPDATE session SET status = 'closed' WHERE id = $1")
+        .bind(session.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let refresh_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO refresh_token \
+         (id, family_id, subject_type, subject_id, token_hash, expires_at) \
+         VALUES ($1, $2, 'club', $3, $4, now() + interval '30 days')",
+    )
+    .bind(refresh_id)
+    .bind(Uuid::now_v7())
+    .bind(club_id)
+    .bind(format!("club-hash-{refresh_id}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/clubs/{club_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "club delete: {body}");
+    assert_eq!(body["deleted"], "soft");
+    assert_eq!(body["status"], "blocked");
+    let (status,): (String,) = sqlx::query_as("SELECT status FROM club WHERE id = $1")
+        .bind(club_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "blocked", "мягкое удаление оставляет строку");
+    let (revoked,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT revoked_at FROM refresh_token WHERE id = $1")
+            .bind(refresh_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(revoked.is_some(), "refresh-токен клуба отозван");
+    let (n,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM audit_log WHERE action = 'club.delete' AND entity = $1",
+    )
+    .bind(club_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1, "club.delete попал в аудит");
+
+    let (s, _) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/clubs/{}", Uuid::now_v7()),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "delete unknown club");
+
+    // RBAC: клуб не может удалить клуб.
+    let (s, _) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/clubs/{other_id}"),
+        None,
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club role cannot delete clubs");
+}
+
+/// DJ: поля списка, PATCH (клуб/имя/статус с отзывом refresh), инвайт
+/// админом с письмом, hard/soft DELETE, restore.
+///
+/// Закрывает аудит §4.2 (Stripe-статус константой) и §7.2 (мутаций не было).
+#[tokio::test]
+async fn e2e_admin_djs_mutations() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
+    let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
+    let admin = env
+        .keys
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, admin_id, "superadmin").await;
+    let club_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
+        .unwrap();
+
+    let club_a = Uuid::now_v7();
+    let club_b = Uuid::now_v7();
+    for (id, name, slug, email) in [
+        (club_a, "DJ Club A", "dj-club-a", "a@djclub.test"),
+        (club_b, "DJ Club B", "dj-club-b", "b@djclub.test"),
+    ] {
+        sqlx::query(
+            "INSERT INTO club (id, name, slug, email, password_hash) \
+             VALUES ($1, $2, $3, $4, 'x')",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(slug)
+        .bind(email)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let dj_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name, status, \
+         stripe_account_id, stripe_onboarding_status) \
+         VALUES ($1, $2, 'stripe@dj.test', 'x', 'Stripe DJ', 'active', 'acct_dj_1', 'verified')",
+    )
+    .bind(dj_id)
+    .bind(club_a)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let invited_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name, status) \
+         VALUES ($1, $2, 'pending@dj.test', '!', 'Pending DJ', 'invited')",
+    )
+    .bind(invited_id)
+    .bind(club_a)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- список: Stripe/created_at/club_name/removed --------------------
+    let (s, body) = call(&env, "GET", "/v1/admin/djs", None, Some(&admin)).await;
+    assert_eq!(s, StatusCode::OK, "djs list: {body}");
+    let row = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|i| i["id"] == dj_id.to_string())
+        .expect("dj row");
+    assert_eq!(row["stripe_onboarding_status"], "verified");
+    assert_eq!(row["stripe_account_id"], "acct_dj_1");
+    assert!(row["created_at"].is_string(), "created_at приходит: {row}");
+    assert_eq!(row["club_name"], "DJ Club A", "club_name из JOIN: {row}");
+    assert_eq!(row["removed"], false, "removed = removed_at IS NOT NULL");
+
+    // --- PATCH: имя и клуб ----------------------------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{dj_id}"),
+        Some(json!({ "display_name": "Renamed DJ", "club_id": club_b })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "dj patch: {body}");
+    assert_eq!(body["display_name"], "Renamed DJ");
+    assert_eq!(
+        body["club_id"],
+        club_b.to_string(),
+        "DJ переехал в клуб B: {body}"
+    );
+    assert_eq!(body["status"], "active");
+    let (in_club,): (Option<Uuid>,) = sqlx::query_as("SELECT club_id FROM dj WHERE id = $1")
+        .bind(dj_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(in_club, Some(club_b));
+
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{dj_id}"),
+        Some(json!({ "club_id": Uuid::now_v7() })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "unknown club on dj patch: {body}");
+    assert_eq!(body["code"], "club_not_found");
+
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{dj_id}"),
+        Some(json!({ "status": "bogus" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad dj status");
+
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{}", Uuid::now_v7()),
+        Some(json!({ "status": "suspended" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "patch unknown DJ");
+
+    // --- PATCH suspend отзывает refresh ---------------------------------
+    let refresh_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO refresh_token \
+         (id, family_id, subject_type, subject_id, token_hash, expires_at) \
+         VALUES ($1, $2, 'dj', $3, $4, now() + interval '30 days')",
+    )
+    .bind(refresh_id)
+    .bind(Uuid::now_v7())
+    .bind(dj_id)
+    .bind(format!("dj-hash-{refresh_id}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{dj_id}"),
+        Some(json!({ "status": "suspended" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "suspend dj: {body}");
+    assert_eq!(body["status"], "suspended");
+    let (revoked,): (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT revoked_at FROM refresh_token WHERE id = $1")
+            .bind(refresh_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(revoked.is_some(), "suspend отзывает refresh DJ");
+
+    // --- POST: инвайт админом + письмо в mail_message -------------------
+    // Адрес уникален на прогон: `mail_message` не входит в TRUNCATE
+    // `test_repo`, и фиксированный адрес копил бы строки между запусками.
+    let invitee_email = format!("admin-invite-{}@dj.test", Uuid::now_v7());
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/admin/djs",
+        Some(json!({
+            "email": invitee_email.clone(),
+            "display_name": "Admin Invite",
+            "club_id": club_b,
+        })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "admin invite: {body}");
+    let invited_dj_id: Uuid = sfield(&body, "dj_id").parse().unwrap();
+    let token = sfield(&body, "invite_token");
+    assert_eq!(token.len(), 64, "128-битный hex invite-токен");
+    assert!(body["invite_expires_at"].is_string());
+    let (status, club_of, pwd): (String, Option<Uuid>, String) =
+        sqlx::query_as("SELECT status, club_id, password_hash FROM dj WHERE id = $1")
+            .bind(invited_dj_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "invited");
+    assert_eq!(club_of, Some(club_b));
+    assert_eq!(pwd, "!", "инвайт без пароля");
+    let (mails,): (i64,) = sqlx::query_as("SELECT count(*) FROM mail_message WHERE to_email = $1")
+        .bind(&invitee_email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(mails, 1, "письмо-приглашение в очереди mail_message");
+
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/admin/djs",
+        Some(json!({
+            "email": invitee_email.clone(),
+            "display_name": "Admin Invite",
+            "club_id": club_b,
+        })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "repeat admin invite: {body}");
+    assert_eq!(body["code"], "dj_already_invited");
+
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/admin/djs",
+        Some(json!({
+            "email": "ghost@dj.test",
+            "display_name": "Ghost",
+            "club_id": Uuid::now_v7(),
+        })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "invite into unknown club: {body}");
+    assert_eq!(body["code"], "club_not_found");
+
+    let (s, _) = call(
+        &env,
+        "POST",
+        "/v1/admin/djs",
+        Some(json!({ "email": "bad", "display_name": "X", "club_id": club_b })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "invalid email");
+
+    // --- DELETE hard: непринятое приглашение, смен нет ------------------
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/djs/{invited_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "hard delete: {body}");
+    assert_eq!(body["removed"], "hard");
+    let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM dj WHERE id = $1")
+        .bind(invited_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "строка-приглашение стёрта");
+
+    // --- DELETE soft: DJ с паролем --------------------------------------
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/djs/{dj_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "soft delete: {body}");
+    assert_eq!(body["removed"], "soft");
+    let (removed_at, status): (Option<chrono::DateTime<chrono::Utc>>, String) =
+        sqlx::query_as("SELECT removed_at, status FROM dj WHERE id = $1")
+            .bind(dj_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(removed_at.is_some(), "строка сохранена с removed_at");
+    assert_eq!(status, "suspended", "доступ снят");
+
+    // Повторное удаление снятого DJ — 404.
+    let (s, _) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/djs/{dj_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "already removed DJ");
+
+    // Снятый DJ не патчится: сначала restore (иначе «active, но removed»).
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/djs/{dj_id}"),
+        Some(json!({ "status": "active" })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "patch removed DJ: {body}");
+    assert_eq!(body["code"], "dj_removed");
+
+    // --- restore --------------------------------------------------------
+    let (s, body) = call(
+        &env,
+        "POST",
+        &format!("/v1/admin/djs/{dj_id}/restore"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "restore: {body}");
+    assert_eq!(body["status"], "active");
+    assert_eq!(body["removed"], false);
+    let (s, _) = call(
+        &env,
+        "POST",
+        &format!("/v1/admin/djs/{dj_id}/restore"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "restore идемпотентен");
+    let (s, _) = call(
+        &env,
+        "POST",
+        &format!("/v1/admin/djs/{}/restore", Uuid::now_v7()),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "restore unknown DJ");
+
+    // --- открытая смена блокирует удаление ------------------------------
+    let session_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO session (id, club_id, dj_id, status, timezone) \
+         VALUES ($1, $2, $3, 'active', 'Europe/Madrid')",
+    )
+    .bind(session_id)
+    .bind(club_b)
+    .bind(dj_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (s, body) = call(
+        &env,
+        "DELETE",
+        &format!("/v1/admin/djs/{dj_id}"),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "on-shift DJ: {body}");
+    assert_eq!(body["code"], "dj_on_shift");
+
+    // --- RBAC: клуб не управляет DJ через админ-роуты -------------------
+    for (method, uri, body) in [
+        (
+            "POST",
+            "/v1/admin/djs".to_string(),
+            Some(json!({ "email": "x@dj.test", "display_name": "X", "club_id": club_a })),
+        ),
+        (
+            "PATCH",
+            format!("/v1/admin/djs/{dj_id}"),
+            Some(json!({ "status": "active" })),
+        ),
+        ("DELETE", format!("/v1/admin/djs/{dj_id}"), None),
+        ("POST", format!("/v1/admin/djs/{dj_id}/restore"), None),
+    ] {
+        let (s, _) = call(&env, method, &uri, body, Some(&club_tok)).await;
+        assert_eq!(s, StatusCode::FORBIDDEN, "club role on {method} {uri}");
+    }
+}
+
+/// Гости: `PATCH /v1/admin/guests/:id {banned}` пишет колонку, GET её
+/// отражает, повтор идемпотентен, аудит пишется только на смену.
+#[tokio::test]
+async fn e2e_admin_guests_ban() {
+    let repo = maybe_skip!(test_repo().await);
+    let sessions = SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
+    let admin = env
+        .keys
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, admin_id, "superadmin").await;
+    let club_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
+        .unwrap();
+
+    let club_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1, 'Ban Club', 'ban-club', 'ban@club.test', 'x')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let session = sessions
+        .create_session(club_id, None, None, "Europe/Madrid")
+        .await
+        .unwrap();
+    let guest_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO guest_device (id, platform, display_name) VALUES ($1, 'ios', 'Banned Guy')",
+    )
+    .bind(guest_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sessions
+        .grant_session_guest(session.id, guest_id)
+        .await
+        .unwrap();
+
+    let list_uri = format!("/v1/admin/guests?club_id={club_id}");
+    let (s, body) = call(&env, "GET", &list_uri, None, Some(&admin)).await;
+    assert_eq!(s, StatusCode::OK, "guests list: {body}");
+    assert_eq!(body["items"][0]["banned"], false);
+
+    // --- ban ------------------------------------------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": true })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "ban: {body}");
+    assert_eq!(body["id"], guest_id.to_string());
+    assert_eq!(body["banned"], true);
+    let (flagged,): (bool,) = sqlx::query_as("SELECT banned FROM guest_device WHERE id = $1")
+        .bind(guest_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(flagged, "guest_device.banned записан");
+
+    let (_, body) = call(&env, "GET", &list_uri, None, Some(&admin)).await;
+    assert_eq!(body["items"][0]["banned"], true, "GET отражает бан");
+    let (audits,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM audit_log WHERE action = 'guest.ban' AND entity = $1")
+            .bind(guest_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audits, 1, "guest.ban в аудите");
+
+    // Идемпотентность: тот же banned → 200, без второй записи аудита.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": true })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "repeat ban is idempotent: {body}");
+    assert_eq!(body["banned"], true);
+    let (audits,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM audit_log WHERE action = 'guest.ban' AND entity = $1")
+            .bind(guest_id.to_string())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(audits, 1, "повторный клик не дублирует аудит");
+
+    // --- unban ----------------------------------------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": false })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "unban: {body}");
+    assert_eq!(body["banned"], false);
+    let (_, body) = call(&env, "GET", &list_uri, None, Some(&admin)).await;
+    assert_eq!(body["items"][0]["banned"], false, "бан снят");
+    let (audits,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM audit_log WHERE action = 'guest.unban' AND entity = $1",
+    )
+    .bind(guest_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1, "guest.unban в аудите");
+
+    // --- ошибки и RBAC --------------------------------------------------
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{}", Uuid::now_v7()),
+        Some(json!({ "banned": true })),
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "unknown guest: {body}");
+    assert_eq!(body["code"], "guest_not_found");
+
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": true })),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    let (s, _) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": true })),
+        Some(&club_tok),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club role cannot ban guests");
+}
+
+/// Аудит: `diff` приходит, пагинация выдаёт две страницы без пересечения,
+/// мусорный курсор не ломает выдачу.
+#[tokio::test]
+async fn e2e_admin_audit_log_pagination() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
+    let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
+    let admin = env
+        .keys
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, admin_id, "superadmin").await;
+
+    // Три события с разными `at` и разными diff (журнал пуст после TRUNCATE).
+    for (action, marker, minutes) in [
+        ("audit.page.1", "one", 3_i64),
+        ("audit.page.2", "two", 2),
+        ("audit.page.3", "three", 1),
+    ] {
+        sqlx::query(
+            "INSERT INTO audit_log (actor_type, actor_id, action, entity, diff, at) \
+             VALUES ('admin', $1, $2, 'audit-probe', $3, now() - make_interval(mins => $4))",
+        )
+        .bind(admin_id)
+        .bind(action)
+        .bind(json!({ "marker": marker }))
+        .bind(minutes as i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (s, page1) = call(
+        &env,
+        "GET",
+        "/v1/admin/audit-log?limit=2",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "audit page 1: {page1}");
+    let items = page1["items"].as_array().expect("items");
+    assert_eq!(items.len(), 2, "limit работает");
+    assert_eq!(items[0]["action"], "audit.page.3", "свежие сверху");
+    assert_eq!(items[1]["action"], "audit.page.2");
+    assert_eq!(
+        items[0]["diff"]["marker"], "three",
+        "diff (JSONB) приходит как объект: {page1}"
+    );
+    let cursor = page1["next_cursor"]
+        .as_str()
+        .expect("next_cursor на первой странице")
+        .to_string();
+
+    let (s, page2) = call(
+        &env,
+        "GET",
+        &format!("/v1/admin/audit-log?limit=2&cursor={}", urlenc(&cursor)),
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "audit page 2: {page2}");
+    let items2 = page2["items"].as_array().expect("items");
+    assert_eq!(items2.len(), 1, "вторая страница: {page2}");
+    assert_eq!(items2[0]["action"], "audit.page.1");
+    assert!(
+        page2["next_cursor"].is_null(),
+        "на последней странице next_cursor = null: {page2}"
+    );
+    assert!(!items.iter().any(|i| i["id"] == items2[0]["id"]));
+
+    // Мусорный курсор — первая страница, не 500.
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/audit-log?limit=2&cursor=not-a-cursor",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "bad cursor: {body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(2));
+    assert_eq!(body["items"][0]["action"], "audit.page.3");
+
+    // Кламп limit: 0 → 1, 999 → 200 (но строк всего три).
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/audit-log?limit=0",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(1),
+        "limit 0 → 1"
+    );
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/admin/audit-log?limit=999",
+        None,
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        body["items"].as_array().map(Vec::len),
+        Some(3),
+        "limit клампится, но все строки отдаются"
+    );
+
+    // RBAC: клуб не читает админский журнал.
+    let club_tok = env
+        .keys
+        .issue_access(Uuid::now_v7(), Role::Club, Uuid::now_v7())
+        .unwrap();
+    let (s, _) = call(&env, "GET", "/v1/admin/audit-log", None, Some(&club_tok)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+}
+
+/// Платежи: `currency`, `refunded_minor`, `failure_reason`, `captured_at`,
+/// `club_id` реально приходят (аудит §4.3 — UI подставлял константы).
+#[tokio::test]
+async fn e2e_admin_payments_fields() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
+    let pool = repo.pool();
+    let admin_id = Uuid::now_v7();
+    let admin = env
+        .keys
+        .issue_access(admin_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, admin_id, "superadmin").await;
+
+    let (club_id, request_id) =
+        seed_club_request(&pool, &format!("pay-fields-{}", Uuid::now_v7())).await;
+
+    let paid_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO payment (id, request_id, idempotency_key, amount_minor, currency, status, \
+         refunded_minor, failure_reason, captured_at, stripe_payment_intent_id) \
+         VALUES ($1, $2, $3, 2500, 'USD', 'partially_refunded', 500, 'card_declined', \
+         now() - interval '1 hour', 'pi_fields_1')",
+    )
+    .bind(paid_id)
+    .bind(request_id)
+    .bind(format!("idem-fields-{paid_id}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (s, body) = call(&env, "GET", "/v1/admin/payments", None, Some(&admin)).await;
+    assert_eq!(s, StatusCode::OK, "payments: {body}");
+    let row = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|i| i["id"] == paid_id.to_string())
+        .expect("payment row");
+    assert_eq!(row["amount_minor"], 2500, "деньги в минорных единицах");
+    assert_eq!(row["currency"], "USD", "currency из БД, не константа");
+    assert_eq!(row["status"], "partially_refunded");
+    assert_eq!(row["refunded_minor"], 500, "возврат виден");
+    assert_eq!(row["failure_reason"], "card_declined");
+    assert!(
+        row["captured_at"].is_string(),
+        "captured_at приходит: {row}"
+    );
+    assert_eq!(row["club_id"], club_id.to_string(), "club_id из JOIN");
+    assert_eq!(row["stripe_payment_intent_id"], "pi_fields_1");
+
+    // Платёж без оплаты: nullable-поля приходят как null.
+    let intent_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO payment (id, request_id, idempotency_key, amount_minor, status) \
+         VALUES ($1, $2, $3, 700, 'intent')",
+    )
+    .bind(intent_id)
+    .bind(request_id)
+    .bind(format!("idem-intent-{intent_id}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (_, body) = call(&env, "GET", "/v1/admin/payments", None, Some(&admin)).await;
+    let row = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == intent_id.to_string())
+        .expect("intent row");
+    assert_eq!(row["currency"], "EUR", "дефолт колонки");
+    assert_eq!(row["refunded_minor"], 0);
+    assert!(row["failure_reason"].is_null());
+    assert!(row["captured_at"].is_null());
+}
+
+/// `readonly`-админ: GET работает, все мутации — 403; `superadmin` пишет.
+///
+/// Гейт — `rbac::require_admin_write`, роль читается из `admin_user.role`.
+#[tokio::test]
+async fn e2e_admin_readonly_forbidden() {
+    let repo = maybe_skip!(test_repo().await);
+    let env = app_env(
+        Some(repo.clone()),
+        Some(SessionRepo::new(repo.pool())),
+        None,
+    )
+    .await;
+    let pool = repo.pool();
+
+    let readonly_id = Uuid::now_v7();
+    let readonly = env
+        .keys
+        .issue_access(readonly_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, readonly_id, "readonly").await;
+    let super_id = Uuid::now_v7();
+    let superadmin = env
+        .keys
+        .issue_access(super_id, Role::Admin, Uuid::now_v7())
+        .unwrap();
+    seed_admin_user(&pool, super_id, "superadmin").await;
+
+    let club_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash, status) \
+         VALUES ($1, 'RO Club', 'ro-club', 'ro@club.test', 'x', 'active')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let dj_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name, status) \
+         VALUES ($1, $2, 'ro@dj.test', 'x', 'RO DJ', 'active')",
+    )
+    .bind(dj_id)
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let guest_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO guest_device (id, platform) VALUES ($1, 'ios')")
+        .bind(guest_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // --- чтение доступно -------------------------------------------------
+    for uri in [
+        "/v1/admin/clubs".to_string(),
+        "/v1/admin/djs".to_string(),
+        "/v1/admin/audit-log".to_string(),
+        "/v1/admin/payments".to_string(),
+        format!("/v1/admin/clubs/{club_id}"),
+        format!("/v1/admin/guests?club_id={club_id}"),
+    ] {
+        let (s, body) = call(&env, "GET", &uri, None, Some(&readonly)).await;
+        assert_eq!(s, StatusCode::OK, "readonly GET {uri}: {body}");
+    }
+
+    // --- мутации запрещены ----------------------------------------------
+    let mutations: Vec<(&str, String, Option<Value>)> = vec![
+        (
+            "POST",
+            "/v1/admin/clubs".to_string(),
+            Some(json!({ "name": "Nope Club", "city": "Madrid", "timezone": "UTC" })),
+        ),
+        (
+            "PATCH",
+            format!("/v1/admin/clubs/{club_id}"),
+            Some(json!({ "status": "blocked" })),
+        ),
+        ("DELETE", format!("/v1/admin/clubs/{club_id}"), None),
+        (
+            "POST",
+            "/v1/admin/djs".to_string(),
+            Some(json!({ "email": "nope@dj.test", "display_name": "Nope", "club_id": club_id })),
+        ),
+        (
+            "PATCH",
+            format!("/v1/admin/djs/{dj_id}"),
+            Some(json!({ "status": "suspended" })),
+        ),
+        ("DELETE", format!("/v1/admin/djs/{dj_id}"), None),
+        ("POST", format!("/v1/admin/djs/{dj_id}/restore"), None),
+        (
+            "PATCH",
+            format!("/v1/admin/guests/{guest_id}"),
+            Some(json!({ "banned": true })),
+        ),
+        (
+            "PATCH",
+            "/v1/admin/platform-settings".to_string(),
+            Some(json!({ "runtime_mode": "test" })),
+        ),
+    ];
+    for (method, uri, body) in mutations {
+        let (s, resp) = call(&env, method, &uri, body, Some(&readonly)).await;
+        assert_eq!(
+            s,
+            StatusCode::FORBIDDEN,
+            "readonly must be forbidden on {method} {uri}: {resp}"
+        );
+        assert_eq!(resp["code"], "forbidden", "конверт ошибки: {resp}");
+    }
+
+    // Ничего не изменилось.
+    let (status,): (String,) = sqlx::query_as("SELECT status FROM club WHERE id = $1")
+        .bind(club_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "active", "readonly не заблокировал клуб");
+    let (banned,): (bool,) = sqlx::query_as("SELECT banned FROM guest_device WHERE id = $1")
+        .bind(guest_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(!banned, "readonly не забанил гостя");
+
+    // Контроль: superadmin того же окружения пишет.
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        &format!("/v1/admin/guests/{guest_id}"),
+        Some(json!({ "banned": true })),
+        Some(&superadmin),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "superadmin writes: {body}");
+    assert_eq!(body["banned"], true);
+}
+
+// ============================================================
+// W-8: поля профиля/экономики клуба и валидация query
+// ============================================================
+
+/// §4.1–§4.3 / §6.2 / §6.3: профиль отдаёт `city`/`timezone`/`currency`/
+/// `created_at`/`stripe_account_id`; PATCH валидирует `city`/`timezone`/
+/// `currency` и пишет `club.profile_update`; `earnings` валидирует `period`
+/// и отдаёт `currency`; `pricing` возвращает `valid_from`/`valid_to`;
+/// дашборд — `timezone`/`dj_id` открытой смены; очередь DJ отклоняет
+/// мусорный `sort` конвертом `validation_error`.
+#[tokio::test]
+async fn e2e_club_profile_economics_and_query_validation() {
+    let repo = maybe_skip!(test_repo().await);
+    let sessions = SessionRepo::new(repo.pool());
+    let env = app_env(Some(repo.clone()), Some(sessions.clone()), None).await;
+    let pool = repo.pool();
+
+    let club_id = Uuid::now_v7();
+    let dj_id = Uuid::now_v7();
+    let club = env
+        .keys
+        .issue_access(club_id, Role::Club, Uuid::now_v7())
+        .unwrap();
+    let dj = env
+        .keys
+        .issue_access(dj_id, Role::Dj, Uuid::now_v7())
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash, city, timezone) \
+         VALUES ($1, 'Audit Club', 'audit-club', 'audit@club.test', 'x', \
+         'Valencia', 'Europe/Madrid')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name) \
+         VALUES ($1, $2, 'audit@dj.test', 'x', 'Audit DJ')",
+    )
+    .bind(dj_id)
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // --- GET profile: поля из БД, без выдумок UI ---
+    let (s, body) = call(&env, "GET", "/v1/club/profile", None, Some(&club)).await;
+    assert_eq!(s, StatusCode::OK, "profile: {body}");
+    assert_eq!(body["city"], "Valencia");
+    assert_eq!(body["timezone"], "Europe/Madrid");
+    assert_eq!(body["currency"], "EUR", "валюта — platform_settings");
+    assert!(body["created_at"].is_string(), "created_at: {body}");
+    assert!(body["stripe_account_id"].is_null());
+    assert!(body["logo_url"].is_null());
+
+    // --- PATCH: city/timezone + currency (текущая платформенная) ---
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/club/profile",
+        Some(json!({ "city": "Barcelona", "timezone": "UTC", "currency": "eur" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "profile patch: {body}");
+    assert_eq!(body["city"], "Barcelona");
+    assert_eq!(body["timezone"], "UTC");
+    assert_eq!(body["currency"], "EUR", "код валюты нормализован");
+    let (s, body) = call(&env, "GET", "/v1/club/profile", None, Some(&club)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["timezone"], "UTC", "PATCH сохранил зону: {body}");
+    assert_eq!(body["city"], "Barcelona");
+
+    // --- аудит: actor=club, before/after ---
+    let (action, actor_type, diff): (String, String, Value) = sqlx::query_as(
+        "SELECT action, actor_type, diff FROM audit_log \
+         WHERE action = 'club.profile_update' ORDER BY at DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(action, "club.profile_update");
+    assert_eq!(actor_type, "club");
+    assert_eq!(diff["before"]["timezone"], "Europe/Madrid");
+    assert_eq!(diff["after"]["timezone"], "UTC");
+
+    // --- 422: невалидная зона / длинный город / неизвестная валюта ---
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/club/profile",
+        Some(json!({ "timezone": "Bad/Zone" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad tz: {body}");
+    assert_eq!(body["code"], "invalid_timezone");
+
+    let long_city = "x".repeat(121);
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/club/profile",
+        Some(json!({ "city": long_city })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "long city: {body}");
+    assert_eq!(body["code"], "validation_error");
+
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/club/profile",
+        Some(json!({ "currency": "XYZ" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad currency: {body}");
+    assert_eq!(body["code"], "validation_error");
+
+    // --- 422 currency_locked: валюта платформенная, не клубная ---
+    let (s, body) = call(
+        &env,
+        "PATCH",
+        "/v1/club/profile",
+        Some(json!({ "currency": "USD" })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "currency locked: {body}"
+    );
+    assert_eq!(body["code"], "currency_locked");
+    assert_eq!(body["details"]["current"], "EUR");
+
+    // --- earnings: мусорный period → 400; валидный — currency ---
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/club/earnings?period=quarter",
+        None,
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "bad period: {body}");
+    assert_eq!(body["code"], "validation_error");
+
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/club/earnings?period=week",
+        None,
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "earnings week: {body}");
+    assert_eq!(body["period"], "week");
+    assert_eq!(body["currency"], "EUR");
+    assert_eq!(body["net_minor"], 0);
+    assert_eq!(body["payments"], 0);
+    let (s, body) = call(&env, "GET", "/v1/club/earnings", None, Some(&club)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(body["period"], "today", "дефолт остался today");
+
+    // --- pricing: 201 отдаёт valid_from/valid_to ---
+    let (s, body) = call(
+        &env,
+        "POST",
+        "/v1/club/pricing",
+        Some(json!({ "price_minor": 300 })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "pricing: {body}");
+    assert!(body["valid_from"].is_string(), "valid_from: {body}");
+    assert!(body["valid_to"].is_null(), "новая политика открыта");
+    let (s, _) = call(
+        &env,
+        "POST",
+        "/v1/club/pricing",
+        Some(json!({ "price_minor": 500, "dj_share_bp": 5000 })),
+        Some(&club),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, body) = call(&env, "GET", "/v1/club/pricing", None, Some(&club)).await;
+    assert_eq!(s, StatusCode::OK);
+    let old = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["price_minor"] == 300)
+        .expect("old 300 policy");
+    assert!(
+        !old["valid_to"].is_null(),
+        "старая политика закрыта: {body}"
+    );
+
+    // --- dashboard: timezone/dj_id/dj_display_name открытой смены ---
+    let session = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    let (s, body) = call(&env, "GET", "/v1/club/dashboard", None, Some(&club)).await;
+    assert_eq!(s, StatusCode::OK, "dashboard: {body}");
+    assert_eq!(body["session"]["id"], json!(session.id));
+    assert_eq!(body["session"]["timezone"], "Europe/Madrid");
+    assert_eq!(body["session"]["dj_id"], json!(dj_id));
+    assert_eq!(body["session"]["dj_display_name"], "Audit DJ");
+
+    // --- очередь DJ: мусорный sort → 400 validation_error ---
+    let (s, body) = call(&env, "GET", "/v1/dj/queue?sort=abc", None, Some(&dj)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "bad sort: {body}");
+    assert_eq!(body["code"], "validation_error");
+    let (s, body) = call(&env, "GET", "/v1/dj/queue?sort=hot", None, Some(&dj)).await;
+    assert_eq!(s, StatusCode::OK, "hot sort: {body}");
+    assert!(body["items"].is_array());
 }

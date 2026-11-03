@@ -56,7 +56,7 @@ export default function PaymentsPage() {
           </div>
         </header>
 
-        <div style={{ maxWidth: 260, marginBottom: 16 }}>
+        <div className="admin-filter-single">
           <Select
             id="payment-status"
             label={t('payments.statusLabel')}
@@ -84,7 +84,7 @@ export default function PaymentsPage() {
 
         {data && data.items.length > 0 ? (
           <div className="table-wrap">
-            <table className="data-table" style={{ minWidth: 760 }}>
+            <table className="data-table data-table--stack" style={{ minWidth: 760 }}>
               <thead>
                 <tr>
                   <th scope="col">{t('payments.colPayment')}</th>
@@ -97,9 +97,9 @@ export default function PaymentsPage() {
               <tbody>
                 {data.items.map((payment) => (
                   <tr key={payment.id}>
-                    <td className="is-mono is-muted">{payment.id.slice(0, 12)}</td>
-                    <td className="is-mono is-muted">{payment.requestId.slice(0, 12)}</td>
-                    <td className="is-num">
+                    <td data-label="" className="cell-primary is-mono">{payment.id.slice(0, 12)}</td>
+                    <td data-label={t('payments.colRequest')} className="is-mono is-muted">{payment.requestId.slice(0, 12)}</td>
+                    <td data-label={t('payments.colAmount')} className="is-num">
                       <span className="is-strong">{money(payment.amountMinor, payment.currency)}</span>
                       {payment.refundedMinor > 0 ? (
                         <span style={{ display: 'block', color: 'var(--c-text-muted-sm)', fontSize: 'var(--fs-11)' }}>
@@ -107,7 +107,7 @@ export default function PaymentsPage() {
                         </span>
                       ) : null}
                     </td>
-                    <td>
+                    <td data-label={t('payments.colStatus')}>
                       <div style={{ display: 'grid', justifyItems: 'start', gap: 4 }}>
                         <StatusBadge status={payment.status} />
                         {payment.failureReason ? (
@@ -115,7 +115,7 @@ export default function PaymentsPage() {
                         ) : null}
                       </div>
                     </td>
-                    <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{new Date(payment.createdAt).toLocaleString(locale)}</td>
+                    <td data-label={t('payments.colCreated')} className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{new Date(payment.createdAt).toLocaleString(locale)}</td>
                   </tr>
                 ))}
               </tbody>

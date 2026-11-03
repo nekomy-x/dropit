@@ -49,6 +49,7 @@
  * definition, so it starts at `test` without waiting for the network.
  */
 import { useEffect, useRef, useState } from 'react';
+import Icon from './Icon';
 import { useLocale } from '../locale';
 
 export type DeploymentMode = 'test' | 'maintenance' | 'normal';
@@ -256,6 +257,10 @@ export default function DeploymentStatusBar({ info }: { info: DeploymentStatusIn
  * One fact, one shape: the bottom band (`DeploymentStatusBar`) is kept for
  * `maintenance` only, which is a different fact and needs the room for words.
  * See `MaintenanceBand`.
+ *
+ * The mark is the `triangle-alert` warning sign the panels already use for
+ * "needs attention", not a leading dot: a 5px disc next to a word that already
+ * names the state encoded nothing and looked like a bullet.
  */
 export function DeploymentPill({
   demoBuild,
@@ -278,7 +283,7 @@ export function DeploymentPill({
       data-test-stand=""
       data-payments={info.payments}
     >
-      <span className="test-badge-dot" aria-hidden="true" />
+      <Icon name="lucide:triangle-alert" size={13} className="test-badge-icon" />
       <span>{t('deployment.testLabel')}</span>
     </span>
   );

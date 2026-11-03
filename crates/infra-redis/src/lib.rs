@@ -140,6 +140,17 @@ pub trait TicketStore: Send + Sync {
         -> Result<(), RedisStoreError>;
     /// Атомарно забирает билет; `None`, если его нет, истёк или уже взят.
     async fn take(&self, ticket: &str) -> Result<Option<Value>, RedisStoreError>;
+
+    /// Проверка доступности бэкенда для публичной статус-страницы
+    /// (`GET /v1/status/services`). In-memory бэкенд всегда доступен.
+    async fn ping(&self) -> Result<(), RedisStoreError> {
+        Ok(())
+    }
+
+    /// Имя бэкенда для статус-страницы: `redis` или `memory`.
+    fn backend(&self) -> &'static str {
+        "memory"
+    }
 }
 
 /// In-memory реализация [`TicketStore`]: `Mutex<HashMap>` с честным TTL и
@@ -270,6 +281,19 @@ impl TicketStore for RedisTicketStore {
             .await
             .map_err(map_redis_error)?;
         Ok(())
+    }
+
+    async fn ping(&self) -> Result<(), RedisStoreError> {
+        let mut conn = self.manager.clone();
+        redis::cmd("PING")
+            .query_async::<String>(&mut conn)
+            .await
+            .map(|_| ())
+            .map_err(map_redis_error)
+    }
+
+    fn backend(&self) -> &'static str {
+        "redis"
     }
 
     async fn take(&self, ticket: &str) -> Result<Option<Value>, RedisStoreError> {

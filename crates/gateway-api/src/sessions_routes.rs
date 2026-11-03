@@ -46,6 +46,7 @@ pub struct JoinRequest {
 /// (сервер в F4 проверяет живой session_guest, не client-side id).
 #[derive(Serialize)]
 pub struct JoinResponse {
+    pub test_payments: bool,
     pub session_id: Uuid,
     pub club_name: String,
     pub dj_display_name: Option<String>,
@@ -67,10 +68,29 @@ pub struct CreateSessionRequest {
 #[derive(Serialize)]
 pub struct SessionResponse {
     pub id: Uuid,
+    /// Клуб-владелец сессии — чтобы клиенту не приходилось помнить его
+    /// отдельно (audit web-club §4.1: UI терял `club_id`/`timezone`).
+    pub club_id: Uuid,
     pub status: String,
     pub timezone: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dj_id: Option<Uuid>,
+    /// Плановое авто-закрытие: следующий 07:00 в зоне сессии (Q5).
+    /// `null` — сессия уже закрыта. Это ожидаемое время для UI, а не
+    /// фоновый таймер.
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Плановое авто-закрытие для `SessionResponse` (см. [`SessionResponse`]).
+///
+/// Закрытая сессия планового времени не имеет; невалидная зона в БД
+/// (теоретический брак) даёт `null`, а не 500 — сессия уже создана.
+fn planned_close_at(status: &str, timezone: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    if status == "closed" {
+        return None;
+    }
+    let tz: chrono_tz::Tz = timezone.parse().ok()?;
+    Some(dropit_domain::qr::next_close_at(&tz, chrono::Utc::now()))
 }
 
 #[derive(Serialize)]
@@ -119,6 +139,9 @@ pub struct CurrentSessionResponse {
     pub club_id: Uuid,
     pub club_name: String,
     pub club_city: String,
+    /// IANA-зона клуба/сессии: UI открывает смену в ней, а не в
+    /// захардкоженной `Europe/Madrid` (audit web-club §4.1).
+    pub timezone: String,
     pub opened_at: chrono::DateTime<chrono::Utc>,
     pub closes_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Принимает ли клуб заявки сейчас (та же логика, что в гейте
@@ -243,6 +266,7 @@ async fn join_session(
     (
         StatusCode::OK,
         Json(JoinResponse {
+            test_payments: state.stripe.as_ref().is_some_and(|provider| provider.is_mock()),
             session_id: info.session_id,
             club_name: info.club_name,
             dj_display_name: info.dj_display_name,
@@ -360,6 +384,7 @@ async fn current_session(State(state): State<ApiEnv>, headers: HeaderMap) -> Res
                 club_id: row.club_id,
                 club_name: row.club_name,
                 club_city: row.club_city,
+                timezone: row.timezone.clone(),
                 opened_at: row.opened_at,
                 closes_at: row.closed_at,
                 requests_open,
@@ -427,6 +452,9 @@ async fn create_session(
             StatusCode::CREATED,
             Json(SessionResponse {
                 id: s.id,
+                club_id: s.club_id,
+                // `expires_at` считается до перемещения `status`/`timezone`.
+                expires_at: planned_close_at(&s.status, &s.timezone),
                 status: s.status,
                 timezone: s.timezone,
                 dj_id: s.dj_id,
@@ -657,6 +685,9 @@ async fn close_session(
             StatusCode::OK,
             Json(SessionResponse {
                 id: s.id,
+                club_id: s.club_id,
+                // `expires_at` считается до перемещения `status`/`timezone`.
+                expires_at: planned_close_at(&s.status, &s.timezone),
                 status: s.status,
                 timezone: s.timezone,
                 dj_id: s.dj_id,
@@ -707,6 +738,9 @@ async fn open_session(
             StatusCode::OK,
             Json(SessionResponse {
                 id: s.id,
+                club_id: s.club_id,
+                // `expires_at` считается до перемещения `status`/`timezone`.
+                expires_at: planned_close_at(&s.status, &s.timezone),
                 status: s.status,
                 timezone: s.timezone,
                 dj_id: s.dj_id,

@@ -1,0 +1,170 @@
+/* Hub — the domain root's two-sided gate.
+   Page-local layout only: colours, spacing and type scales are the Tailwind
+   `drop-*` utilities on the markup, motion and the photo switch live here.
+   Contract: docs/ui/hub-download-contract.md §Visual contract. */
+
+/* The page is one screen: the shell is `min-h-screen` and a column, so the gate
+   takes the space the 72px bar and the footer leave over and the footer sits on
+   the fold instead of just below it. When the halves cannot be that short
+   (phones, short laptops) their own min-heights win and the page scrolls. */
+.hub-gate {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.hub-intro {
+  flex: 0 0 auto;
+}
+
+.hub-intro .connect-eyebrow {
+  font-size: 11px;
+}
+
+/* One column on phones, two equal halves from 900px up. Each half is a link
+   and a grid item, so the two always match height on a wide screen. */
+.hub-split {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.hub-side {
+  position: relative;
+  display: flex;
+  min-height: 460px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.hub-photo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* The one animated property on this page: the colour switch below. */
+  transition: filter var(--dur-base) var(--ease-out);
+}
+
+/* The club photograph is portrait (1080×1620) dropped into a landscape half, so
+   `cover` alone decides the crop — and its top-left corner is the house's lit
+   projector screen, a near-white rectangle that reads as a broken scrim behind
+   the copy. The element is made twice the half's height and anchored to its
+   bottom edge, which shows only the bottom half of the photo: crowd, booth and
+   mixer, never the screen, at every width the two halves are used. */
+.hub-photo--club {
+  top: auto;
+  bottom: 0;
+  height: 200%;
+  object-position: 50% 100%;
+}
+
+/* Functional scrim, not decoration. One light bottom-up veil gives the photo a
+   readable dark base without flattening it; the contrast floor itself is carried
+   by the per-group bands on `.hub-copy` below, which travel with the text when a
+   translation wraps to more lines. */
+.hub-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.12) 0%,
+    rgba(0, 0, 0, 0.08) 40%,
+    rgba(0, 0, 0, 0.14) 62%,
+    rgba(0, 0, 0, 0.22) 82%,
+    rgba(0, 0, 0, 0.34) 100%
+  );
+}
+
+/* Each copy group carries its own soft legibility band, full-bleed to the half's
+   edges and faded at the top and bottom so it reads as a wash on the photograph
+   rather than a panel. The alpha inside a band is the measured floor for the
+   brightest pixel the photo puts under that row (white 15px lead and 14px
+   bullets ≥4.5:1; the accent eyebrow and the 22px stat values need less). */
+.hub-copy > div {
+  position: relative;
+  isolation: isolate;
+}
+
+.hub-copy > div::before {
+  content: '';
+  position: absolute;
+  inset: -28px -100vw;
+  z-index: -1;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0.6) 26px,
+    rgba(0, 0, 0, 0.64) 55%,
+    rgba(0, 0, 0, 0.68) calc(100% - 26px),
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+/* The bottom band starts at the CTA row: the CTA is an opaque control, the rows
+   under it are the two stat values and their mono labels. */
+.hub-copy > div:last-child::before {
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0.28) 28px,
+    rgba(0, 0, 0, 0.52) 62%,
+    rgba(0, 0, 0, 0.64) calc(100% - 28px),
+    rgba(0, 0, 0, 0) 100%
+  );
+}
+
+.hub-copy {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* The two door titles are the biggest type on the page; the frame's 80px was
+   sized for one fixed 1440 artboard, so this tracks the viewport instead and
+   keeps a 320px phone at a readable two-word line. */
+.hub-side-title {
+  font-size: clamp(30px, 3.6vw, 52px);
+  line-height: 0.96;
+  letter-spacing: -0.035em;
+}
+
+@media (min-width: 900px) {
+  .hub-split {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The halves are side by side, so their height is the copy's height: the
+     gate flexes to fill a tall viewport and stops at the content on a short
+     one instead of pushing the footer under the fold. */
+  .hub-side {
+    min-height: 0;
+  }
+}
+
+/* Keyboard selection wins over a pointer left on the other half, so the
+   focused door always stays in colour. Touch devices have no sticky hover. */
+.hub-split:has(.hub-side:focus-visible) .hub-side:not(:focus-visible) .hub-photo {
+  filter: grayscale(1) brightness(0.55);
+}
+
+@media (hover: hover) {
+  .hub-split:not(:has(.hub-side:focus-visible)):has(.hub-side:hover) .hub-side:not(:hover) .hub-photo {
+    filter: grayscale(1) brightness(0.55);
+  }
+}
+
+/* A half is a viewport-wide link, so the public focus ring (2px accent, drawn
+   by `.connect-root :focus-visible`) is pulled inside the photo: at the page
+   edge an offset ring would be clipped by `.connect-root`'s overflow. Colour
+   and width stay the shared ones — only the offset belongs to this shape. */
+.hub-side:focus-visible {
+  outline-offset: -4px;
+}

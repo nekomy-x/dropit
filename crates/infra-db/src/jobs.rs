@@ -238,6 +238,20 @@ impl JobsRepo {
         Ok(1)
     }
 
+    /// Отмечает живость воркера для публичной статус-страницы
+    /// (`GET /v1/status/services`). Вызывается супервизором каждые 15 с
+    /// и один раз в `--once`-прогоне; ошибка не валит задачу.
+    pub async fn record_heartbeat(&self, worker: &str) -> Result<(), JobsError> {
+        sqlx::query(
+            "INSERT INTO worker_heartbeat (worker, last_seen_at) VALUES ($1, now()) \
+             ON CONFLICT (worker) DO UPDATE SET last_seen_at = now()",
+        )
+        .bind(worker)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Retention-sweep: устройства, неактивные 180 дней, —
     /// плановая псевдонимизация (та же механика, без субъекта).
     pub async fn retention_sweep(&self) -> Result<Vec<Uuid>, JobsError> {
@@ -252,6 +266,24 @@ impl JobsRepo {
             if self.anonymize_guest_device(id, None).await? > 0 {
                 done.push(id);
             }
+        }
+        // Журнал вызовов Developer API живёт 30 дней (ADR-010), replay-кэш
+        // идемпотентности — 24 часа. Чистка не должна валить GDPR-проход:
+        // ошибка только логируется.
+        if let Err(err) =
+            sqlx::query("DELETE FROM api_key_usage WHERE at < now() - interval '30 days'")
+                .execute(&self.pool)
+                .await
+        {
+            tracing::warn!(error = %err, "api_key_usage retention failed");
+        }
+        if let Err(err) = sqlx::query(
+            "DELETE FROM developer_idempotency WHERE created_at < now() - interval '24 hours'",
+        )
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!(error = %err, "developer_idempotency retention failed");
         }
         Ok(done)
     }

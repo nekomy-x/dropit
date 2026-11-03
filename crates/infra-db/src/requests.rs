@@ -90,6 +90,57 @@ pub struct QueueItem {
     pub same_track_count: i64,
 }
 
+/// Строка лога смены DJ (`GET /v1/dj/history`).
+///
+/// Лог строго по проигранным заявкам: `played` — единственный статус, у
+/// которого есть время события (`played_at`). Отказ живёт без метки времени
+/// (`request` не хранит `rejected_at`), поэтому в этот лог не попадает:
+/// показывать «сыгранное» и «отклонённое» в одном списке под одной подписью
+/// значило бы выдавать одно за другое.
+#[derive(Debug, sqlx::FromRow)]
+pub struct DjHistoryItem {
+    pub id: Uuid,
+    pub title: String,
+    pub artist: String,
+    pub style: Option<String>,
+    pub played_at: Option<DateTime<Utc>>,
+    /// Ключ сортировки страницы: `COALESCE(played_at, created_at)`.
+    ///
+    /// Отдаётся отдельным полем, чтобы курсор следующей страницы кодировал
+    /// ровно тот ключ, по которому шла сортировка: иначе заявка без
+    /// `played_at` даёт курсор, не совпадающий с `ORDER BY`, и следующая
+    /// страница повторяет или теряет строки.
+    pub sort_key: DateTime<Utc>,
+    /// Когда заявку приняли. Колонки `accepted_at` в `request` нет, а миграция
+    /// вне рамок этой задачи, поэтому время берётся из единственного
+    /// фактического источника — outbox-события `request.accepted`, которое
+    /// пишется тем же действием DJ, что и смена статуса. События нет →
+    /// `None` (в ответе `null`), а не выдуманное время.
+    pub accepted_at: Option<DateTime<Utc>>,
+    /// Сколько раз эту же песню (canonical-ключ) заказали в сессии.
+    pub same_track_count: i64,
+    pub cover_url: Option<String>,
+}
+
+/// Счётчики текущей смены DJ (`GET /v1/dj/stats/session`).
+///
+/// Отличие от `/v1/dj/stats/today`: окно здесь — смена (`session.id`), а не
+/// последние 24 часа, поэтому числа не «плывут» через смену и совпадают с
+/// тем, что DJ видит в логе.
+#[derive(Debug, Clone, Copy, sqlx::FromRow)]
+pub struct DjSessionTotals {
+    pub requests: i64,
+    /// Заявки, которые DJ принял в очередь за смену: `accepted` + `played`.
+    /// Сыгранная заявка была принята раньше, поэтому `WHERE status='accepted'`
+    /// показал бы ноль к концу смены — а подпись в консоли «Requests you moved
+    /// into the queue» обещает именно «сколько принял».
+    pub accepted: i64,
+    pub played: i64,
+    pub rejected: i64,
+    /// DJ-доля по этой смене (`split.payee_type = 'dj'`), minor units.
+    pub earned_minor: i64,
+}
+
 #[derive(Debug, sqlx::FromRow)]
 struct ReplayRow {
     /// Владелец ключа (guest_device_id) — для проверки «чужой гость».
@@ -316,6 +367,87 @@ impl RequestRepo {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    /// Лог проигранных заявок смены (keyset-страница).
+    ///
+    /// Ключ сортировки — `(COALESCE(played_at, created_at), id)` по убыванию.
+    /// `COALESCE` нужен как страховка: `played` без `played_at` теоретически
+    /// возможен (строка могла прийти из бэкфилла), и без него такая заявка
+    /// выпала бы из лога навсегда — то есть «пропала», а не «не сыграла».
+    /// `played_at` при этом возвращается как есть: `null` в ответе честно
+    /// означает «время неизвестно».
+    ///
+    /// `after` — последняя строка предыдущей страницы (курсор); `limit`
+    /// ограничивает размер страницы (вызывающий просит `limit + 1`, чтобы
+    /// понять, есть ли следующая).
+    pub async fn dj_history(
+        &self,
+        session_id: Uuid,
+        after: Option<(DateTime<Utc>, Uuid)>,
+        limit: i64,
+    ) -> Result<Vec<DjHistoryItem>, RequestError> {
+        let (after_at, after_id) = match after {
+            Some((at, id)) => (Some(at), Some(id)),
+            None => (None, None),
+        };
+        let rows = sqlx::query_as::<_, DjHistoryItem>(
+            "SELECT r.id, t.title, t.artist, r.style, r.played_at, \
+             COALESCE(r.played_at, r.created_at) AS sort_key, \
+             (SELECT min(o.created_at) FROM outbox o \
+               WHERE o.aggregate_type = 'request' AND o.aggregate_id = r.id \
+                 AND o.event_type = 'request.accepted') AS accepted_at, \
+             (SELECT count(*) FROM request r2 \
+               JOIN track_cache t2 ON t2.id = r2.track_cache_id \
+               WHERE r2.session_id = r.session_id AND t2.canonical_key = t.canonical_key) \
+              AS same_track_count, \
+             t.cover_url \
+             FROM request r JOIN track_cache t ON t.id = r.track_cache_id \
+             WHERE r.session_id = $1 AND r.status = 'played' \
+               AND ($2::timestamptz IS NULL \
+                    OR (COALESCE(r.played_at, r.created_at), r.id) < ($2::timestamptz, $3::uuid)) \
+             ORDER BY COALESCE(r.played_at, r.created_at) DESC, r.id DESC \
+             LIMIT $4",
+        )
+        .bind(session_id)
+        .bind(after_at)
+        .bind(after_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// Счётчики смены целиком: заявки, решения, DJ-доля.
+    ///
+    /// `dj_id` — из JWT-контекста (не из запроса), поэтому чужие сплиты в
+    /// сумму не попадут даже если клиент подсунет чужой `session_id`.
+    pub async fn dj_session_totals(
+        &self,
+        session_id: Uuid,
+        dj_id: Uuid,
+    ) -> Result<DjSessionTotals, RequestError> {
+        let totals = sqlx::query_as::<_, DjSessionTotals>(
+            "SELECT \
+             (SELECT count(*) FROM request WHERE session_id = $1) AS requests, \
+             (SELECT count(*) FROM request WHERE session_id = $1 \
+                AND status IN ('accepted', 'played')) AS accepted, \
+             (SELECT count(*) FROM request WHERE session_id = $1 AND status = 'played') \
+               AS played, \
+             (SELECT count(*) FROM request WHERE session_id = $1 AND status = 'rejected') \
+               AS rejected, \
+             (SELECT COALESCE(sum(sp.amount_minor - sp.reversed_minor), 0)::bigint \
+                FROM split sp \
+                JOIN payment p ON p.id = sp.payment_id \
+                JOIN request r ON r.id = p.request_id \
+               WHERE r.session_id = $1 AND sp.payee_type = 'dj' AND sp.payee_id = $2) \
+               AS earned_minor",
+        )
+        .bind(session_id)
+        .bind(dj_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(totals)
     }
 
     /// Запросы гостя в сессии (для snapshot при reconnect WS).

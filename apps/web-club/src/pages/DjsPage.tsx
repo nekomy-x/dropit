@@ -427,7 +427,7 @@ export default function DjsPage() {
 
           {!firstLoad && roster.length > 0 ? (
             <div className="table-wrap">
-              <table className="data-table dj-table">
+              <table className="data-table dj-table data-table--stack">
                 <caption className="sr-only">
                   {t('djs.tableCaption')}
                 </caption>
@@ -462,7 +462,7 @@ export default function DjsPage() {
                     return (
                       <Fragment key={dj.id}>
                         <tr className={panel ? 'is-open' : undefined}>
-                          <td className="is-strong" data-label={t('djs.colDj')}>
+                          <td className="is-strong cell-primary">
                             <span className="dj-cell">
                               <span className="list-thumb" aria-hidden="true">
                                 {dj.displayName.slice(0, 1).toUpperCase()}
@@ -504,7 +504,7 @@ export default function DjsPage() {
                               <span className="dj-note is-empty">{t('djs.noNote')}</span>
                             )}
                           </td>
-                          <td data-label={t('djs.colActions')}>
+                          <td data-label="" className="cell-actions">
                             <div className="dj-row-actions">
                               <button
                                 type="button"
@@ -545,7 +545,7 @@ export default function DjsPage() {
 
                         {panel ? (
                           <tr className="dj-row-panel">
-                            <td colSpan={6}>
+                            <td colSpan={6} data-label="">
                               {panel.kind === 'note' ? (
                                 <form
                                   onSubmit={(event) => {

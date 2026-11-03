@@ -19,8 +19,17 @@ use crate::types::{
 /// синхронный (чистая криптография + разбор JSON, без I/O).
 #[async_trait::async_trait]
 pub trait StripeApi: Send + Sync {
+    /// Only a non-network simulator may enable the test payment method.
+    fn is_mock(&self) -> bool { false }
+
     /// `POST /v1/payment_intents` — создание PaymentIntent.
     async fn create_payment_intent(&self, req: CreateIntent) -> Result<IntentResult, StripeError>;
+
+    /// Recover an existing checkout after a lost HTTP response, without
+    /// creating or authorizing another payment.
+    async fn retrieve_payment_intent(&self, _intent_id: &str) -> Result<IntentResult, StripeError> {
+        Err(StripeError::Config("payment intent retrieval unsupported".into()))
+    }
 
     /// `POST /v1/payment_intents/{id}/capture` — захват холда.
     /// `amount_minor = None` → полный захват.

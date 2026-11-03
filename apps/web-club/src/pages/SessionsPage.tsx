@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
+import { guestJoinUrl } from '../guest/links';
 import {
   ApiRequestError,
   closeSession,
@@ -292,7 +293,13 @@ export default function SessionsPage() {
         </div>
       ) : null}
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
+      {/* Two panels only from 1280px, the breakpoint every wide+narrow row in the
+          panel system collapses at (PANEL-DESIGN §Layout rules). At 1024–1279 the
+          old `lg` split gave the QR panel 303px, which no QR layout survives.
+          The second column is the wider one on purpose: it owns the page's one
+          indivisible element, a 200px code, so the shift card — three short
+          rows — is the column that can afford to be narrow. */}
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <Panel
           title={t('sessions.shiftPanel')}
           detail={t('sessions.shiftPanelDetail')}
@@ -500,22 +507,29 @@ export default function SessionsPage() {
           ) : qr ? (
             <>
               <Tile tone="inset">
-                <div className="flex items-start gap-4 max-sm:flex-col">
+                {/* The code is the one indivisible element here: 200px of QR plus
+                    a readable column of copy next to it. Until the panel is wide
+                    enough for both (≈476px of tile content) the copy wraps under
+                    the code. A plain fixed row squeezed it into a 7px sliver at
+                    1024px, and the `nowrap` studio link then pushed the whole
+                    page 131px sideways. */}
+                <div className="flex flex-wrap items-start gap-4">
                   <div
-                    className="w-[200px] shrink-0 rounded-[var(--r-tile)] bg-white p-3"
+                    className="w-[200px] max-w-full shrink-0 rounded-[var(--r-tile)] bg-white p-3"
                     role="img"
                     aria-label={t('sessions.qrImageLabel')}
                   >
                     <QRCodeSVG
-                      value={qr.qr_token}
+                      value={guestJoinUrl(qr.qr_token)}
                       size={176}
                       bgColor="#FFFFFF"
-                      fgColor="#06130C"
+                      fgColor="#0A0A0A"
                       level="M"
                       marginSize={0}
+                      className="h-auto w-full"
                     />
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-[1_1_260px]">
                     <p className="text-[length:var(--fs-13)] font-medium text-[color:var(--c-text)]">
                       {t('sessions.qrScan')}
                     </p>

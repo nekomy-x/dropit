@@ -162,6 +162,42 @@ const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 };
   await mctx.close();
 }
 
+// --- 7. Публичная страница статуса --------------------------------------
+// Страница не хардкодит сервисы: она рендерит ровно то, что вернул
+// /v1/status/services. Поэтому проверяем и количество строк, и то, что у
+// каждой строки есть валидный data-state — именно по нему красится точка.
+{
+  const ctx = await browser.newContext(desktop);
+  const page = await ctx.newPage();
+  watch(page, 'status');
+  await page.goto(`${BASE}/status/`, { waitUntil: 'networkidle' });
+  // Первичный рендер может завершиться уже после networkidle; ждём с
+  // таймаутом и не падаем, чтобы успеть записать проблему и закрыть браузер.
+  await page
+    .waitForFunction(() => document.querySelectorAll('li.check').length > 0, null, { timeout: 10000 })
+    .catch(() => {});
+  await shot(page, '15-status');
+
+  const rows = page.locator('li.check');
+  const count = await rows.count();
+  if (count !== 6) problems.push(`[status] ожидалось 6 строк сервисов, получено ${count}`);
+
+  const states = await rows.evaluateAll((nodes) =>
+    nodes.map((node) => node.dataset.state || ''),
+  );
+  const allowed = ['ok', 'degraded', 'down', 'unknown'];
+  states.forEach((state, index) => {
+    if (!allowed.includes(state)) {
+      problems.push(`[status] строка ${index + 1}: data-state="${state}"`);
+    }
+  });
+
+  const overall = await page.locator('#overall').getAttribute('data-state');
+  if (!allowed.includes(overall)) problems.push(`[status] #overall: data-state="${overall}"`);
+  console.log('status ->', states.join(', ') || '(нет строк)');
+  await ctx.close();
+}
+
 await browser.close();
 
 console.log('\n=== screenshots');

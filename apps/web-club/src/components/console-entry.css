@@ -1,0 +1,71 @@
+/* ============================================================================
+   Console entry — club panel → /dj
+   ----------------------------------------------------------------------------
+   Shown while the club's handoff is being confirmed, and when it cannot be
+   confirmed. It is a page, not a modal: the panel has already navigated to the
+   console, and a dialog over a console that does not exist would misrepresent
+   the state. One block with the reason and the next action, centred at the
+   reading width the panel uses for form pages.
+
+   Every value comes from the shared token layer (styles/club-tokens.css), so
+   the two themes stay in sync by construction.
+   ========================================================================== */
+
+/* The screen sits on the panel canvas, not inside the rail: there is no
+   workspace to navigate while the console is still being confirmed. */
+/* Vertically centred: this screen is an interstitial (a moment between two
+   surfaces), not a page with content below the fold. */
+.console-entry-page {
+  display: grid;
+  align-content: center;
+  gap: var(--sp-6);
+  min-height: 100vh;
+  width: min(560px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: var(--sp-6) 0 var(--sp-8);
+}
+
+.console-entry-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: fit-content;
+  min-height: var(--hit-desktop);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+  text-decoration: none;
+}
+.console-entry-brand:hover { color: var(--c-text); }
+
+.console-entry {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+}
+
+.console-entry-body {
+  margin-top: 2px;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+.console-entry-meta {
+  margin-top: var(--sp-2);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.console-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+@media (max-width: 767px) {
+  .console-entry-page { align-content: start; padding-top: var(--sp-4); }
+  /* One full-width primary action per row: the two choices are not equal, and
+     side-by-side 44px buttons on a phone leave neither readable. */
+  .console-entry-actions .btn { width: 100%; }
+}

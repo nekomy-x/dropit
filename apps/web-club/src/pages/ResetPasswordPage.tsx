@@ -1,27 +1,17 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ApiRequestError, resetPassword } from '../api/client';
-import {
-  AuthAlert,
-  AuthFacts,
-  AuthWizard,
-  PasswordField,
-  type WizardStep,
-} from '../components/auth/AuthKit';
-import { useLocale, type Translate } from '../locale';
+import { AuthAlert, AuthScreen, PasswordField } from '../components/auth/AuthKit';
+import { useLocale } from '../locale';
 
 /**
- * Password reset — choose a new password (skin B, step 2 of 2).
+ * Password reset — choose a new password.
  *
  * POST /v1/auth/password/reset consumes the token and revokes every refresh
  * token of the account: a reset is also a sign-out everywhere. The token is
  * single-use, so a double submit is reported as an invalid link rather than
  * silently succeeding twice.
  */
-const STEPS = (t: Translate): ReadonlyArray<WizardStep> => [
-  { title: t('auth.resetEmailStep'), note: t('auth.resetRequestedFor') },
-  { title: t('auth.newPassword'), note: t('auth.resetNewStepNote') },
-];
 
 export default function ResetPasswordPage() {
   const { t } = useLocale();
@@ -75,20 +65,10 @@ export default function ResetPasswordPage() {
 
   if (done) {
     return (
-      <AuthWizard
+      <AuthScreen
         role={t('auth.recovery')}
-        steps={STEPS(t)}
-        step={2}
         title={t('auth.passwordChangedTitle')}
         subtitle={t('auth.passwordChangedSubtitle')}
-        asideFooter={
-          <AuthFacts
-            facts={[
-              { label: t('auth.resetNextLabel'), value: t('auth.resetNextSignIn') },
-              { label: t('auth.sessionsLabel'), value: t('auth.sessionsRevokedDone') },
-            ]}
-          />
-        }
         footer={<Link to="/login" className="auth-link">{t('auth.clubSignIn')}</Link>}
       >
         <div className="auth-form">
@@ -99,25 +79,15 @@ export default function ResetPasswordPage() {
             {t('auth.goToSignIn')}
           </button>
         </div>
-      </AuthWizard>
+      </AuthScreen>
     );
   }
 
   return (
-    <AuthWizard
+    <AuthScreen
       role={t('auth.recovery')}
-      steps={STEPS(t)}
-      step={2}
       title={t('auth.resetChooseTitle')}
       subtitle={t('auth.resetChooseSubtitle')}
-      asideFooter={
-        <AuthFacts
-          facts={[
-            { label: t('auth.resetLinkLivesLabel'), value: t('auth.resetLinkLivesValue') },
-            { label: t('auth.sessionsLabel'), value: t('auth.sessionsRevoked') },
-          ]}
-        />
-      }
       footer={
         <>
           <Link to="/reset-password" className="auth-link">{t('auth.requestNewLink')}</Link>
@@ -157,6 +127,6 @@ export default function ResetPasswordPage() {
           {submitting ? t('auth.saving') : t('auth.setNewPassword')}
         </button>
       </form>
-    </AuthWizard>
+    </AuthScreen>
   );
 }

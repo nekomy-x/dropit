@@ -1,0 +1,30 @@
+/* Roles & access — the role legend above the permission matrix.
+   Tokens only (`var(--c-*)`, `var(--fs-*)`, `var(--sp-*)`); the card, list rows
+   and type come from the shared panel kit.
+
+   Why this file exists: the legend is two columns — the role and its purpose on
+   the left, the scope it governs on the right. `.list-main` is a zero-basis flex
+   item, so on a phone the right column took the whole row (its sentence needed
+   ~236px of a 248px row), the left column collapsed to nothing, and the role
+   name printed on top of the scope text. A row that carries two sentences needs
+   a stacking breakpoint, and only this screen has that shape. */
+
+.access-role-row { align-items: flex-start; }
+
+.access-role-scope {
+  max-width: 48ch;
+  margin: 0;
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  /* One column: purpose under the role, scope under the purpose, both left
+     aligned. The role name keeps the full row width it needs. */
+  .access-role-row { flex-wrap: wrap; }
+  .access-role-scope {
+    max-width: none;
+    flex: 1 1 100%;
+    margin-top: var(--sp-1);
+    text-align: left;
+  }
+}

@@ -63,7 +63,7 @@ export default function GuestsPage() {
 
           {data && clubId && data.items.length > 0 ? (
             <div className="table-wrap">
-              <table className="data-table" style={{ minWidth: 820 }}>
+              <table className="data-table data-table--stack" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
                     <th scope="col">{t('guests.colDevice')}</th>
@@ -76,11 +76,11 @@ export default function GuestsPage() {
                 <tbody>
                   {data.items.map((guest) => (
                     <tr key={guest.id}>
-                      <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{guest.id}</td>
-                      <td>{guest.displayName || guest.email || t('guests.guestFallback')}</td>
-                      <td className="is-num">{guest.requestsCount}</td>
-                      <td>{new Date(guest.createdAt).toLocaleString(locale)}</td>
-                      <td>
+                      <td data-label="" className="cell-primary is-mono">{guest.id}</td>
+                      <td data-label={t('guests.colGuest')}>{guest.displayName || guest.email || t('guests.guestFallback')}</td>
+                      <td data-label={t('guests.colRequests')} className="is-num">{guest.requestsCount}</td>
+                      <td data-label={t('guests.colFirstSeen')}>{new Date(guest.createdAt).toLocaleString(locale)}</td>
+                      <td data-label={t('guests.colLastSeen')}>
                         {new Date(guest.lastSeenAt).toLocaleString(locale)}
                         {guest.banned ? <span style={{ marginLeft: 8 }}><StatusBadge status="blocked" /></span> : null}
                       </td>

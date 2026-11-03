@@ -25,7 +25,11 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const requestedPath = (location.state as { from?: unknown } | null)?.from;
-  const returnTo = typeof requestedPath === 'string' && /^\/(dashboard|clubs|djs|guests|payments|payouts|incidents|audit-log|platform-settings|admin)(?:[/?#]|$)/.test(requestedPath) ? requestedPath : '/payouts';
+  // Deep links that survive the login redirect: every admin destination the
+  // rail offers. `/api-keys` and `/mail` were missing, so signing in from
+  // either one landed on the fallback screen instead of the page that was asked
+  // for.
+  const returnTo = typeof requestedPath === 'string' && /^\/(dashboard|clubs|djs|guests|payments|payouts|incidents|audit-log|platform-settings|mail|api-keys|onboarding|admin)(?:[/?#]|$)/.test(requestedPath) ? requestedPath : '/payouts';
   const [form, setForm] = useState<AdminLoginRequest>({
     email: '',
     password: '',
@@ -95,16 +99,19 @@ export default function LoginPage() {
   return (
     <AdminAuthScreen
       title={challenge ? t('login.twoFactor') : t('login.signIn')}
-      subtitle={
-        challenge
-          ? t('login.twoFactorHint')
-          : t('login.note')
-      }
-      footer={
+      subtitle={challenge ? t('login.twoFactorHint') : undefined}
+      // The ways out sit in the club kit's links row: a new operator asks the
+      // operations address for an account (admin accounts are created by hand),
+      // and the club panel is the product's other door. An admin session has no
+      // self-service recovery, so there is no third link to offer.
+      links={
         <>
-          <a className="auth-link auth-link-muted" href="/login">Club panel sign-in</a>
-          <span className="auth-foot-sep" aria-hidden="true">·</span>
-          <a className="auth-link auth-link-muted" href="mailto:ops@dropit.music">Request access</a>
+          <a href="mailto:ops@dropit.music" className="auth-link">
+            {t('login.requestAccess')}
+          </a>
+          <a href="/login" className="auth-link auth-link-muted">
+            {t('login.clubPanel')}
+          </a>
         </>
       }
     >

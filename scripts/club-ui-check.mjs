@@ -30,6 +30,7 @@
  * Exit code 0 = gate green, 1 = at least one assert failed.
  */
 import { createRequire } from 'node:module';
+import { signInPanelIfNeeded } from './panel-test-auth.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -162,6 +163,9 @@ async function newPage(browser, viewport, { populated = true, reducedMotion = 'n
   const pageErrors = [];
   const externalHosts = new Set();
   const blockedRequests = [];
+  await page.route('**/v1/status', (route) => route.fulfill({
+    json: { mode: 'test', source: 'adaptive', open_signup: true, payments: 'mock' },
+  }));
 
   page.on('console', (msg) => {
     if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -196,6 +200,7 @@ async function newPage(browser, viewport, { populated = true, reducedMotion = 'n
   }
 
   await page.goto(PAGE, { waitUntil: 'networkidle', timeout: 60000 });
+  await signInPanelIfNeeded(page, 'club', '/dashboard');
   await page.waitForTimeout(900);
   return { context, page, consoleErrors, pageErrors, externalHosts, blockedRequests };
 }

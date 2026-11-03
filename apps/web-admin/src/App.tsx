@@ -16,6 +16,8 @@ import IncidentsPage from './pages/IncidentsPage';
 import AuditLogPage from './pages/AuditLogPage';
 import PlatformSettingsPage from './pages/PlatformSettingsPage';
 import MailPage from './pages/MailPage';
+import OnboardingPage from './pages/OnboardingPage';
+import ApiKeysPage from './pages/ApiKeysPage';
 import AdminOverviewPage from './pages/AdminOverviewPage';
 import AdminManagementView from './pages/AdminManagementView';
 import AdminActivityPage from './pages/AdminActivityPage';
@@ -86,6 +88,12 @@ export default function App() {
           {/* Mail reads the live API, so a demo build shows its real answer or
               an honest error state — never a seeded queue. */}
           <Route path="/mail" element={<MailPage />} />
+          {/* Key oversight is a live API surface too: the demo build shows the
+              real answer or an honest error, never a seeded list. */}
+          <Route path="/api-keys" element={<ApiKeysPage />} />
+          {/* The onboarding queue is a live API surface too: the demo build
+              shows the real answer or an honest error, never a seeded list. */}
+          <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -109,8 +117,13 @@ export default function App() {
         <Route path="/incidents" element={<IncidentsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
         <Route path="/platform-settings" element={<PlatformSettingsPage />} />
+        {/* Developer keys: read-only oversight of every club, plus revocation. */}
+        <Route path="/api-keys" element={<ApiKeysPage />} />
         {/* Mail is a LIVE API surface (docs/mail-infra-contract.md §8). */}
         <Route path="/mail" element={<MailPage />} />
+        {/* Club applications and their invite links
+            (docs/onboarding-contract.md). */}
+        <Route path="/onboarding" element={<OnboardingPage />} />
 
         {/* Operations control center: local-first preview with full CRUD.
             Paths are relative to the router basename (/admin/), so `/admin/users`

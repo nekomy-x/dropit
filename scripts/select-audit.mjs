@@ -127,7 +127,21 @@ try {
             const triggers = page.locator('.field-select__trigger');
             const total = await triggers.count();
             if (total === 0) {
+              // The request workspace now exposes status and sort as segments,
+              // not dropdowns. Verify those choices rather than requiring a
+              // control that no longer exists on this route.
+              if (appName === 'club' && route === '/dj') {
+                const groups = page.locator('.dj-req-toolbar .seg[role="group"]');
+                record(await groups.count() === 2, `${label} status and sort choices are present`);
+                for (const group of await groups.all()) {
+                  record(await group.locator('[aria-pressed="true"]').count() === 1,
+                    `${label} segmented choice has one active option`);
+                }
+                await context.close();
+                continue;
+              }
               record(false, `${label} has at least one select`, 'none rendered');
+              await context.close();
               continue;
             }
 

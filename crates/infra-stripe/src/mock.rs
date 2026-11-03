@@ -49,6 +49,17 @@ fn mock_uuid(seed: &str) -> String {
 
 #[async_trait::async_trait]
 impl StripeApi for MockStripe {
+    fn is_mock(&self) -> bool { true }
+
+    async fn retrieve_payment_intent(&self, intent_id: &str) -> Result<IntentResult, StripeError> {
+        Ok(IntentResult {
+            id: intent_id.to_string(),
+            status: IntentStatus::RequiresCapture,
+            amount_minor: 0,
+            client_secret: Some(format!("{intent_id}_secret_mock")),
+        })
+    }
+
     async fn create_payment_intent(&self, req: CreateIntent) -> Result<IntentResult, StripeError> {
         let id = format!(
             "pi_mock_{}",

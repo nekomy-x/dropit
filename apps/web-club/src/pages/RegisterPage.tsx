@@ -1,390 +1,284 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   ApiRequestError,
+  applyClubOnboarding,
   isAuthenticated,
-  registerClub,
-  registerDj,
 } from '../api/client';
-import { AuthAlert, AuthFacts, AuthWizard, PasswordField, type WizardStep } from '../components/auth/AuthKit';
+import { AuthAlert, AuthScreen } from '../components/auth/AuthKit';
+import BrandLogo from '../components/BrandLogo';
 import { useLocale, type Translate } from '../locale';
 
 /**
- * Open registration (Test Mode stand) — docs/signup-contract.md.
+ * Club application — docs/onboarding-contract.md.
  *
- * One path: the form posts to POST /v1/auth/club/register or
- * /v1/auth/dj/register, whose 201 body is a TokenPair, so the panel opens
- * without a second request. "Generate" fills the three fields with a demo
- * identity for someone who does not want to type one; it is a shortcut into
- * the same form, not a second submit path.
+ * Registration is closed: this screen submits `POST /v1/club/onboarding/apply`
+ * and the club gets a one-time invitation link from the platform after the
+ * application is approved. Nothing is created here and no password is asked
+ * for — the owner sets it on the invitation page, where the application facts
+ * are shown read-only.
  *
- * Tokens stay in memory (project rule), so a page refresh sends the user back
- * to /login — the fields are what they must have written down.
+ * Four fields, one action, one column: name, city, e-mail, capacity. The guest
+ * price is deliberately not asked for here — the club sets it in the panel
+ * (`/pricing`) after activation, so the owner never names a price before the
+ * invitation arrives. The application body therefore carries an empty `qr`
+ * block; the endpoint still accepts a price from richer flows such as
+ * `/connect`.
+ *
+ * The success state names the address the invitation will go to and says
+ * nothing else; the DJ branch is one line pointing at the club invitation,
+ * because a DJ cannot apply on their own.
  */
 
-type Role = 'club' | 'dj';
-
-interface GeneratedIdentity {
+interface ApplicationForm {
   name: string;
+  city: string;
   email: string;
-  password: string;
+  capacity: string;
 }
 
-interface SignupError {
-  scope: 'quick' | 'manual';
+interface ApplicationError {
   message: string;
-  hint?: string;
   code?: string;
+  hint?: string;
 }
 
-const ROLE_OPTIONS: ReadonlyArray<{ value: Role; labelKey: string; hintKey: string }> = [
-  { value: 'club', labelKey: 'auth.roleClub', hintKey: 'auth.roleClubHint' },
-  { value: 'dj', labelKey: 'auth.roleDj', hintKey: 'auth.roleDjHint' },
-];
+const EMPTY_FORM: ApplicationForm = {
+  name: '',
+  city: '',
+  email: '',
+  capacity: '',
+};
 
-const CLUB_NAMES = ['Barrio Latino', 'Noche Club', 'Vinyl Room', 'Basement 9', 'Sala Norte', 'Nebula Club'] as const;
-const DJ_NAMES = ['DJ Noche', 'DJ Vela', 'DJ Kairo', 'DJ Mirlo', 'DJ Lumen', 'DJ Senda'] as const;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_CAPACITY = 1;
+const MAX_CAPACITY = 100_000;
 
-/** Readable alphabet: no 0/o/1/l so a demo password can be retyped from screen. */
-const TOKEN_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
-
-function randomToken(length: number): string {
-  const values = new Uint8Array(length);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
-    crypto.getRandomValues(values);
-  } else {
-    for (let index = 0; index < length; index += 1) values[index] = Math.floor(Math.random() * 256);
+/** Field name from `details.field` → the message that names the same field. */
+function messageForField(field: unknown, t: Translate): string | undefined {
+  switch (field) {
+    case 'club.name':
+    case 'venue.name':
+      return t('auth.clubNameRequired');
+    case 'club.city':
+    case 'venue.city':
+      return t('auth.cityRequired');
+    case 'club.contact':
+      return t('auth.emailInvalid');
+    case 'venue.capacity':
+      return t('auth.capacityInvalid');
+    default:
+      return undefined;
   }
-  let token = '';
-  for (const value of values) token += TOKEN_ALPHABET.charAt(value % TOKEN_ALPHABET.length);
-  return token;
 }
 
-function pick<T>(items: readonly T[], fallback: T): T {
-  return items[Math.floor(Math.random() * items.length)] ?? fallback;
-}
-
-/** `demo+<rand>@club.test` / `@dj.test` per the signup contract. */
-function generateIdentity(role: Role): GeneratedIdentity {
-  const id = randomToken(6);
-  const base = pick(role === 'club' ? CLUB_NAMES : DJ_NAMES, role === 'club' ? 'Demo Club' : 'DJ Demo');
-  return {
-    name: `${base} ${id.slice(0, 3).toUpperCase()}`,
-    email: `demo+${id}@${role}.test`,
-    password: `demo-${randomToken(10)}`,
-  };
-}
-
-function describeSignupError(err: unknown, scope: SignupError['scope'], t: Translate): SignupError {
+function describeApplicationError(err: unknown, t: Translate): ApplicationError {
   if (err instanceof ApiRequestError) {
-    switch (err.code) {
-      case 'email_taken':
-        return {
-          scope,
-          code: err.code,
-          message: t('auth.emailTaken'),
-          hint: scope === 'quick' ? t('auth.emailTakenHintQuick') : t('auth.emailTakenHintManual'),
-        };
-      case 'validation_failed':
-        return {
-          scope,
-          code: err.code,
-          message: err.message || t('auth.validationFailed'),
-          hint: t('auth.validationFailedHint'),
-        };
-      case 'rate_limited':
-        return {
-          scope,
-          code: err.code,
-          message: t('auth.rateLimited'),
-          hint: t('auth.rateLimitedHint'),
-        };
-      case 'club_not_found':
-        return {
-          scope,
-          code: err.code,
-          message: t('auth.clubSlugNotFound'),
-          hint: t('auth.clubSlugNotFoundHint'),
-        };
-      default:
-        return { scope, code: err.code, message: err.message || t('auth.signupRejected') };
+    if (err.code === 'validation_error' || err.code === 'validation_failed') {
+      const fieldMessage = messageForField(err.details?.field, t);
+      return { message: fieldMessage ?? t('auth.validationFailed'), code: err.code };
     }
+    if (err.code === 'rate_limited') {
+      return { message: t('auth.rateLimited'), code: err.code, hint: t('auth.rateLimitedHint') };
+    }
+    return { message: t('auth.applicationFailed'), code: err.code };
   }
-  if (err instanceof Error) return { scope, message: t('auth.serverNoAnswer'), hint: err.message };
-  return { scope, message: t('auth.signupFailed') };
+  if (err instanceof Error) return { message: t('auth.serverNoAnswer'), hint: err.message };
+  return { message: t('auth.applicationFailed') };
 }
-
-/** The two steps, translated at render time (the rail is read, not navigated). */
-const STEPS = (t: Translate): ReadonlyArray<WizardStep> => [
-  { title: t('auth.stepRole'), note: t('auth.stepRoleNote') },
-  { title: t('auth.stepAccount'), note: t('auth.stepAccountNote') },
-];
 
 export default function RegisterPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const requestedRole = searchParams.get('role');
-  const [role, setRole] = useState<Role | null>(requestedRole === 'dj' || requestedRole === 'club' ? requestedRole : null);
-  const [manual, setManual] = useState({ name: '', email: '', password: '', clubSlug: '' });
-  const [error, setError] = useState<SignupError | null>(null);
+  const [form, setForm] = useState<ApplicationForm>(EMPTY_FORM);
+  const [error, setError] = useState<ApplicationError | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [signupClosed, setSignupClosed] = useState(false);
+  /** Set to the contact e-mail on success: the confirmation names it. */
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
-  // A live session does not need the funnel.
+  // A live session does not need the application form.
   useEffect(() => {
     if (isAuthenticated('dj')) navigate('/dj', { replace: true });
-    else if (isAuthenticated()) navigate('/sessions', { replace: true });
+    else if (isAuthenticated()) navigate('/dashboard', { replace: true });
   }, [navigate]);
 
-  const roleMeta = ROLE_OPTIONS.find((option) => option.value === role);
-  const busy = submitting || signupClosed;
-
-  const chooseRole = (next: Role) => {
-    if (next === role) return;
-    setRole(next);
-    setManual({ name: '', email: '', password: '', clubSlug: '' });
+  const set = (patch: Partial<ApplicationForm>) => {
+    setForm((current) => ({ ...current, ...patch }));
     setError(null);
   };
 
-  const changeRole = () => {
-    setRole(null);
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError(null);
-  };
 
-  const fillFromGenerator = () => {
-    const generated = generateIdentity(role ?? 'club');
-    setManual((current) => ({ ...current, name: generated.name, email: generated.email, password: generated.password }));
-    setError(null);
-  };
+    const name = form.name.trim();
+    const city = form.city.trim();
+    const email = form.email.trim();
+    if (name === '') return setError({ message: t('auth.clubNameRequired') });
+    if (city === '') return setError({ message: t('auth.cityRequired') });
+    if (!EMAIL_RE.test(email)) return setError({ message: t('auth.emailInvalid') });
 
-  const createAccount = async (
-    scope: SignupError['scope'],
-    payload: { name: string; email: string; password: string; clubSlug?: string },
-  ) => {
-    if (!role) return;
-    setError(null);
+    const capacityText = form.capacity.trim();
+    const capacity = Number(capacityText);
+    if (
+      !/^\d+$/.test(capacityText)
+      || !Number.isFinite(capacity)
+      || capacity < MIN_CAPACITY
+      || capacity > MAX_CAPACITY
+    ) {
+      return setError({ message: t('auth.capacityInvalid') });
+    }
+
     setSubmitting(true);
     try {
-      if (role === 'club') {
-        await registerClub({ name: payload.name, email: payload.email, password: payload.password });
-        navigate('/sessions', { replace: true });
-      } else {
-        const slug = payload.clubSlug?.trim();
-        await registerDj({
-          display_name: payload.name,
-          email: payload.email,
-          password: payload.password,
-          ...(slug ? { club_slug: slug } : {}),
-        });
-        navigate('/dj', { replace: true });
-      }
+      await applyClubOnboarding({
+        club: {
+          name,
+          city,
+          address: '',
+          website: '',
+          contact: email,
+          genres: [],
+        },
+        venue: {
+          name,
+          type: 'club',
+          address: '',
+          city,
+          district: '',
+          capacity,
+          seats: null,
+          area_m2: null,
+        },
+        // No price: the owner sets the guest price in the panel after the
+        // account is activated, so the application must not name one.
+        qr: { zones: [] },
+      });
+      setSentTo(email);
     } catch (err) {
-      // The flag is a server switch, so it is reported once for the whole page.
-      if (err instanceof ApiRequestError && err.code === 'signup_disabled') setSignupClosed(true);
-      else setError(describeSignupError(err, scope, t));
+      setError(describeApplicationError(err, t));
+    } finally {
       setSubmitting(false);
     }
   };
 
-  const onSubmitManual = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = manual.name.trim();
-    const email = manual.email.trim();
-    if (name === '') {
-      setError({
-        scope: 'manual',
-        message: role === 'club' ? t('auth.clubNameRequired') : t('auth.djNameRequired'),
-      });
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError({ scope: 'manual', message: t('auth.emailInvalid') });
-      return;
-    }
-    if (manual.password.length < 8) {
-      setError({ scope: 'manual', message: t('auth.passwordTooShort') });
-      return;
-    }
-    void createAccount('manual', { name, email, password: manual.password, clubSlug: manual.clubSlug });
-  };
+  // Photograph column (desktop only, see styles/auth.css): the room the
+  // application is for, and the three steps the product runs on. Built here
+  // rather than in the kit because no other auth screen carries it.
+  const aside = (
+    <>
+      <Link to="/connect" className="auth-brand">
+        <BrandLogo size="small" />
+        <span className="auth-brand-role">{t('auth.clubPanel')}</span>
+      </Link>
+      <div className="auth-media-copy">
+        <h2 className="auth-media-title">{t('auth.applyAsideTitle')}</h2>
+        <ol className="auth-media-steps">
+          <li className="auth-media-step">
+            <span className="auth-media-step-index" aria-hidden="true">01</span>
+            <span>{t('auth.applyAsideStepScan')}</span>
+          </li>
+          <li className="auth-media-step">
+            <span className="auth-media-step-index" aria-hidden="true">02</span>
+            <span>{t('auth.applyAsideStepPick')}</span>
+          </li>
+          <li className="auth-media-step">
+            <span className="auth-media-step-index" aria-hidden="true">03</span>
+            <span>{t('auth.applyAsideStepQueue')}</span>
+          </li>
+        </ol>
+      </div>
+    </>
+  );
 
   return (
-    <AuthWizard
-      role={t('auth.panelsEyebrow')}
-      steps={STEPS(t)}
-      step={role ? 2 : 1}
-      title={t('auth.registerTitle')}
-      subtitle={t('auth.registerIntro')}
-      asideFooter={
-        <AuthFacts
-          facts={[
-            { label: t('auth.factSignupLabel'), value: t('auth.factSignupValue') },
-            { label: t('auth.factSessionLabel'), value: t('auth.sessionMemoryNote') },
-            { label: t('auth.factStandLabel'), value: t('auth.factStandValue') },
-          ]}
-        />
-      }
-      footer={
-        // Each link is wrapped, so the spaces between them are real text nodes:
-        // two inline-flex links with no gap between their boxes rendered as
-        // "DJ sign-inSupport". The separators are the only glue.
-        <>
-          <span>{t('auth.haveAccount')}</span>{' '}
-          <Link to="/login" className="auth-link">{t('auth.clubSignIn')}</Link>
-          <span className="auth-foot-sep" aria-hidden="true">·</span>
-          <Link to="/dj/login" className="auth-link">{t('auth.djSignIn')}</Link>
-          <span className="auth-foot-sep auth-link-optional" aria-hidden="true">·</span>
-          <Link to="/connect" className="auth-link auth-link-muted auth-link-optional">{t('auth.publicSite')}</Link>
-          <span className="auth-foot-sep" aria-hidden="true">·</span>
-          <a href="mailto:clubs@dropit.music" className="auth-link auth-link-muted">{t('auth.support')}</a>
-        </>
+    <AuthScreen
+      role={t('auth.clubPanel')}
+      title={t('auth.applyTitle')}
+      subtitle={t('auth.applySubtitle')}
+      media={aside}
+      links={
+        <span className="auth-links-lead">
+          {t('auth.haveAccount')}{' '}
+          <Link to="/login" className="auth-link">{t('auth.signIn')}</Link>
+        </span>
       }
     >
-      {signupClosed ? (
-        <AuthAlert tone="note" title={t('auth.signupClosedTitle')}>
-          {t('auth.signupClosedBodyLead')}{' '}
-          <span className="font-mono">signup_disabled</span>
-          {t('auth.signupClosedBodyTail')}
-          <span className="auth-links">
-            <button type="button" className="auth-link" onClick={() => setSignupClosed(false)}>
-              {t('common.tryAgain')}
-            </button>
-            <Link className="auth-link auth-link-muted" to="/login">{t('auth.clubSignIn')}</Link>
-            <Link className="auth-link auth-link-muted" to="/dj/login">{t('auth.djSignIn')}</Link>
-          </span>
-        </AuthAlert>
-      ) : null}
-
-      <div className="auth-field" role="radiogroup" aria-label={t('auth.roleLegend')}>
-        <span className="field-label" aria-hidden="true">{t('auth.roleLegend')}</span>
-        <div className="auth-choice-grid" style={{ marginTop: 6 }}>
-          {ROLE_OPTIONS.map((option) => {
-            const selected = role === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                className={`auth-choice ${selected ? 'is-selected' : ''}`.trim()}
-                onClick={() => chooseRole(option.value)}
-              >
-                <span className="auth-choice-head">
-                  <span className="auth-choice-title">{t(option.labelKey)}</span>
-                  <span className="auth-choice-mark" aria-hidden="true" />
-                </span>
-                <span className="auth-choice-note">{t(option.hintKey)}</span>
-              </button>
-            );
-          })}
+      {sentTo ? (
+        <div className="auth-form">
+          <AuthAlert tone="ok" title={t('auth.applicationSentTitle')}>
+            {t('auth.applicationSentBody', { email: sentTo })}
+          </AuthAlert>
         </div>
-      </div>
-
-      {role && roleMeta ? (
-        <section className="auth-form" aria-labelledby="signup-step-two">
-          <div className="auth-field-row">
-            <h2 id="signup-step-two" className="auth-step-title" style={{ color: 'var(--c-text)', fontWeight: 600 }}>
-              {t('auth.stepTwo', { role: t(roleMeta.labelKey) })}
-            </h2>
-            <button
-              type="button"
-              className="auth-link auth-link-muted"
-              onClick={changeRole}
-              disabled={submitting}
-            >
-              {t('auth.changeRole')}
-            </button>
+      ) : (
+        <form className="auth-form" onSubmit={onSubmit} noValidate>
+          <div className="auth-field">
+            <label htmlFor="apply-name" className="field-label">{t('auth.clubNameLabel')}</label>
+            <input
+              id="apply-name"
+              type="text"
+              autoComplete="organization"
+              className="field-input auth-input"
+              value={form.name}
+              onChange={(event) => set({ name: event.target.value })}
+            />
           </div>
 
-          {/* One form, one action. The screen used to carry a "create in one
-              click" block with the generated identity inside it and then the
-              same account fields below a divider: two primaries for one job,
-              and the person had to read a password to use the top one. Now the
-              generator only fills the fields, so what is created is always the
-              account visible on screen. */}
-          <form className="auth-form" onSubmit={onSubmitManual} noValidate>
-            <div className="auth-field-row">
-              <span className="auth-hint">{t('auth.manualHint')}</span>
-              <button
-                type="button"
-                className="auth-link auth-link-muted"
-                onClick={fillFromGenerator}
-                disabled={submitting}
-              >
-                {t('auth.generate')}
-              </button>
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="signup-name" className="field-label">
-                {role === 'club' ? t('auth.clubNameLabel') : t('auth.djNameLabel')}
-              </label>
-              <input
-                id="signup-name"
-                type="text"
-                autoComplete={role === 'club' ? 'organization' : 'nickname'}
-                className="field-input auth-input"
-                value={manual.name}
-                onChange={(event) => setManual({ ...manual, name: event.target.value })}
-              />
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="signup-email" className="field-label">{t('auth.email')}</label>
-              <input
-                id="signup-email"
-                type="email"
-                autoComplete="email"
-                className="field-input auth-input"
-                value={manual.email}
-                onChange={(event) => setManual({ ...manual, email: event.target.value })}
-              />
-            </div>
-
-            <PasswordField
-              id="signup-password"
-              label={t('auth.password')}
-              autoComplete="new-password"
-              hint={t('auth.passwordHint')}
-              value={manual.password}
-              onChange={(value) => setManual({ ...manual, password: value })}
+          <div className="auth-field">
+            <label htmlFor="apply-city" className="field-label">{t('auth.cityLabel')}</label>
+            <input
+              id="apply-city"
+              type="text"
+              autoComplete="address-level2"
+              className="field-input auth-input"
+              value={form.city}
+              onChange={(event) => set({ city: event.target.value })}
             />
+          </div>
 
-            {role === 'dj' ? (
-              <div className="auth-field">
-                <label htmlFor="signup-club" className="field-label">
-                  {t('auth.clubSlugLabel')}{' '}
-                  <span className="auth-hint">— {t('common.optional')}</span>
-                </label>
-                <input
-                  id="signup-club"
-                  type="text"
-                  autoComplete="off"
-                  placeholder="barrio-latino"
-                  className="field-input auth-input font-mono"
-                  value={manual.clubSlug}
-                  onChange={(event) => setManual({ ...manual, clubSlug: event.target.value })}
-                />
-                <span className="auth-hint">{t('auth.clubSlugHint')}</span>
-              </div>
-            ) : null}
+          <div className="auth-field">
+            <label htmlFor="apply-email" className="field-label">{t('auth.email')}</label>
+            <input
+              id="apply-email"
+              type="email"
+              autoComplete="email"
+              className="field-input auth-input"
+              value={form.email}
+              onChange={(event) => set({ email: event.target.value })}
+            />
+          </div>
 
-            {error?.scope === 'manual' ? (
-              <AuthAlert tone="error" title={error.message} code={error.code}>
-                {error.hint}
-              </AuthAlert>
-            ) : null}
+          <div className="auth-field">
+            <label htmlFor="apply-capacity" className="field-label">{t('auth.capacityLabel')}</label>
+            <input
+              id="apply-capacity"
+              type="number"
+              inputMode="numeric"
+              min={MIN_CAPACITY}
+              max={MAX_CAPACITY}
+              step={1}
+              className="field-input auth-input"
+              value={form.capacity}
+              onChange={(event) => set({ capacity: event.target.value })}
+            />
+          </div>
 
-            {/* The one action of the screen: it creates exactly the account
-                shown in the fields above it. */}
-            <button type="submit" className="btn-primary" disabled={busy}>
-              {submitting ? t('auth.creating') : t('auth.createAccount')}
-            </button>
-            <span className="auth-hint">{t('auth.accountReady')}</span>
-          </form>
-        </section>
-      ) : null}
-    </AuthWizard>
+          {error ? (
+            <AuthAlert tone="error" title={error.message} code={error.code}>
+              {error.hint}
+            </AuthAlert>
+          ) : null}
+
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting ? t('auth.sending') : t('auth.sendApplication')}
+          </button>
+
+          <p className="auth-aside">
+            {t('auth.djInviteOnly')}{' '}
+            <Link to="/dj/login" className="auth-link">{t('auth.djSignIn')}</Link>
+          </p>
+        </form>
+      )}
+    </AuthScreen>
   );
 }

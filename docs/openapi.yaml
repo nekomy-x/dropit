@@ -28,6 +28,11 @@ tags:
     description: Панель клуба (дашборд, профиль, тарифы, DJ, Stripe)
   - name: admin-panel
     description: Панель админа (клубы, гости, платежи, аудит, настройки)
+  - name: onboarding
+    description: |
+      Публичная заявка клуба, одобрение админом и активация по одноразовой
+      ссылке (`docs/onboarding-contract.md`). Заменяет открытую регистрацию
+      как основной путь подключения.
   - name: dj
     description: Смена и статистика DJ, стили профиля
   - name: catalog
@@ -1451,7 +1456,8 @@ paths:
       summary: Одноразовый билет WS (TTL 30 с)
       description: |
         JWT в query НЕ передаётся (утечки в логи Cloudflare/Loki).
-        Билет одноразовый, передаётся в Sec-WebSocket-Protocol.
+        Билет одноразовый; на рукопожатии `GET /v1/ws` он передаётся в query
+        (`WsQuery { ticket }` в `crates/gateway-api/src/ws.rs`), а не заголовком.
       security:
         - bearerAuth: []
         - deviceToken: []
@@ -1485,7 +1491,12 @@ paths:
         Кеш (catalog_query_cache) → внешний каталог (iTunes/Deezer) →
         upsert в track_cache. q 2..80 символов, limit 1..=25 (по
         умолчанию 10). Внешний каталог недоступен → 503
-        catalog_unavailable. Авторизация — JWT гостя (RBAC-гейт role=guest).
+        catalog_unavailable.
+
+        Авторизация проверяется в хендлере и принимает ровно два
+        удостоверения: JWT роли `guest` или выданный сервером device-token
+        (`Bearer <uuid>`, строка в `guest_device`) — мобильному гостю JWT не
+        выдаётся. Иные роли → 403, без токена/неизвестный device-token → 401.
       security:
         - bearerAuth: []
       parameters:
@@ -1614,8 +1625,8 @@ paths:
       summary: Создание платёж-интента (гость)
       description: |
         Цена — из ДЕЙСТВУЮЩЕГО тарифа клуба (Q6), дефолт 3 €.
-        GUARD: request pending + session active. Провайдер — мок
-        (client_secret фиктивный, Test Mode до ADR-004).
+        GUARD: request pending + session active. При STRIPE_API_KEY
+        используется Stripe; в mock-окружении client_secret фиктивный.
       security:
         - deviceToken: []
       parameters:
@@ -1633,9 +1644,11 @@ paths:
             Replay/гонка: для request уже есть активный платёж (не
             cancelled/refunded/failed) — либо повторный вызов с другим
             Idempotency-Key, либо параллельный запрос успел первым.
-            Возвращается существующий платёж БЕЗ вызова провайдера;
-            `client_secret` пустой (у клиента уже есть оригинальный
-            секрет первого ответа, новый не выдаётся).
+            Возвращается существующий платёж без создания нового интента.
+            Для status=intent исходный client_secret восстанавливается
+            чтением того же PaymentIntent у провайдера, только владельцу
+            request. Это позволяет продолжить оплату после потери ответа.
+            Для остальных статусов client_secret пустой.
           content:
             application/json:
               schema:
@@ -1646,7 +1659,8 @@ paths:
                   request_id: { type: string, format: uuid }
                   amount_minor: { type: integer }
                   currency: { type: string }
-                  client_secret: { type: string, description: Пустой при replay }
+                  test_mode: { type: boolean, description: true только для серверного mock-провайдера; карта и Stripe SDK не нужны }
+                  client_secret: { type: string, description: Исходный секрет для intent; для остальных статусов пустой }
                   status: { type: string }
         "201":
           description: Интент создан
@@ -1660,8 +1674,53 @@ paths:
                   request_id: { type: string, format: uuid }
                   amount_minor: { type: integer }
                   currency: { type: string }
+                  test_mode: { type: boolean, description: true только для серверного mock-провайдера }
                   client_secret: { type: string }
                   status: { type: string, enum: [intent] }
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+
+  /v1/payments/{id}/test-confirm:
+    post:
+      tags: [payments]
+      summary: Подтверждение тестовой оплаты без списания денег
+      description: |
+        Только для фактического MockStripe и intent с префиксом pi_mock_.
+        При Stripe, включая sandbox-ключи, возвращается 404.
+        Проверяются владелец, Idempotency-Key, активность сессии и pending request.
+        Применяется обычный цикл confirm → captured, ledger и outbox, без сети
+        провайдера и списания денег. Повтор не создаёт вторую проводку.
+      security:
+        - deviceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Тестовая оплата завершена, деньги не списывались
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment_id, status, test_mode]
+                properties:
+                  payment_id: { type: string, format: uuid }
+                  status: { type: string, enum: [captured] }
+                  test_mode: { type: boolean, enum: [true] }
         "401":
           $ref: "#/components/responses/Error"
         "404":
@@ -2153,6 +2212,82 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/club/dj-console/session:
+    post:
+      tags: [club-panel]
+      summary: Открыть консоль диджея от имени диджея смены
+      description: |
+        Выдаёт DJ-пару токенов для диджея на открытой смене этого клуба,
+        чтобы клуб работал в консоли без второго логина.
+
+        Это делегирование доступа, а не второй аккаунт: refresh-токен
+        живёт 12 часов (одна смена, не 30 дней), принадлежит только
+        диджею этого клуба на его открытой смене, и каждый вход пишется
+        в `audit_log` как `club_dj_console_open` — «кто-то работал в
+        консоли от имени диджея» должно быть восстановимо по журналу.
+
+        Отказ — `409` с отдельным кодом на каждую причину, потому что у
+        панели для каждой своё действие:
+
+        * `no_open_shift` — открытой смены нет;
+        * `dj_required` — смена без диджея, а в составе их несколько:
+          `details.candidates` перечисляет активных, выбранный идёт в
+          `dj_id` следующего запроса;
+        * `dj_unavailable` — диджей назначен, но недоступен (приостановлен,
+          заблокирован, снят), либо запрошенный `dj_id` не из этого клуба;
+        * `no_djs` — в составе клуба нет активных диджеев;
+        * `shift_changed` — смену закрыли или диджея назначили, пока
+          открывалась консоль.
+
+        Если на открытой смене нет диджея, а активный в составе один, сервер
+        назначает его сам и открывает консоль — «одна кнопка» не должна
+        упираться в форму из-за единственного кандидата.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dj_id:
+                  type: string
+                  format: uuid
+                  description: |
+                    Кого поставить за пульт, если на открытой смене ещё нет
+                    диджея. Необязателен: при одном активном диджее клуб не
+                    выбирает его явно, а при уже назначенном на смену диджее
+                    это поле не может его подменить.
+      responses:
+        "200":
+          description: Пара токенов диджея смены
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, refresh_token, token_type, expires_in, dj, session]
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  token_type: { type: string, enum: [Bearer] }
+                  expires_in: { type: integer, description: TTL access-токена, секунды }
+                  dj:
+                    type: object
+                    required: [id, display_name]
+                    properties:
+                      id: { type: string, format: uuid }
+                      display_name: { type: string }
+                  session:
+                    type: object
+                    required: [id, status, timezone]
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [created, active, paused_acceptance] }
+                      timezone: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/dj/invite/accept:
     post:
       tags: [dj]
@@ -2172,6 +2307,29 @@ paths:
         "200": { description: Аккаунт активирован }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+  /v1/dj/invite/{token}:
+    get:
+      tags: [dj]
+      summary: Публичные данные приглашения DJ
+      description: |
+        Страница `/dj/invite/:token` показывает имя DJ и клуб до задания
+        пароля — иначе письмо выглядит фишингом. Отдаются ровно три поля:
+        `display_name`, `club_name`, `expires_at`. Неизвестный, просроченный,
+        уже принятый и битый токен дают один `404 invite_not_found`.
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string, pattern: "^[0-9a-f]{64}$" }
+      responses:
+        "200":
+          description: Имя DJ, клуб и срок ссылки
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DjInvitePreview" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/club/djs/{id}:
     patch:
       tags: [club-panel]
@@ -2357,6 +2515,275 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  # ---------- Онбординг клуба: заявка → approve → активация ----------
+  /v1/club/onboarding/apply:
+    post:
+      tags: [onboarding]
+      summary: Публичная заявка на подключение клуба
+      description: |
+        Без авторизации: заявку оставляет посетитель лендинга `/connect`.
+        Секретов не принимает (ни `password`, ни токенов): пароль владелец
+        задаёт позже, на странице активации. Первое нарушение валидации →
+        `422 validation_error` с `details.field` (`club.name`, `venue.capacity`,
+        `qr.price_minor`, …).
+
+        Ограничители: 5 заявок/час с IP (`429 rate_limited`), не больше 3
+        pending на один contact, идемпотентность по `Idempotency-Key`
+        (повтор → `200` и та же заявка).
+      security: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnboardingApplyRequest" }
+      responses:
+        "201":
+          description: Заявка создана
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingApplyResponse" }
+        "200":
+          description: Идемпотентный повтор — та же заявка
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingApplyResponse" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/club/onboarding/invite/{token}:
+    get:
+      tags: [onboarding]
+      summary: Данные ссылки активации клуба
+      description: |
+        Публично: единственный секрет — сам токен (64 hex). Неизвестный,
+        использованный, просроченный и битый токен неразличимы снаружи —
+        один `404 invite_not_found`. В `contact` — контакт из заявки
+        (телефон или e-mail).
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string, pattern: "^[0-9a-f]{64}$" }
+      responses:
+        "200":
+          description: Данные заявки для страницы активации
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClubInvitePreview" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/club/onboarding/invite/{token}/accept:
+    post:
+      tags: [onboarding]
+      summary: Активация клуба — задать пароль
+      description: |
+        Публично. Пароль 8..128 символов хешируется Argon2id, `club.status`
+        становится `active`, `invite_token_hash`/`invite_expires_at`
+        зануляются (одноразовость), в `audit_log` пишется
+        `club.invite.accept`. Ответ — `TokenPair` (авто-логин) + `club`.
+
+        Слабый/отсутствующий пароль → `422 validation_failed` с
+        `details.field=password`; повторное использование ссылки → `404`.
+      security: []
+      parameters:
+        - in: path
+          name: token
+          required: true
+          schema: { type: string, pattern: "^[0-9a-f]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, minLength: 8, maxLength: 128 }
+      responses:
+        "200":
+          description: Клуб активирован, пара токенов выдана
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClubInviteAcceptResponse" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/onboarding-applications:
+    get:
+      tags: [onboarding]
+      summary: Очередь заявок на подключение клуба
+      description: |
+        Роль Admin (readonly читает). Keyset-пагинация `(created_at DESC,
+        id DESC)` без OFFSET; `next_cursor` — непрозрачный base64url, мусор
+        в курсоре → `422`. По умолчанию `status=pending_moderation`.
+
+        Каждая строка несёт `club_id` (`null`, пока заявка не одобрена) и
+        `invite_state`: `none | pending | accepted | expired`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending_moderation, approved, rejected] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        "200":
+          description: Страница заявок
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingApplicationPage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/onboarding-applications/{id}:
+    get:
+      tags: [onboarding]
+      summary: Карточка заявки
+      description: |
+        Полный payload заявки (`club`/`venue`/`qr`), решение и `invite_state`.
+        Неизвестный и битый id — один `404 not_found`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Заявка
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingApplicationDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/onboarding-applications/{id}/approve:
+    post:
+      tags: [onboarding]
+      summary: Одобрить заявку и создать клуб
+      description: |
+        Одна транзакция: клуб создаётся в `pending_verification` с
+        `password_hash='!'` (вход по паролю невозможен до активации),
+        одноразовой invite-ссылкой (64 hex, sha256 в БД, TTL 7 дней) и
+        `qr_master_token` (админский вход). Заявка → `approved`,
+        `reviewed_by/at`, audit.
+
+        * `email` необязателен: по умолчанию `club_application.email`,
+          иначе `422 details.field=email`;
+        * `slug` необязателен: иначе генерируется из названия;
+        * `password` — **deprecated**: если передан, сохраняется прежнее
+          поведение (Argon2id-хеш и рабочий вход); invite-ссылка выпускается
+          в любом случае;
+        * `mail_queued` — правда «строка письма `club_invite` в очереди»;
+          ошибка почты не отменяет approve.
+
+        Конфликты: `409 already_reviewed`, `409 email_taken`,
+        `409 slug_taken`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnboardingApproveRequest" }
+      responses:
+        "200":
+          description: Клуб создан, ссылка выпущена
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingApproveResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/onboarding-applications/{id}/reject:
+    post:
+      tags: [onboarding]
+      summary: Отклонить заявку с причиной
+      description: |
+        Причина 1..500 символов сохраняется в `reject_reason` и в audit.
+        Повторный review (approve/reject) → `409 already_reviewed`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        "200":
+          description: Заявка отклонена
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [application_id, status]
+                properties:
+                  application_id: { type: string, format: uuid }
+                  status: { type: string, enum: [rejected] }
+                  reviewed_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/onboarding-applications/{id}/invite:
+    post:
+      tags: [onboarding]
+      summary: Перевыпустить ссылку активации клуба
+      description: |
+        Для `approved`-заявки с ещё не активированным клубом: выпускается
+        НОВЫЙ токен (старый перестаёт работать сразу), новый TTL 7 дней,
+        письмо `club_invite` ставится в очередь. Аудит
+        `club_application.invite`.
+
+        * `409 not_approved` — заявка ещё не одобрена;
+        * `409 invite_already_accepted` — клуб уже задал пароль;
+        * `404 not_found` — неизвестная заявка.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Ссылка перевыпущена
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingReissueResponse" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/club/payouts:
     get:
       tags: [club-panel]
@@ -2489,10 +2916,51 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/admin/clubs/{id}:
+    get:
+      tags: [admin-panel]
+      summary: Карточка клуба
+      description: |
+        Те же поля, что в списке клубов, плюс Stripe-статус онбординга и
+        сохранённый оборот. Неизвестный id → 404 `club_not_found`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Клуб
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  name: { type: string }
+                  city: { type: string, nullable: true }
+                  slug: { type: string }
+                  address: { type: string, nullable: true }
+                  country: { type: string, nullable: true }
+                  email: { type: string }
+                  phone: { type: string, nullable: true }
+                  logo_url: { type: string, nullable: true }
+                  stripe_account_id: { type: string, nullable: true }
+                  stripe_onboarding_status: { type: string, nullable: true }
+                  status: { type: string }
+                  created_at: { type: string, format: date-time }
+                  turnover_minor: { type: integer, description: Сумма в minor units }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
     patch:
       tags: [admin-panel]
-      summary: Блокировка/пауза/верификация клуба
-      description: Статусные поля, НЕ delete (финансы). Пишется в audit_log.
+      summary: Правка/блокировка/верификация клуба
+      description: |
+        Профильные поля и статус. Статус-онли правка пишется в audit_log как
+        `club.status_change`, остальные — `club.update` с diff before/after.
+        Занятый slug → 409 `slug_taken`, занятый e-mail → 409 `email_taken`.
       security: [{ bearerAuth: [] }]
       parameters:
         - name: id
@@ -2505,12 +2973,776 @@ paths:
             schema:
               type: object
               properties:
+                name: { type: string, minLength: 2, maxLength: 120 }
+                slug: { type: string, pattern: "^[a-z0-9-]{3,60}$" }
+                email: { type: string, format: email }
+                city: { type: string, maxLength: 120, nullable: true }
+                address: { type: string, maxLength: 200, nullable: true }
+                phone: { type: string, maxLength: 40, nullable: true }
+                country: { type: string, minLength: 2, maxLength: 2, nullable: true }
                 status: { type: string, enum: [active, suspended, blocked, pending_verification] }
       responses:
-        "200": { description: Статус обновлён }
+        "200": { description: Клуб обновлён (объект клуба) }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [admin-panel]
+      summary: Мягкое удаление клуба
+      description: |
+        Soft-delete: `club.status = 'blocked'`, все refresh-токены клуба
+        отзываются, событие пишется в audit_log. Клуб с открытой сессией
+        удалить нельзя → 409 `club_has_active_session` (сначала закройте смену).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Клуб заблокирован }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/users:
+    get:
+      tags: [admin-panel]
+      summary: Каталог пользователей платформы
+      description: |
+        Объединённая директория principal-ролей: администраторы
+        (`admin_user`), сотрудники клубов (`club`), DJ (`dj`) и гости с
+        аккаунтом (`guest_account`). Анонимные устройства в каталог не
+        попадают — ими управляет `GET /v1/admin/guests?club_id=`.
+
+        Keyset-пагинация по `(created_at, id)`: `next_cursor` из ответа
+        передаётся в `cursor`. `q` ищет по e-mail и отображаемому имени
+        (ILIKE, `%`/`_`/`\` экранируются). Мусорный `role`/`status`/`limit`/
+        `cursor` → 400 в конверте ошибки.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: role, in: query, schema: { type: string, enum: [admin, club_staff, dj, guest] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, invited, suspended, blocked] } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Страница каталога
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, role, status]
+                      properties:
+                        id: { type: string, format: uuid }
+                        role: { type: string, enum: [admin, club_staff, dj, guest] }
+                        status: { type: string, enum: [active, invited, suspended, blocked] }
+                        display_name: { type: string, nullable: true }
+                        email: { type: string, nullable: true }
+                        club_id: { type: string, format: uuid, nullable: true }
+                        created_at: { type: string, format: date-time }
+                        last_seen_at: { type: string, format: date-time, nullable: true }
+                  next_cursor: { type: string, nullable: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [admin-panel]
+      summary: Создание администратора
+      description: |
+        Создаёт только администратора. Пароль хешируется Argon2id, TOTP-секрет
+        шифруется (`DROPIT_TOTP_KEY`, без ключа — legacy-plain Test Mode).
+        `totp_secret` и `otpauth_url` отдаются ОДИН раз (`Cache-Control:
+        no-store`) — без них админ не сможет войти (TOTP обязателен).
+
+        Для `role` ≠ admin → 422 `role_not_creatable` с подсказкой, каким
+        существующим маршрутом создаётся сущность.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, email, display_name, password]
+              properties:
+                role: { type: string, enum: [admin] }
+                email: { type: string, format: email }
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+                password: { type: string, minLength: 8, maxLength: 128 }
+                admin_role: { type: string, enum: [superadmin, operator, readonly], default: operator }
+      responses:
+        "201":
+          description: Админ создан (секрет enrollment — только здесь)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, role, admin_role, status, email, totp_secret, otpauth_url]
+                properties:
+                  id: { type: string, format: uuid }
+                  role: { type: string, enum: [admin] }
+                  admin_role: { type: string, enum: [superadmin, operator, readonly] }
+                  status: { type: string, enum: [active] }
+                  display_name: { type: string }
+                  email: { type: string }
+                  totp_secret: { type: string, description: Base32-секрет, показывается один раз }
+                  otpauth_url: { type: string, description: "otpauth://totp/…" }
+                  created_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/users/bulk:
+    post:
+      tags: [admin-panel]
+      summary: Массовое действие над пользователями
+      description: |
+        Одна транзакция и одна запись `audit_log` (`admin.user.bulk`).
+        `affected` — сколько записей реально нашли; заблокировать себя нельзя
+        (422). Понижение последнего активного superadmin → 409.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, action]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+                action: { type: string, enum: [approve, suspend, block, role] }
+                role: { type: string, enum: [superadmin, operator, readonly] }
+      responses:
+        "200":
+          description: Результат массовой операции
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [affected, ids]
+                properties:
+                  affected: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/users/{id}:
+    get:
+      tags: [admin-panel]
+      summary: Одна запись каталога пользователей
+      description: Неизвестный id → 404 `not_found`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Запись каталога
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, role, status]
+                properties:
+                  id: { type: string, format: uuid }
+                  role: { type: string, enum: [admin, club_staff, dj, guest] }
+                  status: { type: string, enum: [active, invited, suspended, blocked] }
+                  display_name: { type: string, nullable: true }
+                  email: { type: string, nullable: true }
+                  club_id: { type: string, format: uuid, nullable: true }
+                  created_at: { type: string, format: date-time }
+                  last_seen_at: { type: string, format: date-time, nullable: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [admin-panel]
+      summary: Правка пользователя (роль/статус/имя/e-mail)
+      description: |
+        Роль-код (`superadmin|operator|readonly`) меняется только у админа;
+        у клубов/DJ/гостей роль неизменяема → 422 `role_immutable`. Свою роль
+        и свой статус менять нельзя (422 `cannot_change_own_role`). Понижение
+        или блокировка последнего активного superadmin → 409 `last_superadmin`.
+        `suspended|blocked` отзывают refresh-токены в той же транзакции.
+        Каждая мутация пишет `audit_log` с before/after.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+                email: { type: string, format: email }
+                role: { type: string, enum: [superadmin, operator, readonly] }
+                status: { type: string, enum: [active, suspended, blocked] }
+      responses:
+        "200": { description: Обновлённая запись каталога }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [admin-panel]
+      summary: Мягкое удаление пользователя
+      description: |
+        Soft-block: статус `blocked`, refresh-токены отозваны (гостю —
+        бан устройств). Себя удалить нельзя (422), последнего superadmin —
+        нельзя (409 `last_superadmin`). Запись в `audit_log`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Пользователь заблокирован }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/roles:
+    get:
+      tags: [admin-panel]
+      summary: Матрица ролей и прав
+      description: |
+        Read-only. Возможности выведены из фактического кода: `enforced_by`
+        называет модуль/route-family, `planned` — ограничение заявлено, но
+        пока не применено на всех роутах (например operator vs superadmin).
+        `current_admin_role` — подроль запрашивающего админа из
+        `admin_user.role`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Матрица прав
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [current_admin_role, roles, admin_roles]
+                properties:
+                  current_admin_role: { type: string, enum: [superadmin, operator, readonly] }
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string, enum: [guest, dj, club, admin] }
+                        label: { type: string }
+                        capabilities:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              code: { type: string }
+                              allowed: { type: boolean }
+                              enforced_by: { type: string }
+                  admin_roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: { type: string, enum: [superadmin, operator, readonly] }
+                        can_write: { type: boolean }
+                        can_manage_users: { type: boolean }
+                        description: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/djs/{id}:
+    patch:
+      tags: [admin-panel]
+      summary: Правка DJ (статус, клуб, имя)
+      description: |
+        Смена клуба проверяет его существование (404 `club_not_found`).
+        При `suspended|blocked` refresh-токены DJ отзываются. Пишется
+        `audit_log` (`dj.update`) с before/after.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, invited, suspended, blocked] }
+                club_id: { type: string, format: uuid }
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        "200":
+          description: Обновлённый DJ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  display_name: { type: string }
+                  email: { type: string }
+                  club_id: { type: string, format: uuid, nullable: true }
+                  status: { type: string }
+                  stripe_account_id: { type: string, nullable: true }
+                  stripe_onboarding_status: { type: string, nullable: true }
+                  removed: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [admin-panel]
+      summary: Удаление DJ (hard/soft)
+      description: |
+        Hard-delete — только для непринятого приглашения без смен
+        (`password_hash='!'` и нет сессий); иначе soft (`removed_at`,
+        статус → suspended) и отзыв refresh-токенов. Пишется `audit_log`
+        (`dj.remove`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Результат удаления
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, removed]
+                properties:
+                  id: { type: string, format: uuid }
+                  removed: { type: string, enum: [hard, soft] }
+                  status: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/djs/{id}/restore:
+    post:
+      tags: [admin-panel]
+      summary: Восстановление DJ
+      description: Снимает `removed_at`, возвращает статус `active`, пишет `audit_log` (`dj.restore`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: DJ восстановлен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, removed]
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string }
+                  removed: { type: boolean, enum: [false] }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/guests/{id}:
+    patch:
+      tags: [admin-panel]
+      summary: Бан/разбан гостевого устройства
+      description: |
+        `banned` пишется в `guest_device`; повторное значение идемпотентно
+        (аудит только при фактической смене, `guest.ban`/`guest.unban`).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [banned]
+              properties:
+                banned: { type: boolean }
+      responses:
+        "200":
+          description: Текущее состояние бана
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, banned]
+                properties:
+                  id: { type: string, format: uuid }
+                  banned: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/dj/history:
+    get:
+      tags: [dj]
+      summary: История сыгранных заявок текущей смены
+      description: |
+        Только роль DJ. Keyset-пагинация по `(played_at, id)` (курсор —
+        непрозрачный base64url). Нет открытой смены → 200 с пустым списком.
+        `accepted_at` берётся из события `request.accepted`; если его нет —
+        `null` (не выдумывается).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Страница истории
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        title: { type: string }
+                        artist: { type: string }
+                        style: { type: string, nullable: true }
+                        played_at: { type: string, format: date-time }
+                        accepted_at: { type: string, format: date-time, nullable: true }
+                        same_track_count: { type: integer }
+                        cover_url: { type: string, nullable: true }
+                  next_cursor: { type: string, nullable: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/dj/stats/session:
+    get:
+      tags: [dj]
+      summary: Показатели текущей смены DJ
+      description: |
+        В отличие от `/v1/dj/stats/today` (всё время), считает ТОЛЬКО открытую
+        смену: запросы, принятые, сыгранные и заработанные доли DJ в minor
+        units. Смены нет → `session: null` и нули.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Счётчики смены
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session, requests, accepted, played_session, rejected, earned_session_minor]
+                properties:
+                  session:
+                    anyOf:
+                      - type: object
+                        properties:
+                          id: { type: string, format: uuid }
+                          status: { type: string }
+                          timezone: { type: string }
+                      - type: "null"
+                  requests: { type: integer }
+                  accepted: { type: integer }
+                  played_session: { type: integer }
+                  rejected: { type: integer }
+                  earned_session_minor: { type: integer, description: Minor units }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/overview:
+    get:
+      tags: [admin-panel]
+      summary: Обзор платформы (реальные агрегаты)
+      description: |
+        Все числа — из SQL по текущему состоянию БД; серии считаются по
+        `date_trunc` за период. Пропущенные бакеты заполняются нулями, поэтому
+        длина серии всегда равна числу точек периода: 24 (по часам), 7 или
+        30 (по дням). Деньги — целые minor units.
+
+        Серия `revenue_minor` — `amount_minor - refunded_minor` по
+        `payment.captured_at` для статусов `captured`, `partially_refunded`,
+        `refunded`. Мусорный `period` → 400 `validation_error`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [24h, 7d, 30d], default: 24h }
+      responses:
+        "200":
+          description: Обзор
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [period, generated_at, clubs, djs, sessions, requests, payments, guests, series]
+                properties:
+                  period: { type: string, enum: [24h, 7d, 30d] }
+                  generated_at: { type: string, format: date-time }
+                  clubs:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      pending_verification: { type: integer }
+                      suspended: { type: integer }
+                  djs:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      active: { type: integer }
+                      invited: { type: integer }
+                      suspended: { type: integer }
+                  sessions:
+                    type: object
+                    properties:
+                      open: { type: integer }
+                      created: { type: integer }
+                      paused_acceptance: { type: integer }
+                  requests:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      pending: { type: integer }
+                      accepted: { type: integer }
+                      played: { type: integer }
+                      rejected: { type: integer }
+                  payments:
+                    type: object
+                    properties:
+                      captured_count: { type: integer }
+                      captured_minor: { type: integer, description: Minor units }
+                      refunded_minor: { type: integer, description: Minor units }
+                      failed_count: { type: integer }
+                  guests:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      online_24h: { type: integer }
+                  series:
+                    type: object
+                    required: [requests, revenue_minor]
+                    properties:
+                      requests:
+                        type: array
+                        description: Ровно 24/7/30 точек в зависимости от period
+                        items:
+                          type: object
+                          required: [bucket, value]
+                          properties:
+                            bucket: { type: string, format: date-time }
+                            value: { type: integer }
+                      revenue_minor:
+                        type: array
+                        items:
+                          type: object
+                          required: [bucket, value]
+                          properties:
+                            bucket: { type: string, format: date-time }
+                            value: { type: integer, description: Minor units }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/feature-flags:
+    get:
+      tags: [admin-panel]
+      summary: Фича-флаги платформы
+      description: |
+        Набор флагов — контракт (миграция 0020), а не произвольный key-value
+        store: `payments_live`, `guest_signup_open`, `dj_self_signup`,
+        `maintenance_banner`. Отсортировано по `key`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Список флагов
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [key, enabled, description, updated_at]
+                      properties:
+                        key: { type: string }
+                        enabled: { type: boolean }
+                        description: { type: string }
+                        updated_at: { type: string, format: date-time }
+                        updated_by: { type: string, format: uuid, nullable: true }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/feature-flags/{key}:
+    patch:
+      tags: [admin-panel]
+      summary: Переключение фича-флага
+      description: |
+        Только существующий ключ; неизвестный → 404 `not_found`. Аудит
+        (`feature_flag.update`) пишется в той же транзакции, что и `UPDATE`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Флаг обновлён
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, enabled, description, updated_at]
+                properties:
+                  key: { type: string }
+                  enabled: { type: boolean }
+                  description: { type: string }
+                  updated_at: { type: string, format: date-time }
+                  updated_by: { type: string, format: uuid, nullable: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/export:
+    get:
+      tags: [admin-panel]
+      summary: Выгрузка данных (CSV/JSON)
+      description: |
+        Потоковая выгрузка из БД, а не браузерный Blob: CSV экранируется по
+        RFC 4180 (кавычки удваиваются, поля с `,`, `"`, переводом строки
+        берутся в кавычки) и отдаётся с `Content-Disposition: attachment`.
+        Выше 5000 строк — 400 `export_too_large` (обрезать молча нельзя).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: resource
+          in: query
+          required: true
+          schema: { type: string, enum: [users, clubs, djs, payments] }
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, json], default: csv }
+      responses:
+        "200":
+          description: |
+            CSV (`text/csv; charset=utf-8`) либо JSON
+            `{resource, generated_at, items}`.
+          content:
+            text/csv:
+              schema: { type: string }
+            application/json:
+              schema:
+                type: object
+                required: [resource, generated_at, items]
+                properties:
+                  resource: { type: string }
+                  generated_at: { type: string, format: date-time }
+                  items:
+                    type: array
+                    items: { type: object }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/payments/{id}/refund:
+    post:
+      tags: [admin-panel, payments]
+      summary: Возврат платежа (полный или частичный)
+      description: |
+        Возврат идёт у провайдера, затем ОДНОЙ транзакцией БД фиксируются
+        `payment.refunded_minor`, пропорциональный реверс сплитов
+        (Σ прироста `reversed_minor` == сумма возврата), ledger-проводка
+        `reversal` (Σ по txn == 0), outbox `payment.refunded` и аудит.
+
+        Без `amount_minor` возвращается весь остаток. Повтор с тем же
+        `Idempotency-Key` возвращает тот же ответ и НЕ возвращает деньги
+        второй раз. Коды: 409 `invalid_payment_status`, 409
+        `already_refunded`, 409 `no_payment_intent`, 409
+        `idempotency_conflict` (ключ уже использован на другом платеже), 409
+        `refund_conflict` (провайдер вернул деньги, БД отказала — нужна ручная
+        сверка), 422 `invalid_refund_amount` (с
+        `details.max_refundable_minor`), 500 `split_invariant_violated`
+        (инвариант сплитов нарушен — деньги в БД не двигались),
+        502 `stripe_unavailable`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount_minor: { type: integer, minimum: 1, description: Minor units; по умолчанию — весь остаток }
+                reason: { type: string, enum: [duplicate, fraudulent, requested_by_customer] }
+      responses:
+        "200":
+          description: Возврат применён
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [payment_id, status, refunded_minor, refund_id, amount_minor, refund_amount_minor, currency]
+                properties:
+                  payment_id: { type: string, format: uuid }
+                  status: { type: string, enum: [partially_refunded, refunded] }
+                  refunded_minor: { type: integer, description: Всего возвращено по платежу }
+                  refund_id: { type: string, description: "re_… у провайдера" }
+                  amount_minor: { type: integer, description: Исходная сумма платежа }
+                  refund_amount_minor: { type: integer, description: Сумма ЭТОГО возврата }
+                  currency: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/admin/guests:
     get:
@@ -2674,11 +3906,55 @@ paths:
     get:
       tags: [admin-panel]
       summary: Диджеи (админ)
+      description: |
+        Все DJ платформы. Поля: `id`, `display_name`, `email`, `club_id`,
+        `club_name`, `status`, `stripe_account_id`,
+        `stripe_onboarding_status`, `created_at`, `removed`.
       security: [{ bearerAuth: [] }]
       responses:
         "200": { description: Список }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [admin-panel]
+      summary: Приглашение DJ админом
+      description: |
+        Та же механика, что `POST /v1/club/djs/invite`, но клуб выбирает
+        админ. DJ создаётся в статусе `invited` с одноразовым invite-токеном
+        (в БД только sha256, TTL), письмо `dj_invite` ставится в очередь.
+        Неизвестный клуб → 404 `club_not_found`; занятый e-mail → 409
+        `email_taken`.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, display_name, club_id]
+              properties:
+                email: { type: string, format: email }
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+                club_id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Приглашение создано
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dj_id, invite_token, invite_expires_at]
+                properties:
+                  dj_id: { type: string, format: uuid }
+                  invite_token: { type: string, description: 64 hex, показывается один раз }
+                  invite_expires_at: { type: string, format: date-time }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
   /v1/dj/shift:
     get:
@@ -3007,6 +4283,408 @@ paths:
         "401":
           $ref: "#/components/responses/Error"
 
+  /v1/club/developers/docs:
+    get:
+      tags: [club-panel]
+      summary: Манифест документации Developer API
+      description: |
+        Разделы документации, каталог скоупов и пресеты для панели
+        «Developers» (ADR-010). Документация встроена в бинарник и
+        соответствует контракту `docs/api/openapi-developer.yaml`.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Манифест секций, скоупов и пресетов
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/club/developers/docs/{section}:
+    get:
+      tags: [club-panel]
+      summary: Раздел документации Developer API (markdown)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: section
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "`{id, title, summary, requires, markdown}`"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/club/developers/openapi.json:
+    get:
+      tags: [club-panel]
+      summary: Полный OpenAPI Developer API v1 для панели
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OpenAPI 3.1 как JSON
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  # ==========================================================
+  # API-ключи Developer API v1 (ADR-010)
+  # ==========================================================
+  /v1/club/api-keys:
+    get:
+      tags: [club-panel]
+      summary: Ключи Developer API клуба
+      description: |
+        Все ключи клуба, включая отозванные (история видна в панели).
+        Секрета в ответе нет: в БД хранится только `sha256(plaintext)`,
+        полный ключ показывается один раз при создании/ротации.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Список ключей клуба
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApiKeyView"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [club-panel]
+      summary: Создать ключ Developer API
+      description: |
+        Возвращает полный ключ ровно один раз (`Cache-Control: no-store`).
+        Скоупы проверяются по каталогу (неизвестный — 422), лимит — 25
+        активных ключей на клуб (409 `key_limit_reached`).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  items: { type: string, examples: ["docs:read", "requests:write"] }
+                environment: { type: string, enum: [live, test], default: live }
+                expires_in_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                  nullable: true
+                  description: Срок жизни; `null`/отсутствие — бессрочный
+                rate_limit_per_min:
+                  type: integer
+                  minimum: 30
+                  maximum: 600
+                  default: 120
+                allowed_cidrs:
+                  type: array
+                  items: { type: string, examples: ["203.0.113.0/24", "2001:db8::/32"] }
+      responses:
+        "201":
+          description: Ключ создан; `key` показан один раз
+          headers:
+            Cache-Control:
+              description: "`no-store`: секрет нельзя кэшировать"
+              schema: { type: string, enum: ["no-store"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/club/api-keys/scopes:
+    get:
+      tags: [club-panel]
+      summary: Каталог скоупов и пресеты для панели
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Каталог скоупов и пресеты выбора
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyScopes"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/club/api-keys/{id}:
+    get:
+      tags: [club-panel]
+      summary: Карточка ключа
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Карточка без секрета
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyView"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [club-panel]
+      summary: Переименовать ключ или сузить скоупы
+      description: |
+        Скоупы можно только сузить: расширение отклоняется
+        `422 scope_widening_forbidden` (повышение прав — новый ключ).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 64 }
+                scopes:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        "200":
+          description: Обновлённая карточка
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyView"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      tags: [club-panel]
+      summary: Отозвать ключ
+      description: Мгновенный отзыв; повторный отзыв — `404`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Ключ отозван }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/club/api-keys/{id}/rotate:
+    post:
+      tags: [club-panel]
+      summary: Ротировать ключ (новый секрет, окно перекрытия)
+      description: |
+        Создаёт новый ключ с теми же правами и возвращает его секрет один
+        раз. Старый секрет живёт ещё `grace_hours` (0..=72, по умолчанию 24)
+        и затем отвечает `401 api_key_expired`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grace_hours: { type: integer, minimum: 0, maximum: 72, default: 24 }
+      responses:
+        "201":
+          description: Новый ключ; `key` показан один раз
+          headers:
+            Cache-Control:
+              description: "`no-store`: секрет нельзя кэшировать"
+              schema: { type: string, enum: ["no-store"] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyRotated"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/club/api-keys/{id}/usage:
+    get:
+      tags: [club-panel]
+      summary: Сводка и журнал вызовов ключа
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Сводка за 24 ч/30 дней и последние вызовы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyUsage"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/api-keys:
+    get:
+      tags: [admin-panel]
+      summary: Все ключи платформы (read-only обзор)
+      description: |
+        Ключи всех клубов с названием владельца. Админ видит карточки без
+        секрета и может отозвать любой ключ через
+        `POST /v1/admin/api-keys/{id}/revoke`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Список ключей с клубом-владельцем
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AdminApiKeyView"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/api-keys/scopes:
+    get:
+      tags: [admin-panel]
+      summary: Каталог скоупов и пресеты (админ)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Каталог скоупов и пресеты выбора
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyScopes"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/admin/api-keys/{id}/revoke:
+    post:
+      tags: [admin-panel]
+      summary: Отозвать любой ключ платформы
+      description: |
+        Инцидент/утечка: админ гасит ключ независимо от клуба-владельца.
+        Действие пишется в `audit_log` как `api_key.revoked` (actor admin).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204": { description: Ключ отозван }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/admin/api-keys/{id}/usage:
+    get:
+      tags: [admin-panel]
+      summary: Сводка и журнал вызовов любого ключа
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Сводка за 24 ч/30 дней и последние вызовы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyUsage"
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/status/services:
+    get:
+      tags: [health]
+      summary: Публичный статус сервисов (страница /status/)
+      description: |
+        Публичный JSON для страницы `/status/`: только список сервисов и их
+        состояние для людей («работает / с задержками / недоступно»).
+        Внутренние детали (Redis, outbox, heartbeat воркеров, схема,
+        задержки) намеренно не раскрываются — они доступны админу на
+        `GET /v1/admin/status/services`.
+      security: []
+      responses:
+        "200":
+          description: Состояние сервисов
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checked_at, services]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, degraded, down]
+                  checked_at:
+                    type: string
+                    format: date-time
+                  services:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, state, note]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        state: { type: string, enum: [ok, degraded, down, unknown] }
+                        note: { type: string }
+  /v1/admin/status/services:
+    get:
+      tags: [admin-panel]
+      summary: Полный технический статус подсистем (только админ)
+      description: |
+        Детальные проверки для операторов: имена подсистем, возраст
+        heartbeat, размер outbox, схема БД, режим платежей и версия.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Детальный статус
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearerAuth:
@@ -3117,6 +4795,227 @@ components:
             Срок жизни токена (RFC3339, TTL 30 минут). Только вместе с
             `reset_url`.
       required: [requested]
+    OnboardingApplyRequest:
+      type: object
+      description: |
+        Тело публичной заявки. Секретов не принимает: лишние поля (в том
+        числе гипотетический `password`) игнорируются и никуда не пишутся.
+      required: [club, venue, qr]
+      properties:
+        club:
+          type: object
+          required: [name, contact]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 120 }
+            city: { type: string, maxLength: 200 }
+            address: { type: string, maxLength: 200 }
+            website:
+              type: string
+              maxLength: 300
+              description: http(s)-URL или пустая строка
+            contact:
+              type: string
+              minLength: 1
+              maxLength: 120
+              description: E-mail или телефон; e-mail попадает в `email`
+            genres:
+              type: array
+              maxItems: 8
+              items: { type: string, maxLength: 40 }
+        venue:
+          type: object
+          required: [name, capacity]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 120 }
+            type: { type: string, maxLength: 60 }
+            address: { type: string, maxLength: 200 }
+            city: { type: string, maxLength: 200 }
+            district: { type: string, maxLength: 120 }
+            capacity: { type: integer, minimum: 1, maximum: 100000 }
+            seats: { type: integer, minimum: 0 }
+            area_m2: { type: integer, minimum: 0, maximum: 100000 }
+        qr:
+          type: object
+          description: |
+            QR-блок. Цена необязательна: компактная форма `/register` её не
+            спрашивает (клуб задаёт тариф в панели после активации), визард
+            `/connect` присылает.
+          properties:
+            price_minor:
+              type: integer
+              nullable: true
+              minimum: 100
+              maximum: 100000
+              description: Цена запроса в минорных единицах; нет цены — `null`
+            zones:
+              type: array
+              maxItems: 12
+              items: { type: string, maxLength: 60 }
+    OnboardingApplyResponse:
+      type: object
+      required: [application_id, status, submitted_at]
+      properties:
+        application_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending_moderation] }
+        submitted_at: { type: string, format: date-time }
+    ClubInvitePreview:
+      type: object
+      description: Публичные данные ссылки активации клуба (без секретов).
+      required: [club_name, email, contact, slug, expires_at]
+      properties:
+        club_name: { type: string }
+        city:
+          type: string
+          nullable: true
+        email: { type: string, format: email }
+        contact: { type: string, description: Контакт из заявки (телефон или e-mail) }
+        slug: { type: string }
+        expires_at: { type: string, format: date-time }
+    OnboardingClub:
+      type: object
+      required: [id, name, slug, email]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        email: { type: string, format: email }
+    ClubInviteAcceptResponse:
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          required: [club]
+          properties:
+            club: { $ref: "#/components/schemas/OnboardingClub" }
+    OnboardingInviteState:
+      type: string
+      enum: [none, pending, accepted, expired]
+      description: |
+        Состояние invite-ссылки клуба, выводимое из `club`:
+        `none` — клуба ещё нет; `accepted` — `invite_token_hash IS NULL`
+        (пароль задан); `pending` — срок в будущем; `expired` — срок вышел.
+    OnboardingApplicationRow:
+      type: object
+      required: [id, club_name, city, contact, price_minor, status, created_at, club_id, invite_state]
+      properties:
+        id: { type: string, format: uuid }
+        club_name: { type: string }
+        city: { type: string }
+        contact: { type: string }
+        price_minor: { type: integer }
+        status: { type: string, enum: [pending_moderation, approved, rejected] }
+        created_at: { type: string, format: date-time }
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        club_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: null, пока заявка не одобрена
+        invite_state: { $ref: "#/components/schemas/OnboardingInviteState" }
+    OnboardingApplicationPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/OnboardingApplicationRow" }
+        next_cursor:
+          type: string
+          nullable: true
+    OnboardingApplicationDetail:
+      type: object
+      required: [id, club_name, city, contact, price_minor, status, created_at, club_id, invite_state]
+      properties:
+        id: { type: string, format: uuid }
+        club:
+          type: object
+          description: Исходный клубный блок заявки как есть
+        venue:
+          type: object
+        qr:
+          type: object
+        club_name: { type: string }
+        city: { type: string }
+        contact: { type: string }
+        email:
+          type: string
+          format: email
+          nullable: true
+        price_minor: { type: integer }
+        status: { type: string, enum: [pending_moderation, approved, rejected] }
+        reject_reason:
+          type: string
+          nullable: true
+        reviewed_by:
+          type: string
+          format: uuid
+          nullable: true
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at: { type: string, format: date-time }
+        source_ip: { type: string }
+        club_id:
+          type: string
+          format: uuid
+          nullable: true
+        invite_state: { $ref: "#/components/schemas/OnboardingInviteState" }
+    OnboardingApproveRequest:
+      type: object
+      description: Все поля необязательны; пустое тело — валидный approve.
+      properties:
+        email:
+          type: string
+          format: email
+          description: По умолчанию `club_application.email`
+        slug:
+          type: string
+          minLength: 2
+          maxLength: 60
+          description: "[a-z0-9-]; иначе генерируется из названия"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+          deprecated: true
+          description: |
+            Устарело: новый поток пароль не принимает. Если передан —
+            сохраняется прежнее поведение (Argon2id + рабочий вход).
+    OnboardingApproveResponse:
+      type: object
+      required: [application_id, club_id, status, email, invite_url, invite_expires_at, mail_queued]
+      properties:
+        application_id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        status: { type: string, enum: [approved] }
+        email: { type: string, format: email }
+        invite_url: { type: string, format: uri }
+        invite_expires_at: { type: string, format: date-time }
+        mail_queued:
+          type: boolean
+          description: true — строка письма `club_invite` реально в очереди
+        qr_master_token:
+          type: string
+          description: Master-токен админского входа клуба (plaintext, один раз)
+    OnboardingReissueResponse:
+      type: object
+      required: [invite_url, invite_expires_at, email, mail_queued]
+      properties:
+        invite_url: { type: string, format: uri }
+        invite_expires_at: { type: string, format: date-time }
+        email: { type: string, format: email }
+        mail_queued: { type: boolean }
+    DjInvitePreview:
+      type: object
+      description: Публичные данные приглашения DJ (`/dj/invite/:token`).
+      required: [display_name, club_name, expires_at]
+      properties:
+        display_name: { type: string }
+        club_name: { type: string }
+        expires_at: { type: string, format: date-time }
     ErrorEnvelope:
       type: object
       description: Единый формат ошибок; code — стабильный i18n-ключ
@@ -3268,6 +5167,9 @@ components:
       type: object
       description: Ответ /v1/sessions/join
       properties:
+        test_payments:
+          type: boolean
+          description: Сервер использует MockStripe; доступна тестовая оплата без карты и списания
         session_id:
           type: string
           format: uuid
@@ -3587,6 +5489,116 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
       required: [email, reason, created_at]
+    ApiKeyView:
+      type: object
+      description: |
+        Карточка API-ключа Developer API v1. Секрета здесь нет — в БД
+        хранится только `sha256(plaintext)`, полный ключ отдаётся один раз
+        при создании/ротации. `prefix` — публичный идентификатор для логов
+        и поддержки.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, maxLength: 64 }
+        prefix: { type: string, description: 10 hex-символов, публичный id }
+        environment: { type: string, enum: [live, test] }
+        scopes:
+          type: array
+          items: { type: string, examples: ["docs:read", "requests:write"] }
+        status: { type: string, enum: [active, revoked] }
+        rate_limit_per_min: { type: integer, minimum: 30, maximum: 600 }
+        allowed_cidrs:
+          type: array
+          items: { type: string, examples: ["203.0.113.0/24"] }
+        expires_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string, format: uuid, nullable: true }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        rotated_from: { type: string, format: uuid, nullable: true }
+        expired: { type: boolean, description: Истёк ли срок на момент ответа }
+      required: [id, name, prefix, environment, scopes, status, rate_limit_per_min, allowed_cidrs, created_at, expired]
+    ApiKeyCreated:
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyView"
+        - type: object
+          properties:
+            key:
+              type: string
+              description: Полный ключ `dit_<env>_<prefix>_<secret>`; показан один раз
+            warning: { type: string }
+          required: [key, warning]
+    ApiKeyRotated:
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyView"
+        - type: object
+          properties:
+            key:
+              type: string
+              description: Полный новый ключ; показан один раз
+            replaces:
+              type: string
+              format: uuid
+              description: id заменённого ключа (окно перекрытия `grace_hours`)
+          required: [key, replaces]
+    ApiKeyScopes:
+      type: object
+      description: Каталог скоупов и пресеты выбора для панели Developers.
+      properties:
+        scopes:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, examples: ["docs:read"] }
+              title: { type: string }
+              description: { type: string }
+              group: { type: string }
+              risk: { type: string, enum: [read, write, sensitive] }
+              docs_section: { type: string }
+            required: [id, title, description, group, risk, docs_section]
+        presets:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, examples: ["read-only"] }
+              title: { type: string }
+              description: { type: string }
+              scopes:
+                type: array
+                items: { type: string }
+            required: [id, title, description, scopes]
+      required: [scopes, presets]
+    ApiKeyUsage:
+      type: object
+      description: Журнал вызовов ключа (хранится 30 дней).
+      properties:
+        summary:
+          type: object
+          properties:
+            calls_24h: { type: integer }
+            errors_24h: { type: integer }
+            calls_30d: { type: integer }
+            last_call_at: { type: string, format: date-time, nullable: true }
+          required: [calls_24h, errors_24h, calls_30d, last_call_at]
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              at: { type: string, format: date-time }
+              method: { type: string }
+              path: { type: string }
+              status: { type: integer }
+            required: [at, method, path, status]
+      required: [summary, items]
+    AdminApiKeyView:
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyView"
+        - type: object
+          properties:
+            club_name: { type: string, description: Клуб-владелец ключа }
+          required: [club_name]
   responses:
     Error:
       description: Ошибка с единым envelope

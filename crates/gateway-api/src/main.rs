@@ -2,16 +2,35 @@
 //!
 //! F0A: каркас + health. F1: device-token, логины, refresh, RBAC.
 
+mod admin_insights_routes;
+mod admin_users_routes;
+mod api_key_auth;
+mod api_key_routes;
 mod auth;
 mod catalog_routes;
+mod developer_api;
+mod developer_docs;
+mod developer_docs_content;
 #[cfg(test)]
 mod e2e;
 #[cfg(test)]
+mod e2e_admin_insights;
+#[cfg(test)]
+mod e2e_admin_users;
+#[cfg(test)]
+mod e2e_api_keys;
+#[cfg(test)]
 mod e2e_catalog;
+#[cfg(test)]
+mod e2e_developer_api;
+#[cfg(test)]
+mod e2e_dj_console;
 #[cfg(test)]
 mod e2e_f8;
 #[cfg(test)]
 mod e2e_mail;
+#[cfg(test)]
+mod e2e_onboarding;
 #[cfg(test)]
 mod e2e_panels;
 #[cfg(test)]
@@ -27,9 +46,12 @@ mod e2e_sessions;
 #[cfg(test)]
 mod e2e_signup;
 #[cfg(test)]
+mod e2e_status_services;
+#[cfg(test)]
 mod e2e_ws;
 mod infra;
 mod mail_routes;
+mod onboarding_routes;
 mod panel_routes;
 mod payments;
 mod payments_routes;

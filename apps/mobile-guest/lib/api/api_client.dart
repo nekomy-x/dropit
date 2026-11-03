@@ -17,13 +17,25 @@ class ApiClient {
 
   /// Base URL: задаётся через `--dart-define=DROPIT_API_URL=...`.
   /// 10.0.2.2 = хост-localhost из Android-эмулятора. API слушает 8080.
-  String get baseUrl => const String.fromEnvironment(
-        'DROPIT_API_URL',
-        defaultValue: 'http://10.0.2.2:8080',
-      );
+  String get baseUrl {
+    const configured = String.fromEnvironment('DROPIT_API_URL');
+    if (configured.isNotEmpty) return configured;
+    return defaultTargetPlatform == TargetPlatform.android
+        ? 'http://10.0.2.2:8080'
+        : 'http://127.0.0.1:8080';
+  }
 
-  /// Выдаёт device-token, если ещё нет.
-  Future<String> ensureDeviceToken() async {
+  Future<String>? _deviceTokenFuture;
+
+  /// A cold-start QR may join while the startup probe is still in flight.
+  /// Share issuance so both operations use the same guest identity.
+  Future<String> ensureDeviceToken() =>
+      _deviceTokenFuture ??= _loadDeviceToken().catchError((Object error) {
+        _deviceTokenFuture = null;
+        throw error;
+      });
+
+  Future<String> _loadDeviceToken() async {
     final existing = await _secureStorage.read(key: _deviceTokenKey);
     if (existing != null) return existing;
     final token = await _issueDeviceToken();
@@ -83,7 +95,7 @@ class ApiClient {
       idempotencyKey: idempotencyKey,
     );
     if (resp.statusCode != 201) {
-      throw ApiException(_parseError(resp));
+      throw ApiException(_parseError(resp), statusCode: resp.statusCode);
     }
     return RequestCreated.fromJson(jsonDecode(resp.body));
   }
@@ -109,16 +121,23 @@ class ApiClient {
     required String paymentId,
     required String idempotencyKey,
     String? paymentMethod,
+    bool testMode = false,
   }) async {
     final resp = await _post(
-      '/v1/payments/$paymentId/confirm',
+      '/v1/payments/$paymentId/${testMode ? 'test-confirm' : 'confirm'}',
       {if (paymentMethod != null) 'payment_method': paymentMethod},
       idempotencyKey: idempotencyKey,
     );
     if (resp.statusCode != 200) {
       throw ApiException(_parseError(resp));
     }
-    return PaymentConfirmation.fromJson(jsonDecode(resp.body));
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    if (testMode &&
+        (data['test_mode'] != true || data['status'] != 'captured')) {
+      throw ApiException.of(
+          'test_payment_failed', 'Test payment was not completed.');
+    }
+    return PaymentConfirmation.fromJson(data);
   }
 
   /// GET /v1/my/requests: история + статусы.
@@ -157,18 +176,22 @@ class ApiClient {
     final token = await _secureStorage.read(key: _deviceTokenKey);
     if (token != null) headers['Authorization'] = 'Bearer $token';
     if (idempotencyKey != null) headers['Idempotency-Key'] = idempotencyKey;
-    return http.post(
-      Uri.parse('$baseUrl$path'),
-      headers: headers,
-      body: jsonEncode(body),
-    );
+    return http
+        .post(
+          Uri.parse('$baseUrl$path'),
+          headers: headers,
+          body: jsonEncode(body),
+        )
+        .timeout(const Duration(seconds: 15));
   }
 
   Future<http.Response> _get(String path) async {
     final headers = <String, String>{};
     final token = await _secureStorage.read(key: _deviceTokenKey);
     if (token != null) headers['Authorization'] = 'Bearer $token';
-    return http.get(Uri.parse('$baseUrl$path'), headers: headers);
+    return http
+        .get(Uri.parse('$baseUrl$path'), headers: headers)
+        .timeout(const Duration(seconds: 15));
   }
 
   ErrorEnvelope _parseError(http.Response resp) {
@@ -199,13 +222,14 @@ class ErrorEnvelope {
 }
 
 class ApiException implements Exception {
-  ApiException(this.envelope);
+  ApiException(this.envelope, {this.statusCode});
 
   /// Convenience: из кода+сообщения (WS-клиент и пр.).
-  ApiException.of(String code, String message)
+  ApiException.of(String code, String message, {this.statusCode})
       : envelope = ErrorEnvelope(code: code, message: message, details: null);
 
   final ErrorEnvelope envelope;
+  final int? statusCode;
 
   String get code => envelope.code;
   String get message => envelope.message;
@@ -224,6 +248,7 @@ class JoinResponse {
     required this.timezone,
     this.priceMinor,
     required this.grantId,
+    this.testPayments = false,
   });
 
   final String sessionId;
@@ -233,6 +258,7 @@ class JoinResponse {
   final String timezone;
   final int? priceMinor;
   final String grantId;
+  final bool testPayments;
 
   factory JoinResponse.fromJson(Map<String, dynamic> json) => JoinResponse(
         sessionId: json['session_id'] as String,
@@ -242,6 +268,7 @@ class JoinResponse {
         timezone: json['timezone'] as String,
         priceMinor: json['price_minor'] as int?,
         grantId: json['grant_id'] as String,
+        testPayments: json['test_payments'] == true,
       );
 
   /// Цена в € (минорные единицы → валютный формат; ADR-03 — без float
@@ -305,6 +332,7 @@ class PaymentIntent {
     required this.currency,
     required this.clientSecret,
     required this.status,
+    this.testMode = false,
   });
 
   final String paymentId;
@@ -313,6 +341,7 @@ class PaymentIntent {
   final String currency;
   final String clientSecret;
   final String status;
+  final bool testMode;
 
   factory PaymentIntent.fromJson(Map<String, dynamic> json) => PaymentIntent(
         paymentId: json['payment_id'] as String,
@@ -321,6 +350,7 @@ class PaymentIntent {
         currency: json['currency'] as String,
         clientSecret: json['client_secret'] as String? ?? '',
         status: json['status'] as String,
+        testMode: json['test_mode'] == true,
       );
 }
 

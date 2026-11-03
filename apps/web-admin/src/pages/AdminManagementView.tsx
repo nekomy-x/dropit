@@ -419,7 +419,7 @@ export default function AdminManagementView({ view }: AdminManagementViewProps) 
       <PageHeading
         title={spec.title}
         action={(
-          <>
+          <div className="admin-page-actions">
             <QuickActionConsole onAction={(action) => {
               const target: Record<string, string> = { review: 'users', suspend: 'clubs', audit: 'activity', role: 'access' };
               const section = target[action];
@@ -431,7 +431,7 @@ export default function AdminManagementView({ view }: AdminManagementViewProps) 
               <Icon name={showCreate ? 'lucide:x' : 'lucide:plus'} size={15} />
               {showCreate ? t('common.cancel') : spec.createLabel}
             </button>
-          </>
+          </div>
         )}
       />
 

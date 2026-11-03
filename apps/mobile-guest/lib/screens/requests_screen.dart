@@ -190,7 +190,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                   ],
                 ),
               ),
-            const SizedBox(height: 100),
+            const SizedBox(height: 24),
           ],
         ),
       ),
@@ -248,7 +248,8 @@ class _FilterSelect extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => Padding(
+      builder: (_) => DropSheet(
+          child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -278,7 +279,7 @@ class _FilterSelect extends StatelessWidget {
               ),
           ],
         ),
-      ),
+      )),
     );
   }
 }

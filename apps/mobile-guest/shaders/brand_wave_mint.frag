@@ -29,8 +29,8 @@ const float TIME_2 = -2.1;
 const float SOFT = 0.025;
 
 const vec3 LIGHT_BASE = vec3(0.949, 0.969, 0.961); // #F2F7F5
-const vec3 MINT_DEEP = vec3(0.541, 0.706, 0.973);  // #8AB4F8
-const vec3 MINT_SOFT = vec3(0.682, 0.796, 0.980);  // #AECBFA
+const vec3 MINT_DEEP = vec3(0.000, 1.000, 0.529);  // #00FF87
+const vec3 MINT_SOFT = vec3(0.486, 1.000, 0.753);  // #7CFFC0
 
 void main() {
     vec2 uv = FlutterFragCoord().xy / uSize;

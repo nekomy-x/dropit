@@ -1,0 +1,533 @@
+/* ============================================================================
+   DJ requests workspace — the processing surface behind /dj#requests
+   ----------------------------------------------------------------------------
+   Three parts, top to bottom: a sticky live strip (connection, freshness,
+   counts, intake), one toolbar (search, status, sort) and the queue itself.
+
+   The rows are separators on the page canvas, not cards. A DJ works this list
+   for a whole shift, so the shape is a table: one hairline between requests,
+   full-width hit areas, and the actions pinned to the right of the title line.
+   A stack of containers would add an edge to read past on every row and turn a
+   working queue into a card feed.
+
+   Every colour is a `--c-*` token from club-tokens.css, every radius is one of
+   the five token radii, every type step is one of the six token sizes. That is
+   why both themes are correct by construction rather than by inspection.
+
+   The strip is a block child of `.dj-req-workspace` on purpose: a sticky item
+   inside a grid or flex line is confined to its own row box and never sticks.
+   ========================================================================== */
+
+.dj-req-workspace {
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Sticky live strip
+   44px on desktop, pinned under the 64px top bar, so the connection state and
+   the intake control stay visible while the queue scrolls past them. On a phone
+   it is a deliberate two-row band (79px): state on the first row, the intake
+   bar on the second — see the 640px block at the end of this file.
+   ------------------------------------------------------------------------ */
+.dj-req-strip {
+  position: sticky;
+  top: var(--h-topbar);
+  z-index: 2;
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--c-hairline);
+  background: var(--c-surface);
+}
+
+.dj-req-strip-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* Freshness is a sentence about a value that changes every second: tabular
+   figures keep it from jittering, and it is deliberately not a live region —
+   a once-a-second announcement is noise, not information. */
+.dj-req-fresh {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The counts open the right-hand group: `margin-left: auto` here (not on the
+   controls beside them) is what puts connection state on the left edge and
+   everything that is being counted on the right edge, on every width. */
+.dj-req-strip-counts {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.dj-req-strip-side {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.dj-req-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dj-req-count-label {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+.dj-req-count-value {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* No shift: the strip is the only surface on this tab that can say it, so the
+   reason sits beside the (disabled) intake control instead of the control
+   vanishing without an explanation. */
+.dj-req-shift {
+  display: grid;
+  min-width: 0;
+  max-width: 42ch;
+  gap: 1px;
+}
+
+.dj-req-shift strong {
+  color: var(--c-text);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.dj-req-shift span {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+.dj-req-intake { flex: 0 0 auto; }
+
+/* ---------------------------------------------------------------------------
+   Toolbar
+   ------------------------------------------------------------------------ */
+.dj-req-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2) var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) 0 var(--sp-2);
+}
+
+.dj-req-search {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+
+/* Above the rail breakpoint the toolbar reads as one left-aligned group:
+   search, then the two segment controls. The field stops at 340px because a
+   track title is short — a 1000px underline with the placeholder stranded at
+   its left edge reads as a paragraph field, and it pushes the segments so far
+   right that they no longer look like part of the same control strip. */
+@media (min-width: 1024px) {
+  .dj-req-search { flex: 0 1 340px; }
+}
+
+.dj-req-toolbar .seg { flex: 0 0 auto; }
+
+/* Keyboard hints are desktop-only: a phone has no hardware keyboard, and the
+   line would take the space a request row needs. */
+.dj-req-hint {
+  margin: 0 0 var(--sp-2);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: var(--lh-text);
+}
+
+@media (max-width: 1023px) {
+  .dj-req-hint { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Queue rows
+   ------------------------------------------------------------------------ */
+.dj-req-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dj-req-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--c-hairline-row);
+  /* Pin the side too: a row whose divider is removed by a variant must never
+     fall back to a UA border. */
+  border-color: var(--c-hairline-row);
+  /* A focused row is scrolled under the sticky strip otherwise: keep the space
+     the top bar plus the strip occupy out of the scroll target. */
+  scroll-margin-top: calc(var(--h-topbar) + 56px);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.dj-req-row:last-child { border-bottom: 0; }
+.dj-req-row:hover { background: var(--c-raised); }
+
+/* The keyboard cursor: the same tint as hover plus a 2px accent rule, so the
+   selected row is visible without moving anything or animating. */
+.dj-req-row[data-active='true'] {
+  background: var(--c-raised);
+  box-shadow: inset 2px 0 0 var(--c-accent);
+}
+
+/* A row is a real target for the arrow keys, so focus must be visible on it.
+   The ring is drawn inside the row box: an offset ring on a full-width row
+   would paint into the next row's divider. */
+.dj-req-row:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: -2px;
+}
+
+.dj-req-cover,
+.dj-req-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-tile);
+}
+
+.dj-req-cover {
+  display: block;
+  object-fit: cover;
+  background: var(--c-raised);
+}
+
+.dj-req-thumb {
+  display: grid;
+  place-items: center;
+  background: var(--c-raised);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.dj-req-main { min-width: 0; }
+
+.dj-req-titleline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dj-req-title {
+  color: var(--c-text);
+  font-size: var(--fs-15);
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+/* Artist · style · request count · arrival clock, then the money and "new"
+   facts as chips. One text node for the ramp keeps the separators consistent
+   and lets the line wrap where the reader expects. */
+.dj-req-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.dj-req-meta {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* The guest's own note is context for the decision, so it stays visible; one
+   line, ellipsised, with the full text on the title attribute. */
+.dj-req-note {
+  margin: 4px 0 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Music block — preview, external search links, copy
+   Compact by contract: one wrap-flex line of small controls, never a panel.
+   ------------------------------------------------------------------------ */
+.dj-req-music {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+
+.dj-req-music-group {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.dj-req-music-label {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+.dj-req-preview-slot { display: inline-flex; }
+
+.dj-req-preview {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: var(--c-raised);
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dj-req-preview:hover {
+  background: var(--c-hover-strong);
+  color: var(--c-text);
+}
+
+/* Playing is a state, not a hover: the tinted pair is the one the kit uses for
+   "this is live right now", and the label has already become "Stop preview". */
+.dj-req-preview[aria-pressed='true'] {
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+}
+
+/* An absent preview is a stated fact, not a dead button: no control, the
+   sentence itself, muted, with the same words as its tooltip. */
+.dj-req-preview.is-off {
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  color: var(--c-text-muted-sm);
+  cursor: default;
+}
+
+.dj-req-service {
+  color: var(--c-text-2);
+  font-size: var(--fs-11);
+  text-decoration: underline;
+  text-decoration-color: var(--c-text-muted-sm);
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.dj-req-service:hover {
+  color: var(--c-text);
+  text-decoration-color: currentColor;
+}
+
+/* Copy is an in-place action, not navigation: no underline, a hover surface.
+   That is the only affordance difference it needs from the links beside it. */
+.dj-req-copy {
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--c-text-2);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dj-req-copy:hover {
+  background: var(--c-nav-hover-bg);
+  color: var(--c-text);
+}
+
+.dj-req-copy.is-done { color: var(--c-accent-quiet); }
+
+/* ---------------------------------------------------------------------------
+   Row actions
+   ------------------------------------------------------------------------ */
+.dj-req-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 1px;
+}
+
+.dj-req-actions .btn { white-space: nowrap; }
+
+/* Declining asks for a reason inside the row it belongs to: the request never
+   leaves the list until the DJ chooses, so nothing is hidden behind a dialog. */
+.dj-req-reasons {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+/* Above the phone breakpoint the row has a 40px cover column and a 12px gap:
+   indenting the reason row by that much lines it up with the title, so it
+   reads as part of this request instead of as a row of page-level controls. */
+@media (min-width: 768px) {
+  .dj-req-reasons { padding-left: 52px; }
+}
+
+.dj-req-reasons-label {
+  margin-right: 2px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+/* ---------------------------------------------------------------------------
+   States
+   ------------------------------------------------------------------------ */
+.dj-req-audio { display: none; }
+
+/* ---------------------------------------------------------------------------
+   Phones and narrow tablets
+   The row keeps its two columns (cover, content) and the actions become a full
+   width bar under them: at 390px a right-hand action column would either
+   squeeze the title to two words or push the page into horizontal scroll.
+   ------------------------------------------------------------------------ */
+@media (max-width: 767px) {
+  .dj-req-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  /* Only the title shares a line with the cover. Metadata and music controls
+     use the whole row instead of inheriting an empty 52px cover gutter. */
+  .dj-req-main { display: contents; }
+  .dj-req-titleline { grid-column: 2; }
+  .dj-req-sub,
+  .dj-req-note,
+  .dj-req-music { grid-column: 1 / -1; }
+  .dj-req-note { white-space: normal; overflow: visible; }
+
+  .dj-req-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .dj-req-actions .btn { flex: 1 1 0; }
+
+  .dj-req-reasons { padding-left: 0; }
+}
+
+@media (max-width: 640px) {
+  /* Two deliberate rows, not whatever the flex wrap produces.
+     Row 1: connection chip (+ freshness when there is a server reading).
+     Row 2: the two counts, then the intake control — it keeps its words, since
+     collapsing it to an icon would trade the one sentence that says what the
+     button does for an empty half-row. A language whose freshness sentence is
+     wide (ru, de) pushes the counts down one line; the counts and the control
+     then share that line instead of opening a third one. With no shift the
+     state block takes the full width above the disabled control. */
+  .dj-req-strip { gap: var(--sp-1) var(--sp-2); }
+
+  .dj-req-strip-side {
+    flex: 0 1 auto;
+    justify-content: flex-end;
+  }
+
+  /* The intake control is a bar, not a chip with empty space beside it — the
+     same shape as the action bar on every row below. */
+  .dj-req-intake { flex: 1 1 100%; }
+
+  .dj-req-shift { flex: 1 1 100%; max-width: none; }
+
+  /* The preview, the four service links and the two copy actions are all
+     controls now, so each takes a real target; the row grows, the hit areas do
+     not lie. */
+  .dj-req-preview,
+  .dj-req-service,
+  .dj-req-copy {
+    min-height: var(--hit-mobile);
+  }
+
+  .dj-req-service,
+  .dj-req-copy {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .dj-req-copy { padding: 0 8px; }
+
+  /* The unavailable sentence is not a control and needs no target. */
+  .dj-req-preview.is-off { min-height: 24px; }
+
+  /* A phone has no room for a label row above the field: the placeholder names
+     the field on screen, and this keeps the label (the input's real name) in
+     the accessibility tree instead of removing it. */
+  .dj-req-search .field-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* One row less of chrome, same 44px targets. */
+  .dj-req-toolbar {
+    align-items: stretch;
+    gap: var(--sp-1) var(--sp-2);
+    padding: var(--sp-2) 0;
+  }
+
+  .dj-req-search { flex: 1 1 100%; }
+
+  /* The two segments are compact controls, not full-width bars: sizing each to
+     its content lets both share one row at 390, which is the row this change
+     buys back. The item padding drops 2px a side — the kit's `min-width: 44px`
+     keeps every option a real touch target, so this trims the track, not the
+     hit area — and the label never wraps inside an option (a two-line
+     "Most wanted" would make the track taller than the target it sits in).
+     Below 390 the toolbar's own wrap puts the segments on separate rows. */
+  .dj-req-toolbar .seg { flex: 0 1 auto; }
+  .dj-req-toolbar .seg-item {
+    padding: 0 8px;
+    white-space: nowrap;
+  }
+}

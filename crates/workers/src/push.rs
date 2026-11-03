@@ -177,7 +177,9 @@ pub async fn run_push(
                     match tokens.revoke_token(tok).await {
                         Ok(true) => invalid_revoked += 1,
                         Ok(false) => {}
-                        Err(e) => tracing::warn!(error = %e, token = ?tok.is_empty(), "push: не отозвать токен"),
+                        Err(e) => {
+                            tracing::warn!(error = %e, token = ?tok.is_empty(), "push: не отозвать токен")
+                        }
                     }
                 }
                 sent += 1;
@@ -238,10 +240,7 @@ fn build_message(row: &OutboxRow) -> PushMessage {
             "Заявка принята".to_string(),
             "Ваш трек в очереди.".to_string(),
         ),
-        "request.played" => (
-            "Трек играет".to_string(),
-            "Поставили ваш трек.".to_string(),
-        ),
+        "request.played" => ("Трек играет".to_string(), "Поставили ваш трек.".to_string()),
         "request.rejected" => {
             let reason = row
                 .payload
@@ -272,7 +271,10 @@ fn platform_from_str(s: &str) -> Option<Platform> {
         "android" => Some(Platform::Android),
         "ios" => Some(Platform::Ios),
         other => {
-            tracing::warn!(platform = other, "push: неизвестная платформа, токен пропущен");
+            tracing::warn!(
+                platform = other,
+                "push: неизвестная платформа, токен пропущен"
+            );
             None
         }
     }
@@ -317,7 +319,13 @@ impl FakeTokenSource {
 #[async_trait]
 impl PushTokenSource for FakeTokenSource {
     async fn active_tokens(&self, guest_id: Uuid) -> Result<Vec<PushTokenRow>, TokenError> {
-        Ok(self.tokens.lock().unwrap().get(&guest_id).cloned().unwrap_or_default())
+        Ok(self
+            .tokens
+            .lock()
+            .unwrap()
+            .get(&guest_id)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn revoke_token(&self, token: &str) -> Result<bool, TokenError> {
@@ -371,7 +379,11 @@ mod tests {
     async fn push_no_tokens_marks_published_no_retry() {
         let store = InMemoryOutboxStore::new();
         let guest = Uuid::from_u128(777);
-        store.push(row(2, "request.played", json!({ "guest_device_id": guest })));
+        store.push(row(
+            2,
+            "request.played",
+            json!({ "guest_device_id": guest }),
+        ));
         let tokens = FakeTokenSource::new();
 
         let report = run_push(&store, &NoopPush, &tokens, 10).await;
@@ -385,7 +397,11 @@ mod tests {
     async fn push_idempotent_second_run_is_noop() {
         let store = InMemoryOutboxStore::new();
         let guest = Uuid::from_u128(555);
-        store.push(row(1, "request.accepted", json!({ "guest_device_id": guest })));
+        store.push(row(
+            1,
+            "request.accepted",
+            json!({ "guest_device_id": guest }),
+        ));
         let tokens = FakeTokenSource::new().with_token(guest, "tok-bbbbbbbbbbbbbbb", "ios");
 
         let first = run_push(&store, &NoopPush, &tokens, 10).await;
@@ -403,7 +419,11 @@ mod tests {
     async fn push_non_push_events_left_unmarked() {
         let store = InMemoryOutboxStore::new();
         // request.created — не push-тип (адресован DJ-очереди).
-        store.push(row(3, "request.created", json!({ "session_id": Uuid::nil() })));
+        store.push(row(
+            3,
+            "request.created",
+            json!({ "session_id": Uuid::nil() }),
+        ));
         let tokens = FakeTokenSource::new();
 
         let report = run_push(&store, &NoopPush, &tokens, 10).await;
@@ -442,7 +462,11 @@ mod tests {
     async fn push_revokes_invalid_tokens() {
         let store = InMemoryOutboxStore::new();
         let guest = Uuid::from_u128(555);
-        store.push(row(1, "request.accepted", json!({ "guest_device_id": guest })));
+        store.push(row(
+            1,
+            "request.accepted",
+            json!({ "guest_device_id": guest }),
+        ));
         let tokens = FakeTokenSource::new()
             .with_token(guest, "tok-good-aaaaaaaaaaa", "android")
             .with_token(guest, "tok-bad-bbbbbbbbbbbb", "ios");
@@ -453,7 +477,9 @@ mod tests {
         let report = run_push(&store, &sender, &tokens, 10).await;
         assert_eq!(report.detail["sent"], 1);
         assert_eq!(report.detail["invalid_tokens_revoked"], 1);
-        assert!(tokens.revoked().contains(&"tok-bad-bbbbbbbbbbbb".to_string()));
+        assert!(tokens
+            .revoked()
+            .contains(&"tok-bad-bbbbbbbbbbbb".to_string()));
     }
 
     /// Sender, имитирующий транспортную ошибку.
@@ -474,13 +500,20 @@ mod tests {
     async fn push_transport_failure_leaves_event_unpublished() {
         let store = InMemoryOutboxStore::new();
         let guest = Uuid::from_u128(555);
-        store.push(row(1, "request.accepted", json!({ "guest_device_id": guest })));
+        store.push(row(
+            1,
+            "request.accepted",
+            json!({ "guest_device_id": guest }),
+        ));
         let tokens = FakeTokenSource::new().with_token(guest, "tok-ccccccccccccccc", "android");
 
         let report = run_push(&store, &FailingSender, &tokens, 10).await;
         assert_eq!(report.detail["failed"], 1);
         assert_eq!(report.detail["marked_published"], 0);
-        assert!(!store.is_published(Uuid::from_u128(1)), "событие должно остаться для ретрая");
+        assert!(
+            !store.is_published(Uuid::from_u128(1)),
+            "событие должно остаться для ретрая"
+        );
     }
 
     #[tokio::test]
@@ -504,7 +537,10 @@ mod tests {
 
     #[test]
     fn platform_mapping() {
-        assert!(matches!(platform_from_str("android"), Some(Platform::Android)));
+        assert!(matches!(
+            platform_from_str("android"),
+            Some(Platform::Android)
+        ));
         assert!(matches!(platform_from_str("IOS"), Some(Platform::Ios)));
         assert!(platform_from_str("windows").is_none());
     }

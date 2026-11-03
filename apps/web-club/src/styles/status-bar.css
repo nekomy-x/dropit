@@ -179,10 +179,6 @@ html[data-deployment-bar] .auth-screen {
   padding-bottom: calc(32px + max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
 }
 
-html[data-deployment-bar] .auth-wizard {
-  padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
-}
-
 html[data-deployment-bar] .connect-root {
   padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
 }

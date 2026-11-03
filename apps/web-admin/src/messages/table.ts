@@ -23,6 +23,7 @@ export const tableCatalog = {
     "table.saveError": "Could not save this change.",
     "table.bulkActions": "Bulk actions",
     "table.selected": "{count} selected",
+    "table.showMore": "Show more",
   },
   es: {
     "table.searchPlaceholder": "Buscar registros",
@@ -39,6 +40,7 @@ export const tableCatalog = {
     "table.saveError": "No se pudo guardar el cambio.",
     "table.bulkActions": "Acciones masivas",
     "table.selected": "{count} seleccionados",
+    "table.showMore": "Mostrar más",
   },
   fr: {
     "table.searchPlaceholder": "Rechercher des enregistrements",
@@ -55,6 +57,7 @@ export const tableCatalog = {
     "table.saveError": "Impossible d’enregistrer cette modification.",
     "table.bulkActions": "Actions groupées",
     "table.selected": "{count} sélectionnés",
+    "table.showMore": "Afficher plus",
   },
   de: {
     "table.searchPlaceholder": "Datensätze durchsuchen",
@@ -71,6 +74,7 @@ export const tableCatalog = {
     "table.saveError": "Diese Änderung konnte nicht gespeichert werden.",
     "table.bulkActions": "Sammelaktionen",
     "table.selected": "{count} ausgewählt",
+    "table.showMore": "Mehr anzeigen",
   },
   pt: {
     "table.searchPlaceholder": "Pesquisar registos",
@@ -87,6 +91,7 @@ export const tableCatalog = {
     "table.saveError": "Não foi possível guardar a alteração.",
     "table.bulkActions": "Ações em massa",
     "table.selected": "{count} selecionados",
+    "table.showMore": "Mostrar mais",
   },
   ru: {
     "table.searchPlaceholder": "Поиск записей",
@@ -103,5 +108,6 @@ export const tableCatalog = {
     "table.saveError": "Не удалось сохранить изменение.",
     "table.bulkActions": "Массовые действия",
     "table.selected": "Выбрано: {count}",
+    "table.showMore": "Показать ещё",
   },
 } satisfies MessageCatalog;

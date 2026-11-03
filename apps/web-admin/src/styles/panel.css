@@ -422,10 +422,15 @@
   border-radius: var(--r-control);
   background: var(--c-raised);
 }
+/* Square segments: 30×30 inside the 3px track makes the group exactly 36px
+   tall, which is `--hit-desktop` and the height of every icon control beside
+   it in the top bar. The 28px height here was the segmented-control size, so
+   the group came out 34px — two short of its neighbours — and any shell that
+   raised the segments to 36px turned them into 30×36 ovals in a 42px track. */
 .theme-toggle button {
   display: inline-flex;
   width: 30px;
-  height: 28px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -800,13 +805,13 @@ select.field-input { appearance: none; padding-right: 24px; cursor: pointer; }
   background-color: var(--c-accent);
 }
 /* The tick ink is `--c-ink-on-accent`, but an SVG data URI cannot read a CSS
-   variable, so the two inks are inlined: #06130C (dark theme) and #FFFFFF
+   variable, so the two inks are inlined: #0A0A0A (dark theme) and #FFFFFF
    (light theme), the same pair the token defines. */
 .panel-shell input[type='checkbox']:checked {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M2.4 6.3 4.9 8.8 9.7 3.5' fill='none' stroke='%2306130C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M2.4 6.3 4.9 8.8 9.7 3.5' fill='none' stroke='%230A0A0A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .panel-shell input[type='checkbox']:indeterminate {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%2306130C' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M3 6h6' fill='none' stroke='%230A0A0A' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 :root[data-theme='light'] .panel-shell input[type='checkbox']:checked {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12'%3E%3Cpath d='M2.4 6.3 4.9 8.8 9.7 3.5' fill='none' stroke='%23FFFFFF' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -997,7 +1002,7 @@ select.field-input { appearance: none; padding-right: 24px; cursor: pointer; }
 /* ---------------------------------------------------------------------------
    Tables
    ------------------------------------------------------------------------ */
-.table-wrap { width: 100%; overflow-x: auto; }
+.table-wrap { position: relative; width: 100%; min-width: 0; overflow-x: auto; }
 /* Chromium makes a scroll container keyboard-focusable on its own; without a
    ring that tab stop is invisible. */
 .table-wrap:focus-visible,
@@ -1394,7 +1399,6 @@ select.field-input { appearance: none; padding-right: 24px; cursor: pointer; }
    ------------------------------------------------------------------------ */
 .panel-shell :where(a, button, summary, label, [role='button'], [role='radio'], [role='tab'], [role='option']),
 .auth-screen :where(a, button, summary, label, [role='button'], [role='radio']),
-.auth-wizard :where(a, button, summary, label, [role='button'], [role='radio']),
 .connect-root :where(a, button, summary, label, [role='button'], [role='radio']) {
   transition-property: color, background-color, border-color, outline-color, box-shadow, opacity, transform;
   transition-duration: var(--dur-fast);
@@ -1507,7 +1511,6 @@ textarea:focus-visible,
 :where(
   .panel-shell,
   .auth-screen,
-  .auth-wizard,
   .connect-root
 ) :where(
   button,
@@ -1552,7 +1555,6 @@ textarea:focus-visible,
 :where(
   .panel-shell,
   .auth-screen,
-  .auth-wizard,
   .connect-root
 ) :where(input, textarea, [contenteditable='true'], .data-table td, .panel-card p, .field-hint, .panel-note) {
   -webkit-user-select: text;
@@ -1592,11 +1594,43 @@ textarea:focus-visible,
 .club-topbar-search-compact { display: none; }
 
 @media (max-width: 640px) {
+  /* One outer gutter and one content inset: nested desktop spacing used to
+     leave a 320px screen with only 248px for a form or a table record. */
+  .panel-shell {
+    --pad-panel: var(--pad-panel-mobile);
+    --pad-panel-lg: var(--sp-4);
+  }
+  .panel-content { padding-inline: var(--page-gutter-mobile); }
+  .panel-topbar { padding-inline: var(--page-gutter-mobile); }
   .panel-search-compact,
   .club-topbar-search-compact { display: inline-flex; }
   .panel-search { display: none; }
-  .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Four KPI cards stacked one per screen moved the live state below the fold:
+     the row that answers "how is the room doing" opened with one card and
+     ended 900px later. Two columns fit down to 360px, so the phone keeps the
+     row and trades the desktop value size for it. Below 360 the value no
+     longer fits beside its icon, and the single column returns. */
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-card { padding: 14px; }
+  .stat-head { gap: 8px; }
+  .stat-icon { width: 28px; height: 28px; }
+  .stat-label { font-size: var(--fs-12); line-height: 1.3; }
+  .stat-value { margin-top: 8px; font-size: var(--fs-20); letter-spacing: -.02em; }
+  .stat-row { margin-top: 4px; row-gap: 4px; }
+  .stat-foot { line-height: 1.4; }
   .panel-grid-2 { grid-template-columns: minmax(0, 1fr); }
+  .panel-card-head { flex-wrap: wrap; }
+  .panel-card-head > :first-child { min-width: 0; }
+  .panel-card-tools { flex-wrap: wrap; max-width: 100%; }
+  /* Actions get their own row; a short source chip can stay beside a title. */
+  .panel-card-head:has(.panel-card-tools :is(button, a, [role='combobox'])) > :first-child {
+    flex: 1 1 100%;
+  }
+  /* The page head is a title and its one action. On a phone the action takes
+     the row under the title instead of competing with it for the width. */
+  .panel-page-head { flex-direction: column; align-items: stretch; gap: 12px; margin-bottom: 16px; }
+  .panel-page-actions { width: 100%; }
+  .panel-page-sub { margin-top: 4px; }
   /* At 320px the search field plus the theme switch plus the account button do
      not fit on one row: the row scrolled the whole page by 34px. The search
      field is the one element that can give up its width. */
@@ -1620,6 +1654,142 @@ textarea:focus-visible,
   .trash-action { height: var(--hit-mobile); padding: 0 12px; font-size: var(--fs-13); }
 }
 
+/* ---------------------------------------------------------------------------
+   Phones — a table becomes a list of labelled rows
+   ------------------------------------------------------------------------
+   A dense data table is a desktop instrument: eight columns of numbers answer
+   a question in one line of sight, and they do it by being wide. A phone is
+   not wide, so the same table used to be a 760px-wide grid inside a 326px card:
+   the columns past the fold were clipped by the card (the operator saw a header
+   cut mid-word and half an address), and the only way to the rest was a
+   horizontal scroll nobody discovers on a touch screen.
+
+   Below 768px a table marked `data-table--stack` becomes one block per record:
+   the first cell is the record's name, every other cell is a `label / value`
+   line. The markup contract is small and it is the only thing a page owes this
+   layout:
+
+     <th scope="col">E-mail</th>            ← desktop only, hidden when stacked
+     <td data-label="E-mail">…</td>         ← the same translated string
+     <td data-label="" className="cell-actions">…</td>  ← no label
+
+   An empty `data-label` means "this cell has no column label" — the row's
+   identity (`cell-primary`) and its actions (`cell-actions`). The label is the
+   header's own string, so a translated column stays translated and the two
+   cannot drift apart.
+
+   The table keeps no `min-width` here. The inline `min-width` on those tables
+   exists to protect the desktop grid from a squeezed first column; when the
+   grid is gone the number would only mean "overflow again", so this block is
+   the one place that removes it, with `!important` because that is where the
+   value is written.
+   ------------------------------------------------------------------------ */
+@media (max-width: 767px) {
+  .data-table--stack {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+    font-size: var(--fs-13);
+  }
+  /* Visually hidden, still announced: a screen reader keeps the column label
+     before the value, which is the same information the visual label carries. */
+  .data-table--stack thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .data-table--stack tbody { display: block; }
+  .data-table--stack tr {
+    display: block;
+    padding: 14px 0 10px;
+    border-bottom: 1px solid var(--c-hairline-row);
+  }
+  .data-table--stack tr:last-child { padding-bottom: 0; border-bottom: 0; }
+  .data-table--stack td,
+  .data-table--stack tbody th {
+    display: block;
+    width: auto;
+    padding: 3px 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  /* The label column is reserved, not a wrapper: the cell's own content keeps
+     its natural block flow (a chip, a button row, two lines of an address).
+
+     The selector requires the ATTRIBUTE, not just a non-empty value: a cell with
+     no `data-label` at all is a cell with no column (the record's identity, a
+     button strip), and `td:not([data-label=''])` matched exactly those — the
+     record line inherited the 104px label column and every identity title came
+     out indented into the value column. */
+  .data-table--stack td[data-label]:not([data-label='']),
+  .data-table--stack tbody th[data-label]:not([data-label='']) { padding-left: var(--stack-label); position: relative; }
+  .data-table--stack td[data-label]:not([data-label=''])::before,
+  .data-table--stack tbody th[data-label]:not([data-label=''])::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 4px;
+    width: calc(var(--stack-label) - 12px);
+    color: var(--c-text-muted);
+    font-size: var(--fs-11);
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  /* The record itself: the one line that says which row this is. */
+  .data-table--stack .cell-primary {
+    padding: 0 0 8px;
+    color: var(--c-text);
+    font-size: var(--fs-15);
+    font-weight: 600;
+  }
+  .data-table--stack .cell-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 0 0;
+  }
+  /* Buttons in a stacked row are the row's actions, not a trailing column: they
+     stretch to a thumb width instead of shrinking to their longest word. */
+  .data-table--stack .cell-actions > .btn,
+  .data-table--stack .cell-actions > .btn-primary,
+  .data-table--stack .cell-actions > .btn-secondary,
+  .data-table--stack .cell-actions > .btn-quiet,
+  .data-table--stack .cell-actions > .btn-outline,
+  .data-table--stack .cell-actions > .btn-danger { flex: 1 1 auto; justify-content: center; }
+  .data-table--stack td.is-num { text-align: left; }
+  /* A tap is not a hover: the row must not paint a background under the finger
+     and then leave it behind. */
+  .data-table--stack tbody tr:hover td { background: transparent; }
+  .table-wrap:has(> .data-table--stack) { overflow-x: visible; }
+}
+
+@media (max-width: 359px) {
+  .stat-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A dialog on a phone is a sheet: it keeps 12px of canvas around it and the
+   thumb-sized footer sits at the bottom of the screen, not in the middle. */
+@media (max-width: 640px) {
+  .panel-modal,
+  .panel-modal-surface { max-height: calc(100dvh - 24px); }
+  .panel-modal { width: calc(100vw - 24px); }
+  .panel-modal-foot .btn,
+  .panel-modal-foot .btn-primary,
+  .panel-modal-foot .btn-secondary,
+  .panel-modal-foot .btn-quiet,
+  .panel-modal-foot .btn-outline,
+  .panel-modal-foot .btn-danger { flex: 1 1 auto; justify-content: center; }
+  .panel-modal-foot .panel-modal-foot-spacer { display: none; }
+}
+
 /* Below the rail breakpoint the account trigger moves into the top bar, and
    the menu would otherwise open off the right edge of the viewport. */
 @media (max-width: 1023px) {
@@ -1631,6 +1801,24 @@ textarea:focus-visible,
 
 @media (max-width: 480px) {
   .panel-language-options { grid-template-columns: minmax(0, 1fr); }
+  /* A phone record needs the whole line for an address, note or action. Keep
+     the translated label above the value instead of reserving a 104px column. */
+  .data-table--stack td[data-label]:not([data-label='']),
+  .data-table--stack tbody th[data-label]:not([data-label='']) {
+    padding-left: 0;
+    padding-block: var(--sp-1);
+  }
+  .data-table--stack td[data-label]:not([data-label=''])::before,
+  .data-table--stack tbody th[data-label]:not([data-label=''])::before {
+    position: static;
+    display: block;
+    width: auto;
+    margin-bottom: 2px;
+    overflow-wrap: anywhere;
+  }
+  .panel-modal-head { padding-inline: var(--pad-panel-mobile); }
+  .panel-modal-body { padding: var(--pad-panel-mobile); }
+  .panel-modal-foot { padding-inline: var(--pad-panel-mobile); }
 }
 
 @media (prefers-reduced-motion: reduce) {

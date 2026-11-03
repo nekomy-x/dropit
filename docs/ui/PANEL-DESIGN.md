@@ -40,17 +40,25 @@ The new language is a **light-first dashboard shell with a real dark theme**:
 
 | token | dark | light | use |
 | --- | --- | --- | --- |
-| `--c-canvas` | `#0A0C11` | `#F4F6F9` | page background |
-| `--c-rail` | `#0B0E14` | `#FFFFFF` | sidebar, navigation drawer |
-| `--c-surface` | `#12151C` | `#FFFFFF` | cards |
-| `--c-raised` | `#171B23` | `#F3F5F8` | chips, secondary buttons, thumbs |
-| `--c-inset` | `#0E1118` | `#F7F9FB` | wells, bar tracks |
-| `--c-hairline` | `rgba(235,240,250,.08)` | `#E6EAF0` | one divider per edge |
+| `--c-canvas` | `#080808` | `#F5F5F5` | page background |
+| `--c-rail` | `#0E0E0E` | `#FFFFFF` | sidebar, navigation drawer |
+| `--c-surface` | `#181818` | `#FFFFFF` | cards |
+| `--c-raised` | `#202020` | `#F0F0F0` | chips, secondary buttons, thumbs |
+| `--c-inset` | `#111111` | `#F7F7F7` | wells, bar tracks |
+| `--c-hairline` | `rgba(255,255,255,.11)` | `#E4E4E4` | one divider per edge |
 | `--c-accent` | `#00FF87` | `#087A4C` | primary action, live chip, series |
-| `--c-text` | `#F1F4F7` | `#0F141B` | primary text |
-| `--c-text-2` | `#B0B8C3` | `#4A5563` | secondary text |
-| `--c-text-muted` | `#858E9C` | `#67717F` | labels (≥12px) |
-| `--c-text-muted-sm` | `#9AA3B0` | `#5A6472` | micro text (11–12px) |
+| `--c-text` | `#F2F2F2` | `#121212` | primary text |
+| `--c-text-2` | `#B8B8B8` | `#4A4A4A` | secondary text |
+| `--c-text-muted` | `#949494` | `#676767` | labels (≥12px) |
+| `--c-text-muted-sm` | `#A2A2A2` | `#5B5B5B` | micro text (11–12px) |
+
+The ramp is **neutral grey, not blue-grey** (changed 2026-10-28). The previous
+dark set (`#0A0C11` page, `#12151C` panel, cool-white hairlines) carried a blue
+cast that made the panel look blue beside every other black surface; the owner's
+swatch is plain `#080808` / `#181818` with a `#313131` divider on the panel, and
+that is what the tokens now paint. Every value keeps its measured contrast: the
+muted step is the lightest grey that still clears 4.5:1 on the darkest surface
+it labels (`--c-seg-active` `#2C2C2C`, 4.6:1).
 | `--c-ok` / `--c-warn` / `--c-error` | see file | see file | state, never as a second accent |
 
 The light accent is `#087A4C`, not `#00FF87`: the neon green measures ~1.4:1
@@ -157,8 +165,15 @@ itself is left to the browser.
 ## Layout rules
 
 * Rail 248px, sticky, full height; content max 1320px, 24px padding.
+* Phones ≤640px use a single 12px page gutter and a 14px panel inset. Auth
+  cards keep a 16px inset. Tablet gutters remain 16px; desktop spacing stays
+  unchanged. Do not add another page gutter inside a panel body.
+* Stacked table records put the label above its value at ≤480px, so addresses,
+  notes and actions can use the full row instead of a reserved label column.
 * Top bar 64px, sticky, holds the command/search field, theme toggle, account.
-* KPI row: 4 columns ≥1280px, 2 at 1024–1279, 1 below 640.
+* KPI row: 4 columns ≥1280px, 2 at 1024–1279, and 2 on phones (the compact
+  card — 14px padding, 20px value — fits down to 360px); 1 column below 360.
+  Four full-width KPI cards pushed the live state two screens down on a phone.
 * Wide+narrow rows: `2fr 1fr` for the chart row, `1.45fr 1fr` for the table row;
   both collapse to one column below 1280px.
 * Below 1024px the rail is replaced by a **burger button + left drawer**, not a
@@ -222,6 +237,63 @@ Verified by `node scripts/mobile-nav-check.mjs` (both apps, both themes, 390 and
 1440): drawer contents equal rail contents, 44px targets, Escape returns focus,
 body scroll locked and restored, contrast ≥4.5:1, radius set inside the
 contract, no animation left running under reduced motion.
+
+## Mobile content (below 768px)
+
+The rail is not the only desktop instrument these panels have. A dense data
+table is the other one, and on a phone it used to be a 760px grid inside a
+326px card: the columns past the fold were clipped mid-word (a status header
+reading "St", half an address) and the remainder was reachable only through a
+horizontal scroll nobody discovers on touch. The rule below replaces that.
+
+**A table becomes a list of labelled rows.** Mark the table
+`data-table--stack` and give every value cell the column's own translated
+label:
+
+```html
+<table class="data-table data-table--stack">
+  <thead><tr><th scope="col">E-mail</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="cell-primary">Nora Vex</td>              <!-- identity: no label -->
+      <td data-label="E-mail">nora@nebula.test</td>       <!-- same string as the th -->
+      <td data-label="" class="cell-actions">…</td>       <!-- actions: no label -->
+    </tr>
+  </tbody>
+</table>
+```
+
+* the label is the header's own string, so a translated column stays translated
+  and the two cannot drift apart;
+* `cell-primary` is the record's identity line (15px, 600);
+* `cell-actions` holds the row's buttons, which stretch to a thumb target;
+* the desktop `min-width` on the table stays as written — the shared block
+  cancels it below 768px, where the grid no longer exists;
+* the `<thead>` is visually hidden but still announced, so a screen reader keeps
+  the column name before the value.
+
+A **genuine matrix or a document table** (role × permission, markdown reference)
+must not stack. Mark it `data-mobile="scroll"`; it may stay wider than the card,
+but it sits in a keyboard-focusable, visibly scrollable container. Any table that
+neither stacks nor declares `scroll` fails the audit, because that is exactly the
+clipped-grid bug.
+
+**The rest of the phone layout** follows the same "the tool, not the page" rule:
+
+* `.panel-page-head` stacks at ≤640: title, then its actions on their own row;
+* `.panel-card` keeps 20px padding (the phone width comes out of the content
+  padding, not out of every card);
+* `.panel-modal` becomes a sheet: `100vw - 24px` wide, `100dvh - 24px` tall,
+  footer buttons stretch;
+* `TrendChart` picks its x-label density from the measured plot width (an 11px
+  label is ~6.6px per character + a 12px gap), so a seven-point series prints
+  seven labels on a desktop panel and four on a phone instead of overlapping;
+* every control that is reachable by thumb keeps a 44px target down to 320px.
+
+Verified in `node scripts/panel-audit.mjs` (both apps, every route, both themes):
+"mobile tables fit or declare scroll @390" and "stacked rows carry column
+labels @390", next to the existing overflow ladder (320/390/768/1024/1440),
+touch targets, contrast, radius and console checks.
 
 ## Deployment strip (test / maintenance / production)
 

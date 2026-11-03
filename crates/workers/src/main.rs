@@ -31,6 +31,20 @@ async fn main() {
     let config = Config::from_env();
     let env = Arc::new(WorkerEnv::build(config).await);
 
+    // Heartbeat для публичной `/status`: супервизор пишет каждые 15 с,
+    // одноразовый прогон — один раз перед работой. Без БД пропускается.
+    if let Some(repo) = env.jobs.clone() {
+        let _ = repo.record_heartbeat("dropit-workers").await;
+        if matches!(cmd, Command::Run) {
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    let _ = repo.record_heartbeat("dropit-workers").await;
+                }
+            });
+        }
+    }
+
     let code = match cmd {
         Command::Run => jobs::run_supervisor(env).await,
         Command::Once(job) => {

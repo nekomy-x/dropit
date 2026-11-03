@@ -2,6 +2,10 @@ import { Link } from 'react-router-dom';
 import Icon from '../Icons';
 import { useLocale } from '../../../connect/locale';
 import { CLUB_JOIN_CTA } from '../../../connect/cta';
+/* The phone scale for the whole landing (type floor, thumb targets, hero
+   height). Loaded here because the hero is the page's first section; every
+   rule inside is scoped to `.connect-sprint-page` and `max-width: 767px`. */
+import './connect-phone.css';
 
 const STATS = ['0 €', '0.30 €'];
 const AVATARS = ['#3A4038', '#5A5F58', '#7C8278', '#00FF87'];

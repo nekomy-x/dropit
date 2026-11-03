@@ -161,7 +161,7 @@ class SignInScreen extends StatefulWidget {
 class _SignInScreenState extends State<SignInScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final bool _obscure = true;
+  bool _obscure = true;
   String? _error;
 
   @override
@@ -216,6 +216,7 @@ class _SignInScreenState extends State<SignInScreen> {
         const FieldLabel('Email'),
         DropField(
           controller: _email,
+          keyboardType: TextInputType.emailAddress,
           hint: 'you@example.com',
           prefixIcon: Icons.mail_outline,
         ),
@@ -227,6 +228,8 @@ class _SignInScreenState extends State<SignInScreen> {
           prefixIcon: Icons.lock_outline,
           obscure: _obscure,
           suffixIcon: _obscure ? Icons.visibility_off : Icons.visibility,
+          onSuffixPressed: () => setState(() => _obscure = !_obscure),
+          suffixTooltip: _obscure ? 'Show password' : 'Hide password',
         ),
         Align(
           alignment: Alignment.centerRight,
@@ -298,7 +301,7 @@ class CreateAccountScreen extends StatefulWidget {
 class _CreateAccountScreenState extends State<CreateAccountScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final bool _obscure = true;
+  bool _obscure = true;
   String? _error;
 
   @override
@@ -353,6 +356,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
         const FieldLabel('Email'),
         DropField(
           controller: _email,
+          keyboardType: TextInputType.emailAddress,
           hint: 'you@example.com',
           prefixIcon: Icons.mail_outline,
         ),
@@ -364,6 +368,8 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
           prefixIcon: Icons.lock_outline,
           obscure: _obscure,
           suffixIcon: _obscure ? Icons.visibility_off : Icons.visibility,
+          onSuffixPressed: () => setState(() => _obscure = !_obscure),
+          suffixTooltip: _obscure ? 'Show password' : 'Hide password',
         ),
         const Padding(
           padding: EdgeInsets.only(top: 8, left: 2),
@@ -472,8 +478,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         const FieldLabel('Email'),
         DropField(
           controller: _email,
-          hint: 'you@example.com',
           keyboardType: TextInputType.emailAddress,
+          hint: 'you@example.com',
         ),
         const SizedBox(height: 20),
         PrimaryButton(label: 'Send reset link', onPressed: _submit),

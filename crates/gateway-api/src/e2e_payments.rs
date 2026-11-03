@@ -329,6 +329,12 @@ struct RejectingStripe;
 
 #[async_trait::async_trait]
 impl dropit_infra_stripe::StripeApi for RejectingStripe {
+    async fn retrieve_payment_intent(
+        &self,
+        intent_id: &str,
+    ) -> Result<dropit_infra_stripe::IntentResult, dropit_infra_stripe::StripeError> {
+        dropit_infra_stripe::MockStripe.retrieve_payment_intent(intent_id).await
+    }
     async fn create_payment_intent(
         &self,
         req: dropit_infra_stripe::CreateIntent,
@@ -491,6 +497,7 @@ async fn http_call(
 /// методы делегируют `MockStripe` (платёжный цикл не нужен в этих тестах).
 struct CountingStripe {
     create_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    refund_calls: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl CountingStripe {
@@ -500,14 +507,34 @@ impl CountingStripe {
         (
             Self {
                 create_calls: counter.clone(),
+                refund_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             },
             counter,
+        )
+    }
+
+    /// То же, но наружу отдаётся счётчик `refund`: тест возврата проверяет,
+    /// что повтор по тому же `Idempotency-Key` не дёргает провайдера.
+    fn with_refund_counter() -> (Self, std::sync::Arc<std::sync::atomic::AtomicU64>) {
+        let refunds = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        (
+            Self {
+                create_calls: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                refund_calls: refunds.clone(),
+            },
+            refunds,
         )
     }
 }
 
 #[async_trait::async_trait]
 impl dropit_infra_stripe::StripeApi for CountingStripe {
+    async fn retrieve_payment_intent(
+        &self,
+        intent_id: &str,
+    ) -> Result<dropit_infra_stripe::IntentResult, dropit_infra_stripe::StripeError> {
+        dropit_infra_stripe::MockStripe.retrieve_payment_intent(intent_id).await
+    }
     async fn create_payment_intent(
         &self,
         req: dropit_infra_stripe::CreateIntent,
@@ -532,6 +559,8 @@ impl dropit_infra_stripe::StripeApi for CountingStripe {
         &self,
         req: dropit_infra_stripe::RefundReq,
     ) -> Result<dropit_infra_stripe::RefundResult, dropit_infra_stripe::StripeError> {
+        self.refund_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         dropit_infra_stripe::MockStripe.refund(req).await
     }
     async fn create_connected_account(
@@ -676,6 +705,77 @@ async fn payment_fixtures(
     })
 }
 
+#[tokio::test]
+async fn e2e_test_payment_completes_once_and_checks_ownership() {
+    let Some(fx) = payment_fixtures(None).await else { eprintln!("Test payment e2e skipped: database unavailable"); return; };
+    let owner = fx.guest_id.to_string();
+    let (status, intent) = http_call(&fx.env, "POST", &format!("/v1/requests/{}/payment", fx.request_id), None, Some(&owner), Some("test-intent")).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(intent["test_mode"], true);
+    let id = intent["payment_id"].as_str().unwrap();
+    let uri = format!("/v1/payments/{id}/test-confirm");
+    let (foreign, _) = http_call(&fx.env, "POST", &uri, None, Some(&uuid::Uuid::now_v7().to_string()), Some("test-foreign")).await;
+    assert_eq!(foreign, StatusCode::NOT_FOUND);
+    let (missing_key, _) = http_call(&fx.env, "POST", &uri, None, Some(&owner), None).await;
+    assert_eq!(missing_key, StatusCode::UNPROCESSABLE_ENTITY);
+    let (first, parallel) = tokio::join!(
+        http_call(&fx.env, "POST", &uri, None, Some(&owner), Some("test-confirm")),
+        http_call(&fx.env, "POST", &uri, None, Some(&owner), Some("test-confirm")),
+    );
+    assert_eq!(first.0, StatusCode::OK, "{:?}", first.1);
+    assert_eq!(parallel.0, StatusCode::OK, "{:?}", parallel.1);
+    for _ in 0..2 {
+        let (status, result) = http_call(&fx.env, "POST", &uri, None, Some(&owner), Some("test-confirm")).await;
+        assert_eq!(status, StatusCode::OK, "{result}");
+        assert_eq!(result["status"], "captured");
+        assert_eq!(result["test_mode"], true);
+    }
+    let payment_id = uuid::Uuid::parse_str(id).unwrap();
+    let row = fx.billing.find_payment(payment_id).await.unwrap().unwrap();
+    assert_eq!(row.status, "captured");
+    let (transactions, balance): (i64, i64) = sqlx::query_as("SELECT count(DISTINCT txn_id), coalesce(sum(amount_minor), 0)::bigint FROM ledger_entry WHERE ref = $1 AND entry_type = 'capture'")
+        .bind(id).fetch_one(&fx.pool).await.unwrap();
+    assert_eq!(transactions, 1);
+    assert_eq!(balance, 0);
+    let (events,): (i64,) = sqlx::query_as("SELECT count(*) FROM outbox WHERE aggregate_id = $1 AND event_type = 'payment.captured'")
+        .bind(payment_id).fetch_one(&fx.pool).await.unwrap();
+    assert_eq!(events, 1);
+}
+
+#[tokio::test]
+async fn e2e_test_payment_is_unavailable_on_non_mock_provider() {
+    // A wrapper that does not explicitly identify as a simulator must not
+    // expose free confirmations, even if its create method delegates to a mock.
+    let (provider, _) = CountingStripe::new();
+    let Some(fx) = payment_fixtures(Some(std::sync::Arc::new(provider))).await else { eprintln!("Test payment e2e skipped: database unavailable"); return; };
+    let owner = fx.guest_id.to_string();
+    let (_, intent) = http_call(&fx.env, "POST", &format!("/v1/requests/{}/payment", fx.request_id), None, Some(&owner), Some("not-test-intent")).await;
+    assert_eq!(intent["test_mode"], false);
+    let id = intent["payment_id"].as_str().unwrap();
+    let (status, _) = http_call(&fx.env, "POST", &format!("/v1/payments/{id}/test-confirm"), None, Some(&owner), Some("not-test-confirm")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(fx.billing.find_payment(uuid::Uuid::parse_str(id).unwrap()).await.unwrap().unwrap().status, "intent");
+}
+
+#[tokio::test]
+async fn e2e_test_payment_respects_pause_and_rejects_live_intents() {
+    let Some(fx) = payment_fixtures(None).await else { eprintln!("Test payment e2e skipped: database unavailable"); return; };
+    let owner = fx.guest_id.to_string();
+    let (_, intent) = http_call(&fx.env, "POST", &format!("/v1/requests/{}/payment", fx.request_id), None, Some(&owner), Some("guard-test-intent")).await;
+    let id = intent["payment_id"].as_str().unwrap();
+    let payment_id = uuid::Uuid::parse_str(id).unwrap();
+    sqlx::query("UPDATE payment SET stripe_payment_intent_id = 'pi_real_previous_provider' WHERE id = $1").bind(payment_id).execute(&fx.pool).await.unwrap();
+    let uri = format!("/v1/payments/{id}/test-confirm");
+    let (status, _) = http_call(&fx.env, "POST", &uri, None, Some(&owner), Some("reject-live")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    sqlx::query("UPDATE payment SET stripe_payment_intent_id = 'pi_mock_guard_test' WHERE id = $1").bind(payment_id).execute(&fx.pool).await.unwrap();
+    SessionRepo::new(fx.pool.clone()).apply_transition(fx.session_id, dropit_domain::SessionTransition::Pause).await.unwrap();
+    let (status, _) = http_call(&fx.env, "POST", &uri, None, Some(&owner), Some("reject-paused")).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM ledger_entry WHERE ref = $1").bind(id).fetch_one(&fx.pool).await.unwrap();
+    assert_eq!(count, 0);
+}
+
 /// ДЕФЕКТ 2: один request → один платёж. Второй POST на тот же request с
 /// ДРУГИМ Idempotency-Key возвращает тот же payment_id, провайдер вызван
 /// ровно один раз, в БД одна строка payment.
@@ -702,6 +802,15 @@ async fn e2e_payment_one_per_request_provider_called_once() {
     assert_eq!(s2, StatusCode::OK, "second POST must replay: {b2}");
     let id2 = b2["payment_id"].as_str().expect("payment_id").to_string();
     assert_eq!(id1, id2, "second POST must return SAME payment_id");
+    assert!(!b1["client_secret"].as_str().unwrap().is_empty());
+    assert_eq!(b1["client_secret"], b2["client_secret"], "a lost response can resume the same checkout");
+    assert_eq!(b1["amount_minor"], b2["amount_minor"]);
+
+    // Another device cannot obtain the secret for this checkout.
+    let stranger = uuid::Uuid::now_v7().to_string();
+    let (foreign_status, foreign_body) = http_call(&fx.env, "POST", &uri, None, Some(&stranger), Some("foreign-key")).await;
+    assert_eq!(foreign_status, StatusCode::NOT_FOUND);
+    assert!(foreign_body.get("client_secret").is_none());
 
     // Провайдер вызван ровно один раз (replay не дёргает Stripe).
     assert_eq!(
@@ -1212,4 +1321,700 @@ async fn e2e_idempotency_key_foreign_request_conflict() {
         id_a.as_str(),
         "same request + same key → same payment_id"
     );
+}
+
+// ============================================================
+// F6: возврат средств админом — POST /v1/admin/payments/:id/refund
+// ============================================================
+
+/// Фикстуры возврата: захваченный платёж (сплиты + ledger уже есть) и
+/// токены всех ролей, которых проверяет RBAC.
+struct RefundFixtures {
+    fx: PaymentFixtures,
+    payment_id: uuid::Uuid,
+    admin_token: String,
+    readonly_token: String,
+    club_token: String,
+    dj_token: String,
+}
+
+/// Создаёт `admin_user` с заданной ролью и подписывает для него access-JWT.
+async fn admin_fixture_token(
+    env: &crate::routes::ApiEnv,
+    pool: &sqlx::PgPool,
+    role: &str,
+) -> (uuid::Uuid, String) {
+    let id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO admin_user \
+         (id, email, password_hash, totp_secret_enc, totp_confirmed_at, role, status) \
+         VALUES ($1, $2, 'x', $3, now(), $4, 'active')",
+    )
+    .bind(id)
+    .bind(format!("{id}@admin.test"))
+    .bind(b"JBSWY3DPEHPK3PXP".to_vec())
+    .bind(role)
+    .execute(pool)
+    .await
+    .unwrap();
+    let token = env
+        .keys
+        .issue_access(id, dropit_common::Role::Admin, uuid::Uuid::now_v7())
+        .unwrap();
+    (id, token)
+}
+
+/// Готовит захваченный платёж на `amount_minor` (Q1: 30 % комиссия, 50/50).
+async fn refund_fixtures(
+    amount_minor: i64,
+    stripe: Option<std::sync::Arc<dyn dropit_infra_stripe::StripeApi>>,
+) -> Option<RefundFixtures> {
+    let fx = payment_fixtures(stripe).await?;
+    let (club_id, dj_id) = fx
+        .billing
+        .request_participants(fx.request_id)
+        .await
+        .expect("participants");
+    let dj_id = dj_id.expect("session has a DJ");
+
+    let payment = fx
+        .billing
+        .create_payment(
+            fx.request_id,
+            amount_minor,
+            &format!("refund-pay-{}", uuid::Uuid::now_v7()),
+            &format!("pi_refund_{}", uuid::Uuid::now_v7()),
+            &q1_commission(),
+        )
+        .await
+        .expect("payment");
+    fx.billing
+        .confirm_payment(payment.id)
+        .await
+        .expect("confirm");
+    let captured = fx
+        .billing
+        .handle_capture_webhook(
+            &format!("evt_refund_{}", uuid::Uuid::now_v7()),
+            "payment_intent.succeeded",
+            payment.id,
+            amount_minor,
+            club_id,
+            Some(dj_id),
+        )
+        .await
+        .expect("capture");
+    assert!(captured, "capture must materialise splits and ledger");
+
+    let (_, admin_token) = admin_fixture_token(&fx.env, &fx.pool, "superadmin").await;
+    let (_, readonly_token) = admin_fixture_token(&fx.env, &fx.pool, "readonly").await;
+    let club_token = fx
+        .env
+        .keys
+        .issue_access(club_id, dropit_common::Role::Club, uuid::Uuid::now_v7())
+        .unwrap();
+    let dj_token = fx
+        .env
+        .keys
+        .issue_access(dj_id, dropit_common::Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+
+    Some(RefundFixtures {
+        fx,
+        payment_id: payment.id,
+        admin_token,
+        readonly_token,
+        club_token,
+        dj_token,
+    })
+}
+
+/// Σ прироста `reversed_minor` по сплитам платежа.
+async fn split_reversed(
+    pool: &sqlx::PgPool,
+    payment_id: uuid::Uuid,
+) -> (i64, Vec<(String, i64, i64, String)>) {
+    let rows: Vec<(String, i64, i64, String)> = sqlx::query_as(
+        "SELECT payee_type, amount_minor, reversed_minor, status FROM split \
+         WHERE payment_id = $1 ORDER BY payee_type",
+    )
+    .bind(payment_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let total = rows.iter().map(|row| row.2).sum();
+    (total, rows)
+}
+
+/// Полный возврат: платёж `refunded`, все сплиты `reversed`,
+/// Σ reversed == amount, ledger-проводка сходится в ноль, аудит и outbox на месте.
+#[tokio::test]
+async fn e2e_refund_full() {
+    let fx = match refund_fixtures(1000, None).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund full пропущен");
+            return;
+        }
+    };
+    let uri = format!("/v1/admin/payments/{}/refund", fx.payment_id);
+    // Ключ уникален на прогон: журнал outbox не чистится харнессом
+    // (`test_repo` знает таблицу `outbox_event`, а реальная — `outbox`),
+    // и повтор ключа из прошлого прогона дал бы ложный idempotency_conflict.
+    let tag = uuid::Uuid::now_v7();
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "reason": "requested_by_customer" })),
+        Some(&fx.admin_token),
+        Some(&format!("refund-full-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "full refund: {body}");
+    assert_eq!(body["payment_id"], fx.payment_id.to_string());
+    assert_eq!(body["status"], "refunded");
+    assert_eq!(body["refunded_minor"], 1000);
+    assert_eq!(body["refund_amount_minor"], 1000);
+    assert_eq!(body["amount_minor"], 1000);
+    assert_eq!(body["currency"], "EUR");
+    let refund_id = body["refund_id"].as_str().expect("refund_id");
+    assert!(
+        refund_id.starts_with("re_mock_"),
+        "provider refund id is passed through: {refund_id}"
+    );
+
+    // Платёж: деньги возвращены полностью.
+    let payment = fx
+        .fx
+        .billing
+        .find_payment(fx.payment_id)
+        .await
+        .unwrap()
+        .expect("payment");
+    assert_eq!(payment.status, "refunded");
+    assert_eq!(payment.refunded_minor, 1000);
+
+    // Сплиты: каждый возвращён целиком, Σ reversed == amount.
+    let (reversed_total, rows) = split_reversed(&fx.fx.pool, fx.payment_id).await;
+    assert_eq!(reversed_total, 1000, "Σ reversed must equal the refund");
+    for (payee, amount, reversed, status) in &rows {
+        assert_eq!(reversed, amount, "{payee}: fully reversed");
+        assert_eq!(status, "reversed", "{payee}: status");
+    }
+    // 30 % + 50/50 остаток: 300/350/350 — возврат ровно исходными долями.
+    let by_payee: std::collections::BTreeMap<&str, i64> =
+        rows.iter().map(|row| (row.0.as_str(), row.2)).collect();
+    assert_eq!(by_payee.get("platform"), Some(&300));
+    assert_eq!(by_payee.get("club"), Some(&350));
+    assert_eq!(by_payee.get("dj"), Some(&350));
+
+    // Ledger: проводка reversal, Σ по txn == 0 (микро-инвариант).
+    assert!(
+        fx.fx
+            .billing
+            .ledger_txn_invariant()
+            .await
+            .unwrap()
+            .is_empty(),
+        "Σ ledger_entry(txn) must stay zero"
+    );
+    let (reversal_sum,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(sum(amount_minor), 0)::bigint FROM ledger_entry \
+         WHERE ref = $1 AND entry_type = 'reversal'",
+    )
+    .bind(fx.payment_id.to_string())
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(reversal_sum, 0, "reversal entries must net to zero");
+
+    // Аудит и outbox — по одной записи.
+    let (audits,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM audit_log WHERE action = 'payment_refunded' AND entity = $1",
+    )
+    .bind(fx.payment_id.to_string())
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1, "exactly one audit row per refund");
+    let (audit_diff,): (Value,) = sqlx::query_as(
+        "SELECT diff FROM audit_log WHERE action = 'payment_refunded' ORDER BY at DESC LIMIT 1",
+    )
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_diff["amount_minor"], 1000);
+    assert_eq!(audit_diff["refund_id"], refund_id);
+    assert_eq!(audit_diff["reason"], "requested_by_customer");
+
+    let (events,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM outbox WHERE aggregate_type = 'payment' \
+         AND aggregate_id = $1 AND event_type = 'payment.refunded'",
+    )
+    .bind(fx.payment_id)
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1, "one payment.refunded outbox event");
+
+    // Инвариант разреза не сломан возвратом.
+    assert!(fx.fx.billing.split_invariant().await.unwrap().is_empty());
+}
+
+/// Частичный возврат: пропорциональные доли, затем второй частичный до
+/// полного — платёж становится `refunded`, Σ reversed == amount.
+#[tokio::test]
+async fn e2e_refund_partial_then_full() {
+    let fx = match refund_fixtures(1000, None).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund partial пропущен");
+            return;
+        }
+    };
+    let uri = format!("/v1/admin/payments/{}/refund", fx.payment_id);
+    let tag = uuid::Uuid::now_v7();
+
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "amount_minor": 300 })),
+        Some(&fx.admin_token),
+        Some(&format!("refund-part-1-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "partial refund: {body}");
+    assert_eq!(body["status"], "partially_refunded");
+    assert_eq!(body["refunded_minor"], 300);
+    assert_eq!(body["refund_amount_minor"], 300);
+
+    // 300 из 1000 → 90/105/105: строго пропорционально, без float.
+    let (reversed_total, rows) = split_reversed(&fx.fx.pool, fx.payment_id).await;
+    assert_eq!(reversed_total, 300);
+    let by_payee: std::collections::BTreeMap<&str, i64> =
+        rows.iter().map(|row| (row.0.as_str(), row.2)).collect();
+    assert_eq!(by_payee.get("platform"), Some(&90));
+    assert_eq!(by_payee.get("club"), Some(&105));
+    assert_eq!(by_payee.get("dj"), Some(&105));
+    for (payee, _, _, status) in &rows {
+        assert_eq!(status, "partially_reversed", "{payee}: partially reversed");
+    }
+    assert!(fx
+        .fx
+        .billing
+        .ledger_txn_invariant()
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Второй частичный — остаток 700, платёж закрывается полностью.
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "amount_minor": 700 })),
+        Some(&fx.admin_token),
+        Some(&format!("refund-part-2-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "second partial refund: {body}");
+    assert_eq!(body["status"], "refunded");
+    assert_eq!(body["refunded_minor"], 1000);
+
+    let (reversed_total, rows) = split_reversed(&fx.fx.pool, fx.payment_id).await;
+    assert_eq!(reversed_total, 1000, "two partials cover the payment");
+    for (payee, amount, reversed, status) in &rows {
+        assert_eq!(reversed, amount, "{payee}: fully reversed");
+        assert_eq!(status, "reversed", "{payee}: status after full coverage");
+    }
+    assert!(fx
+        .fx
+        .billing
+        .ledger_txn_invariant()
+        .await
+        .unwrap()
+        .is_empty());
+    // Две отдельные проводки: возвраты не склеиваются в одну.
+    let (txns,): (i64,) = sqlx::query_as(
+        "SELECT count(DISTINCT txn_id) FROM ledger_entry \
+         WHERE ref = $1 AND entry_type = 'reversal'",
+    )
+    .bind(fx.payment_id.to_string())
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(txns, 2, "each refund gets its own ledger txn");
+}
+
+/// Валидация суммы и состояния: over-refund → 422 с `max_refundable_minor`,
+/// платёж без захвата → 409, повторный возврат закрытого платежа → 409.
+#[tokio::test]
+async fn e2e_refund_validation() {
+    let fx = match refund_fixtures(1000, None).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund validation пропущен");
+            return;
+        }
+    };
+    let uri = format!("/v1/admin/payments/{}/refund", fx.payment_id);
+    let tag = uuid::Uuid::now_v7();
+
+    // Over-refund.
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "amount_minor": 1001 })),
+        Some(&fx.admin_token),
+        Some(&format!("refund-over-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "over-refund: {body}");
+    assert_eq!(body["code"], "invalid_refund_amount");
+    assert_eq!(body["details"]["max_refundable_minor"], 1000);
+
+    // Ноль и отрицательная сумма — тоже отказ, а не «вернуть ничего».
+    for amount in [0, -5] {
+        let (s, body) = http_call(
+            &fx.fx.env,
+            "POST",
+            &uri,
+            Some(json!({ "amount_minor": amount })),
+            Some(&fx.admin_token),
+            Some(&format!("refund-bad-{tag}-{amount}")),
+        )
+        .await;
+        assert_eq!(
+            s,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "amount {amount}: {body}"
+        );
+        assert_eq!(body["details"]["max_refundable_minor"], 1000);
+    }
+
+    // Неизвестная причина — 422 до провайдера.
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "reason": "because" })),
+        Some(&fx.admin_token),
+        Some(&format!("refund-reason-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "bad reason: {body}");
+    assert_eq!(body["details"]["field"], "reason");
+
+    // Платёж без интента провайдера: возвращать некуда → 409, а не
+    // «успешный» возврат в никуда.
+    let no_intent = fx
+        .fx
+        .billing
+        .create_payment(
+            fx.fx.request_id,
+            500,
+            &format!("refund-no-intent-{}", uuid::Uuid::now_v7()),
+            "",
+            &q1_commission(),
+        )
+        .await
+        .expect("payment without intent");
+    fx.fx
+        .billing
+        .confirm_payment(no_intent.id)
+        .await
+        .expect("confirm");
+    let (club_id, dj_id) = fx
+        .fx
+        .billing
+        .request_participants(fx.fx.request_id)
+        .await
+        .expect("participants");
+    fx.fx
+        .billing
+        .handle_capture_webhook(
+            &format!("evt-no-intent-{}", uuid::Uuid::now_v7()),
+            "payment_intent.succeeded",
+            no_intent.id,
+            500,
+            club_id,
+            dj_id,
+        )
+        .await
+        .expect("capture");
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &format!("/v1/admin/payments/{}/refund", no_intent.id),
+        None,
+        Some(&fx.admin_token),
+        Some(&format!("refund-no-intent-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "no payment intent: {body}");
+    assert_eq!(body["code"], "no_payment_intent");
+    let untouched = fx
+        .fx
+        .billing
+        .find_payment(no_intent.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(untouched.refunded_minor, 0);
+
+    // Несуществующий платёж → 404 (не 500 и не «вернули что-то»).
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &format!("/v1/admin/payments/{}/refund", uuid::Uuid::now_v7()),
+        None,
+        Some(&fx.admin_token),
+        Some(&format!("refund-missing-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "unknown payment: {body}");
+
+    // Полный возврат, затем ещё один с другим ключом → already_refunded.
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.admin_token),
+        Some(&format!("refund-a-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "full refund: {body}");
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.admin_token),
+        Some(&format!("refund-b-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "second refund: {body}");
+    assert_eq!(body["code"], "already_refunded");
+}
+
+/// Возврат из `intent`/`processing` запрещён: деньги ещё не захвачены.
+#[tokio::test]
+async fn e2e_refund_rejects_uncaptured_payment() {
+    let fx = match payment_fixtures(None).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund uncaptured пропущен");
+            return;
+        }
+    };
+    let (_, token) = admin_fixture_token(&fx.env, &fx.pool, "superadmin").await;
+    let payment = fx
+        .billing
+        .create_payment(
+            fx.request_id,
+            1000,
+            &format!("refund-intent-{}", uuid::Uuid::now_v7()),
+            &format!("pi_intent_{}", uuid::Uuid::now_v7()),
+            &q1_commission(),
+        )
+        .await
+        .expect("payment");
+    assert_eq!(payment.status, "intent");
+
+    let (s, body) = http_call(
+        &fx.env,
+        "POST",
+        &format!("/v1/admin/payments/{}/refund", payment.id),
+        None,
+        Some(&token),
+        Some(&format!("refund-intent-{}", uuid::Uuid::now_v7())),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "intent refund: {body}");
+    assert_eq!(body["code"], "invalid_payment_status");
+
+    // Состояние и деньги не тронуты.
+    let after = fx.billing.find_payment(payment.id).await.unwrap().unwrap();
+    assert_eq!(after.status, "intent");
+    assert_eq!(after.refunded_minor, 0);
+}
+
+/// Идемпотентность: повтор с тем же `Idempotency-Key` — тот же ответ и
+/// НИ ОДНОГО лишнего вызова провайдера.
+#[tokio::test]
+async fn e2e_refund_idempotency_key_replay() {
+    let (stripe, refund_calls) = CountingStripe::with_refund_counter();
+    let fx = match refund_fixtures(1000, Some(std::sync::Arc::new(stripe))).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund idempotency пропущен");
+            return;
+        }
+    };
+    let uri = format!("/v1/admin/payments/{}/refund", fx.payment_id);
+    // Один и тот же ключ дважды — предмет теста; в прогоне он уникален.
+    let key = format!("refund-idem-{}", uuid::Uuid::now_v7());
+
+    let (s1, b1) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "amount_minor": 400 })),
+        Some(&fx.admin_token),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK, "first refund: {b1}");
+    let (s2, b2) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        Some(json!({ "amount_minor": 400 })),
+        Some(&fx.admin_token),
+        Some(&key),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::OK, "replay refund: {b2}");
+    assert_eq!(b1["refund_id"], b2["refund_id"], "same refund id");
+    assert_eq!(b2["refunded_minor"], 400, "replay does not refund twice");
+    assert_eq!(
+        refund_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "provider called exactly once for one idempotency key"
+    );
+
+    // В БД: один возврат, одна проводка, одно событие, одна запись аудита.
+    let (reversed, _) = split_reversed(&fx.fx.pool, fx.payment_id).await;
+    assert_eq!(reversed, 400);
+    let (events,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM outbox WHERE aggregate_id = $1 AND event_type = 'payment.refunded'",
+    )
+    .bind(fx.payment_id)
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1);
+    let (audits,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM audit_log WHERE action = 'payment_refunded'")
+            .fetch_one(&fx.fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(audits, 1);
+
+    // Replay закрытого платежа — тоже 200: ключ проверяется ДО гейта
+    // статуса, иначе сетевой ретрай успешного возврата получал бы 409.
+    let key_close = format!("refund-close-{}", uuid::Uuid::now_v7());
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.admin_token),
+        Some(&key_close),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "close the payment: {body}");
+    assert_eq!(body["status"], "refunded");
+    let closed_refund_id = body["refund_id"].as_str().expect("refund id").to_string();
+
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.admin_token),
+        Some(&key_close),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "replay of a finished refund must not be a conflict: {body}"
+    );
+    assert_eq!(body["refund_id"], closed_refund_id);
+    assert_eq!(body["refunded_minor"], 1000, "still refunded exactly once");
+}
+
+/// RBAC: без токена 401, клуб и DJ — 403, readonly-админ — 403.
+#[tokio::test]
+async fn e2e_refund_rbac() {
+    let fx = match refund_fixtures(1000, None).await {
+        Some(f) => f,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e refund rbac пропущен");
+            return;
+        }
+    };
+    let uri = format!("/v1/admin/payments/{}/refund", fx.payment_id);
+    let tag = uuid::Uuid::now_v7();
+
+    let (s, _) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        None,
+        Some(&format!("rbac-none-{tag}")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "no token");
+
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.club_token),
+        Some("rbac-club"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club token: {body}");
+
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.dj_token),
+        Some("rbac-dj"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "dj token: {body}");
+
+    let (s, body) = http_call(
+        &fx.fx.env,
+        "POST",
+        &uri,
+        None,
+        Some(&fx.readonly_token),
+        Some("rbac-ro"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "readonly admin: {body}");
+
+    // Ни одна из попыток не тронула деньги.
+    let payment = fx
+        .fx
+        .billing
+        .find_payment(fx.payment_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(payment.status, "captured");
+    assert_eq!(payment.refunded_minor, 0);
+    let (reversed, _) = split_reversed(&fx.fx.pool, fx.payment_id).await;
+    assert_eq!(reversed, 0);
+    // Провайдер не вызывался: за отказом не должно стоять возвращённых денег.
+    let (events,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM outbox WHERE aggregate_id = $1 AND event_type = 'payment.refunded'",
+    )
+    .bind(fx.payment_id)
+    .fetch_one(&fx.fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 0);
 }

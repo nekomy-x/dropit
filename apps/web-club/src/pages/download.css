@@ -1,0 +1,619 @@
+/* Download — page-local layout for the guest-app page (`/download`).
+   Colours come from the `drop-*` Tailwind theme through `theme()` and the
+   shared radius/duration tokens, so this file adds no new palette value.
+   Contract: docs/ui/hub-download-contract.md §Visual contract. */
+
+.dl-main {
+  padding-block: 28px 56px;
+}
+
+.dl-main .connect-eyebrow,
+.dl-main .connect-mono-label {
+  font-size: 11px;
+}
+
+.dl-shell {
+  width: 100%;
+  max-width: 1440px;
+  margin-inline: auto;
+  padding-inline: 20px;
+}
+
+/* One column below the desktop breakpoint, where the app preview is hidden.
+   The copy block is centred so a tablet does not read as a left-hugging
+   afterthought; from 1024px it owns the left track of the editorial split. */
+.dl-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dl-copy {
+  width: 100%;
+  max-width: 640px;
+  min-width: 0;
+  margin-inline: auto;
+}
+
+/* Back to the choice — a 44px target even though it reads as a line of text. */
+.dl-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: theme('colors.drop.muted');
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: color var(--dur-base) var(--ease-out);
+}
+
+.dl-back:hover {
+  color: theme('colors.drop.text');
+}
+
+.dl-back-icon {
+  display: inline-flex;
+  transform: rotate(180deg);
+}
+
+.dl-title {
+  font-size: clamp(32px, 5.4vw, 48px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.dl-lead {
+  max-width: 46ch;
+  color: theme('colors.drop.muted');
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.dl-note {
+  max-width: 46ch;
+  color: theme('colors.drop.dim');
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* The three app moments as a summary row on narrow screens; from 1024px the
+   app preview carries the same labels, so this row is not repeated there. */
+.dl-steps {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 14px 0 0;
+  border-top: 1px solid theme('colors.drop.line');
+  list-style: none;
+}
+
+.dl-step {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+}
+
+.dl-step-num {
+  color: theme('colors.drop.accent');
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.dl-step-label {
+  color: theme('colors.drop.muted');
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* A hairline section rule used by the store, QR and meta blocks. */
+.dl-rule {
+  border-top: 1px solid theme('colors.drop.line');
+  padding-top: 24px;
+}
+
+.dl-stores-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Manual override: a three-option segmented control. Every option is a 44px
+   target and carries `aria-pressed`, so the current choice is state, not a
+   colour-only cue. */
+.dl-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  max-width: 340px;
+  padding: 3px;
+  border: 1px solid theme('colors.drop.line');
+  border-radius: var(--r-control);
+  background: theme('colors.drop.rail');
+}
+
+.dl-seg-btn {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: calc(var(--r-control) - 3px);
+  background: transparent;
+  color: theme('colors.drop.muted');
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+
+.dl-seg-btn:hover {
+  color: theme('colors.drop.text');
+}
+
+.dl-seg-btn[aria-pressed='true'] {
+  background: theme('colors.drop.tint');
+  color: theme('colors.drop.accent');
+}
+
+.dl-detected {
+  color: theme('colors.drop.dim');
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.dl-unavailable {
+  max-width: 42ch;
+  color: theme('colors.drop.text');
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.dl-store-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.dl-store-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    filter var(--dur-base) var(--ease-out);
+}
+
+.dl-store-btn.is-primary {
+  background: theme('colors.drop.accent');
+  color: theme('colors.drop.ink');
+}
+
+.dl-store-btn.is-primary:hover {
+  filter: brightness(1.06);
+}
+
+.dl-store-btn.is-quiet {
+  border-color: theme('colors.drop.line');
+  background: theme('colors.drop.surface');
+  color: theme('colors.drop.text');
+  font-weight: 500;
+}
+
+.dl-store-btn.is-quiet:hover {
+  background: theme('colors.drop.surface2');
+}
+
+.dl-store-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The "soon" state is carried by a chip inside the button, so it survives on
+   the accent fill (currentColor inherits the ink text there). */
+.dl-soon-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dl-store-note {
+  max-width: 52ch;
+  color: theme('colors.drop.dim');
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Desktop handoff: the QR tile is the only bright surface on the page. */
+.dl-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.dl-qr-tile {
+  flex: 0 0 auto;
+  padding: 10px;
+  border-radius: var(--r-tile);
+  background: theme('colors.white');
+  line-height: 0;
+}
+
+.dl-qr-tile svg {
+  display: block;
+}
+
+.dl-qr-copy {
+  min-width: 0;
+}
+
+.dl-qr-title {
+  color: theme('colors.drop.text');
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.dl-qr-note {
+  max-width: 36ch;
+  color: theme('colors.drop.muted');
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* Direct APK: a quiet row, distinct from the two store buttons. */
+.dl-apk {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid theme('colors.drop.line');
+  border-radius: var(--r-control);
+  color: theme('colors.drop.text');
+  text-decoration: none;
+  transition:
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.dl-apk:hover {
+  border-color: theme('colors.drop.surface2');
+  background: theme('colors.drop.surface');
+}
+
+.dl-apk.is-primary {
+  border-color: transparent;
+  background: theme('colors.drop.accent');
+  color: theme('colors.drop.ink');
+}
+
+.dl-apk.is-primary .dl-apk-note,
+.dl-apk.is-primary .dl-apk-size,
+.dl-apk.is-primary .dl-apk-icon {
+  color: inherit;
+}
+
+.dl-apk.is-primary .dl-apk-icon {
+  background: transparent;
+}
+
+.dl-apk-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: theme('colors.drop.surface');
+  color: theme('colors.drop.muted');
+}
+
+.dl-apk-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dl-apk-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.dl-apk-note {
+  color: theme('colors.drop.dim');
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.dl-apk-size {
+  flex: 0 0 auto;
+  color: theme('colors.drop.muted');
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dl-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dl-price-note {
+  max-width: 52ch;
+  color: theme('colors.drop.dim');
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.dl-support {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  min-height: 44px;
+  color: theme('colors.drop.muted');
+  font-size: 11.5px;
+  text-decoration: none;
+  transition: color var(--dur-base) var(--ease-out);
+}
+
+.dl-support:hover {
+  color: theme('colors.drop.accent');
+}
+
+/* --- app preview (wide screens only) -------------------------------------- */
+
+.dl-preview {
+  display: none;
+}
+
+.dl-device {
+  width: min(320px, 100%);
+  margin-inline: auto;
+  padding: 9px;
+  border: 1px solid theme('colors.drop.line');
+  border-radius: 36px;
+  background: theme('colors.drop.surface');
+}
+
+.dl-device-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 600px;
+  padding: 18px 16px 12px;
+  border: 1px solid theme('colors.drop.line');
+  border-radius: 28px;
+  background: theme('colors.drop.rail');
+}
+
+.dl-device-notch {
+  width: 64px;
+  height: 5px;
+  margin: 0 auto 14px;
+  border-radius: 999px;
+  background: theme('colors.drop.surface2');
+}
+
+.dl-device-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid theme('colors.drop.line');
+}
+
+.dl-device-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+/* Each moment owns an equal slice of the screen, so the device reads as three
+   stacked blocks of the app rather than three labels floating in black. */
+.dl-moment {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-content: center;
+  align-items: center;
+  column-gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid theme('colors.drop.line');
+}
+
+.dl-moment:last-child {
+  border-bottom: 0;
+}
+
+.dl-moment-num {
+  color: theme('colors.drop.accent');
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.dl-moment-label {
+  color: theme('colors.drop.text');
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.dl-moment-glyph {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid theme('colors.drop.line');
+  border-radius: 9px;
+  background: theme('colors.drop.surface');
+  color: theme('colors.drop.accent');
+}
+
+/* Two covers slightly offset: the "pick a track" moment, drawn from the two
+   artwork files that already ship. */
+.dl-moment-stack {
+  position: relative;
+  width: 50px;
+  height: 38px;
+}
+
+.dl-moment-stack img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 34px;
+  border: 1px solid theme('colors.drop.rail');
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.dl-moment-stack img:last-child {
+  left: 15px;
+}
+
+/* A tab bar is part of the guest app, not decoration: it gives the static
+   screen the same bottom chrome the real app has, without adding copy. */
+.dl-device-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 14px;
+  border-top: 1px solid theme('colors.drop.line');
+  color: theme('colors.drop.dim');
+}
+
+.dl-device-tabs span {
+  display: grid;
+  flex: 1 1 0;
+  place-items: center;
+}
+
+.dl-device-tabs span:first-child {
+  color: theme('colors.drop.accent');
+}
+
+.dl-device-home {
+  width: 92px;
+  height: 4px;
+  margin: 12px auto 0;
+  border-radius: 999px;
+  background: theme('colors.drop.surface2');
+}
+
+@media (min-width: 560px) {
+  .dl-shell {
+    padding-inline: 32px;
+  }
+
+  .dl-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 16px;
+  }
+
+  .dl-step {
+    display: block;
+    padding: 0;
+  }
+
+  .dl-step-num {
+    display: block;
+    margin-bottom: 6px;
+  }
+
+  .dl-store-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .dl-store-btn {
+    width: auto;
+    min-width: 200px;
+  }
+
+  .dl-qr {
+    flex-direction: row;
+    align-items: center;
+    gap: 20px;
+  }
+}
+
+@media (min-width: 640px) {
+  .dl-main {
+    padding-block: 40px 72px;
+  }
+
+  .dl-stores-head {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .dl-seg {
+    width: auto;
+  }
+}
+
+@media (min-width: 1024px) {
+  .dl-main {
+    padding-block: 56px 88px;
+  }
+
+  .dl-shell {
+    padding-inline: 48px;
+  }
+
+  .dl-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    column-gap: 48px;
+    align-items: start;
+    justify-content: space-between;
+  }
+
+  .dl-copy {
+    max-width: 620px;
+    margin-inline: 0;
+  }
+
+  .dl-steps {
+    display: none;
+  }
+
+  .dl-preview {
+    display: block;
+    width: 100%;
+    justify-self: end;
+  }
+}

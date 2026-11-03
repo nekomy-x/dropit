@@ -79,6 +79,13 @@ export interface PowerTableProps<T extends PowerTableRow> {
 const ROW_HEIGHT = 64;
 const VIEWPORT_HEIGHT = 560;
 const OVERSCAN_ROWS = 5;
+/**
+ * Cards are tall, so a phone list renders a page of them instead of the whole
+ * filtered set: 123 records as 123 cards made the page 37,000px long and the
+ * bottom of the screen's own content unreachable. "Show more" appends the next
+ * page; the toolbar counter keeps reporting the real filtered total.
+ */
+const MOBILE_PAGE_SIZE = 20;
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -151,6 +158,22 @@ export default function PowerTable<T extends PowerTableRow>({
   const [editing, setEditing] = useState<{ id: string; key: keyof T & string; value: unknown } | null>(null);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  /**
+   * A phone cannot show an eight-column grid: below 768px the same rows render
+   * as record cards. The query is read in an effect, never during render, so the
+   * component stays renderable on the server and in tests.
+   */
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(max-width: 767px)');
+    const sync = () => setCompact(query.matches);
+    sync();
+    query.addEventListener('change', sync);
+    return () => query.removeEventListener('change', sync);
+  }, []);
+  /** How many cards the phone list shows; grows by one page at a time. */
+  const [mobileCount, setMobileCount] = useState(MOBILE_PAGE_SIZE);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const search = controlledSearch ?? searchState;
   const status = controlledStatus ?? statusState;
@@ -209,8 +232,17 @@ export default function PowerTable<T extends PowerTableRow>({
     [resolveRowId, rows, selected],
   );
   const visibleIds = useMemo(() => displayedEntries.map(({ row, index }) => resolveRowId(row, index)), [displayedEntries, resolveRowId]);
+  /** The page of cards the phone list renders, and the rows it has not reached. */
+  const mobileEntries = useMemo(() => displayedEntries.slice(0, mobileCount), [displayedEntries, mobileCount]);
+  const mobileRemaining = displayedEntries.length - mobileEntries.length;
+  const mobileTotal = displayedEntries.length;
+  const mobileIds = useMemo(() => mobileEntries.map(({ row, index }) => resolveRowId(row, index)), [mobileEntries, resolveRowId]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const someVisibleSelected = visibleIds.some((id) => selected.has(id)) && !allVisibleSelected;
+  /* The phone select-all speaks for the cards it can see, the desktop one for
+   * every filtered row it virtualizes. */
+  const allPageSelected = mobileIds.length > 0 && mobileIds.every((id) => selected.has(id));
+  const somePageSelected = mobileIds.some((id) => selected.has(id)) && !allPageSelected;
   const firstVisible = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS);
   const lastVisible = Math.min(
     displayedEntries.length,
@@ -222,8 +254,13 @@ export default function PowerTable<T extends PowerTableRow>({
   const columnCount = columns.length + (selection ? 1 : 0);
 
   useEffect(() => {
-    if (selectAllRef.current) selectAllRef.current.indeterminate = someVisibleSelected;
-  }, [someVisibleSelected]);
+    if (selectAllRef.current) selectAllRef.current.indeterminate = compact ? somePageSelected : someVisibleSelected;
+  }, [compact, somePageSelected, someVisibleSelected]);
+
+  /** A new filter or sort starts the phone list from its first page again. */
+  useEffect(() => {
+    setMobileCount(MOBILE_PAGE_SIZE);
+  }, [search, status, sorting, rows.length]);
 
   const setSearch = (value: string) => {
     setSearchState(value);
@@ -296,10 +333,187 @@ export default function PowerTable<T extends PowerTableRow>({
     }
   };
 
+  /**
+   * The one inline editor. The desktop cell and the mobile card row both open
+   * it, so a column's `edit` renderer cannot drift between the two layouts.
+   */
+  const renderInlineEditor = (column: PowerTableColumn<T>, row: T, value: unknown) => (
+    <div className="power-table-editor" onClick={(event) => event.stopPropagation()}>
+      {column.edit?.(value as T[keyof T], row, (next) => setEditing((current) => (current ? { ...current, value: next } : current))) ?? (
+        <input
+          autoFocus
+          className="field-input power-table-editor-input"
+          value={displayValue(value)}
+          onChange={(event) => setEditing((current) => (current ? { ...current, value: event.target.value } : current))}
+          onKeyDown={handleEditKey}
+          aria-label={t('table.editColumn', { column: column.key })}
+        />
+      )}
+      <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => void commitEdit()}>
+        {saving ? t('common.saving') : t('common.save')}
+      </button>
+      <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={cancelEdit}>{t('common.cancel')}</button>
+      {editError ? <span className="field-error" role="alert">{editError}</span> : null}
+    </div>
+  );
+
+  const renderCellValue = (column: PowerTableColumn<T>, row: T) => {
+    const value = getField(row, column.key) as T[keyof T];
+    return column.render ? column.render(value, row) : displayValue(value) || '—';
+  };
+
+    const renderEditButton = (column: PowerTableColumn<T>, row: T, index: number) => (
+    <button
+      type="button"
+      className="btn-quiet btn-sm power-table-edit"
+      onClick={(event) => { event.stopPropagation(); beginEdit(row, index, column.key); }}
+      aria-label={t('table.editColumn', { column: column.key })}
+    >
+      {t('table.edit')}
+    </button>
+  );
+
+  /**
+   * The visible name of a per-column edit trigger: "Edit E-mail" when the
+   * column header is a translated string, otherwise the plain "Edit" verb.
+   * Desktop keeps its compact "Edit" per cell; a card shows the full name
+   * because a column of identical links says nothing.
+   */
+  const editLabel = (column: PowerTableColumn<T>) => (
+    typeof column.header === 'string' ? t('table.editColumn', { column: column.header }) : t('table.edit')
+  );
+
+  /**
+   * Below 768px a row becomes a record card: the identity column on top (bold,
+   * chips included), then one `label / value` line per remaining column, then
+   * one action row with the inline editors. Nothing is dropped, no column is
+   * clipped, and the desktop table below is untouched.
+   */
+  const renderCards = () => {
+    const [primaryColumn, ...detailColumns] = columns;
+    const cardColumns = primaryColumn ? [primaryColumn, ...detailColumns] : detailColumns;
+    const editableColumns = onInlineEdit ? cardColumns.filter((column) => column.editable) : [];
+    const togglePage = () => {
+      const next = new Set(selected);
+      if (allPageSelected) mobileIds.forEach((id) => next.delete(id));
+      else mobileIds.forEach((id) => next.add(id));
+      setSelected(next);
+      notifySelection(next);
+    };
+    return (
+      <>
+        {selection && mobileEntries.length > 0 ? (
+          <div className="power-table-mobile-selectall">
+            <input
+              ref={selectAllRef}
+              aria-label={t('table.selectAll')}
+              type="checkbox"
+              checked={allPageSelected}
+              onChange={togglePage}
+            />
+            <span aria-hidden="true">{t('table.selectAll')}</span>
+            {somePageSelected ? <span className="sr-only">{t('table.selected', { count: selectedRows.length })}</span> : null}
+          </div>
+        ) : null}
+        <ul className="power-table-mobile">
+          {mobileEntries.map(({ row, index }) => {
+            const id = resolveRowId(row, index);
+            const isSelected = selected.has(id);
+            const primaryEditing = primaryColumn !== undefined && editing?.id === id && editing.key === primaryColumn.key;
+            return (
+              <li
+                key={id}
+                className={['power-table-mobile-card', isSelected ? 'is-selected' : ''].filter(Boolean).join(' ')}
+                style={{ cursor: onRowOpen ? 'pointer' : undefined }}
+                onClick={(event) => {
+                  if (!isInteractiveTarget(event.target)) onRowOpen?.(row);
+                }}
+                onKeyDown={(event) => {
+                  if ((event.key === 'Enter' || event.key === ' ') && !isInteractiveTarget(event.target)) {
+                    event.preventDefault();
+                    onRowOpen?.(row);
+                  }
+                }}
+                tabIndex={onRowOpen ? 0 : undefined}
+              >
+                <div className="power-table-mobile-head">
+                  {selection ? (
+                    <input
+                      className="power-table-mobile-check"
+                      aria-label={t('table.selectRow', { id })}
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleRow(row, index)}
+                    />
+                  ) : null}
+                  <div className="power-table-mobile-identity">
+                    {primaryColumn && editing && primaryEditing
+                      ? renderInlineEditor(primaryColumn, row, editing.value)
+                      : primaryColumn ? (
+                        <span className="power-table-mobile-title">{renderCellValue(primaryColumn, row)}</span>
+                      ) : null}
+                  </div>
+                </div>
+
+                {detailColumns.length ? (
+                  <dl className="power-table-mobile-meta">
+                    {detailColumns.map((column) => {
+                      const isEditing = editing !== null && editing.id === id && editing.key === column.key;
+                      return (
+                        <div key={column.key} className={['power-table-mobile-row', isEditing ? 'is-editing' : ''].filter(Boolean).join(' ')}>
+                          <dt>{column.header}</dt>
+                          <dd>
+                            {editing && isEditing
+                              ? renderInlineEditor(column, row, editing.value)
+                              : <span className="power-table-mobile-value">{renderCellValue(column, row)}</span>}
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                ) : null}
+
+                {editableColumns.length ? (
+                  <div className="power-table-mobile-actions">
+                    {editableColumns.map((column) => (
+                      <button
+                        key={column.key}
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={(event) => { event.stopPropagation(); beginEdit(row, index, column.key); }}
+                        aria-label={editLabel(column)}
+                      >
+                        {editLabel(column)}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {mobileRemaining > 0 ? (
+          <div className="power-table-mobile-more">
+            <span className="power-table-mobile-more-count" aria-live="polite">
+              {mobileEntries.length} / {mobileTotal}
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setMobileCount((count) => count + MOBILE_PAGE_SIZE)}
+            >
+              {t('table.showMore')}
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <section className={`panel-card ${className}`.trim()}>
       <div className="power-table-toolbar">
-        <label style={{ flex: 1, minWidth: 220 }}>
+        <label className="power-table-search">
           <span className="sr-only">{searchHint}</span>
           <input className="field-input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={searchHint} />
         </label>
@@ -330,9 +544,10 @@ export default function PowerTable<T extends PowerTableRow>({
 
       <div
         className="power-table-scroll"
-        style={{ maxHeight: VIEWPORT_HEIGHT, overflow: 'auto' }}
-        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+        style={compact ? undefined : { maxHeight: VIEWPORT_HEIGHT, overflow: 'auto' }}
+        onScroll={compact ? undefined : (event) => setScrollTop(event.currentTarget.scrollTop)}
       >
+        {compact ? renderCards() : (
         <table className="data-table" style={{ width: '100%', minWidth: 720, tableLayout: 'auto' }}>
           <thead className={stickyHeader ? 'power-table-head is-sticky' : 'power-table-head'}>
             <tr>
@@ -401,44 +616,15 @@ export default function PowerTable<T extends PowerTableRow>({
                     </td>
                   ) : null}
                   {columns.map((column) => {
-                    const value = getField(row, column.key) as T[keyof T];
-                    const isEditing = editing?.id === id && editing.key === column.key;
+                    const isEditing = editing !== null && editing.id === id && editing.key === column.key;
                     return (
                       <td key={column.key} className={column.className}>
-                        {isEditing ? (
-                          <div className="power-table-editor" onClick={(event) => event.stopPropagation()}>
-                            {column.edit?.(editing.value as T[keyof T], row, (next) => setEditing({ ...editing, value: next })) ?? (
-                              <input
-                                autoFocus
-                                className="field-input"
-                                style={{ height: 30, minWidth: 0, flex: 1 }}
-                                value={displayValue(editing.value)}
-                                onChange={(event) => setEditing({ ...editing, value: event.target.value })}
-                                onKeyDown={handleEditKey}
-                                aria-label={t('table.editColumn', { column: column.key })}
-                              />
-                            )}
-                            <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => void commitEdit()}>
-                              {saving ? t('common.saving') : t('common.save')}
-                            </button>
-                            <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={cancelEdit}>{t('common.cancel')}</button>
-                            {editError ? <span className="field-error" role="alert">{editError}</span> : null}
-                          </div>
-                        ) : (
+                        {editing && isEditing ? renderInlineEditor(column, row, editing.value) : (
                           <div style={{ display: 'flex', minWidth: 0, alignItems: 'center', gap: 8 }}>
                             <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {column.render ? column.render(value, row) : displayValue(value) || '—'}
+                              {renderCellValue(column, row)}
                             </span>
-                            {column.editable && onInlineEdit ? (
-                              <button
-                                type="button"
-                                className="btn-quiet btn-sm power-table-edit"
-                                onClick={(event) => { event.stopPropagation(); beginEdit(row, index, column.key); }}
-                                aria-label={t('table.editColumn', { column: column.key })}
-                              >
-                                Edit
-                              </button>
-                            ) : null}
+                            {column.editable && onInlineEdit ? renderEditButton(column, row, index) : null}
                           </div>
                         )}
                       </td>
@@ -450,6 +636,7 @@ export default function PowerTable<T extends PowerTableRow>({
             {bottomSpacerHeight > 0 ? <tr aria-hidden="true"><td colSpan={columnCount} style={{ height: bottomSpacerHeight, padding: 0 }} /></tr> : null}
           </tbody>
         </table>
+        )}
         {displayedEntries.length === 0 ? <div className="panel-empty" role="status">{emptyCopy}</div> : null}
       </div>
 

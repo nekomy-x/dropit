@@ -180,7 +180,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -296,18 +296,20 @@ class ProfileGuestScreen extends StatelessWidget {
               children: [
                 for (final benefit in _benefits) ...[
                   Container(
-                    height: 48,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    constraints: const BoxConstraints(minHeight: 48),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                     child: Row(
                       children: [
                         const Icon(Icons.check_circle_outline,
                             size: 18, color: DropTokens.accent),
                         const SizedBox(width: 12),
-                        Text(
+                        Expanded(
+                            child: Text(
                           benefit,
                           style: DropType.caption
                               .copyWith(fontSize: 13, color: DropTokens.muted),
-                        ),
+                        )),
                       ],
                     ),
                   ),
@@ -315,7 +317,7 @@ class ProfileGuestScreen extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -344,8 +346,11 @@ class _OutlineAccountButton extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(label,
-                    style: DropType.button.copyWith(color: DropTokens.text)),
+                Flexible(
+                    child: Text(label,
+                        textAlign: TextAlign.center,
+                        style:
+                            DropType.button.copyWith(color: DropTokens.text))),
                 const SizedBox(width: 12),
                 const Icon(Icons.arrow_forward,
                     size: 20, color: DropTokens.accent),

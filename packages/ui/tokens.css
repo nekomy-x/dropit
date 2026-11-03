@@ -79,8 +79,14 @@
   --sp-8: 32px;
   --pad-panel: 20px;
   --pad-panel-lg: 24px;
+  --page-gutter-mobile: var(--sp-3);
+  --pad-panel-mobile: 14px;
   --hit-desktop: 36px;
   --hit-mobile: 44px;
+  /* The label column of a stacked table row (below 768px). It reserves enough
+     for the longest column header in either panel ("Notification", "Requests")
+     without taking a third of the row's value area. */
+  --stack-label: 104px;
 
   /* one background element per screen, switchable by a single token */
   --abstract-opacity: 1;
@@ -91,38 +97,42 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
 
-  --c-canvas: #0A0C11;
-  --c-rail: #0B0E14;
-  --c-surface: #12151C;
-  --c-raised: #171B23;
-  --c-inset: #0E1118;
-  --c-hairline: rgba(235, 240, 250, .08);
-  --c-hairline-row: rgba(235, 240, 250, .06);
-  --c-hairline-strong: rgba(235, 240, 250, .14);
-  --c-scrim: rgba(3, 5, 9, .72);
+  /* Neutral graphite, no colour cast: the ramp is the one in the owner's
+     swatch — page #080808, panel #181818, a divider that reads #313131 on the
+     panel. The previous set was blue-tinted (#0A0C11 / #12151C), and the panel
+     looked blue next to every other black surface on the desk. */
+  --c-canvas: #080808;
+  --c-rail: #0E0E0E;
+  --c-surface: #181818;
+  --c-raised: #202020;
+  --c-inset: #111111;
+  --c-hairline: rgba(255, 255, 255, .11);
+  --c-hairline-row: rgba(255, 255, 255, .07);
+  --c-hairline-strong: rgba(255, 255, 255, .16);
+  --c-scrim: rgba(0, 0, 0, .72);
   --c-panel-shadow: none;
   /* Floating layers only — an anchored menu is the one surface that leaves the
      page ramp, so it gets its own step and shadow. Never used by a panel. */
-  --c-popover: #1A1F28;
-  --c-popover-shadow: 0 18px 44px -14px rgba(2, 4, 8, .78), 0 2px 8px rgba(2, 4, 8, .38);
+  --c-popover: #232323;
+  --c-popover-shadow: 0 18px 44px -14px rgba(0, 0, 0, .78), 0 2px 8px rgba(0, 0, 0, .38);
 
   --c-accent: #00FF87;
   --c-accent-hover: #00D873;
   --c-accent-tint: rgba(0, 255, 135, .08);
   --c-accent-tint-strong: rgba(0, 255, 135, .14);
-  --c-ink-on-accent: #06130C;
+  --c-ink-on-accent: #0A0A0A;
   --c-accent-quiet: #7CFFC0;   /* accent text on a tint, ≥ 4.5:1 */
 
-  --c-text: #F1F4F7;
-  --c-text-2: #B0B8C3;
-  --c-text-muted: #858E9C;     /* only at >= 12px */
-  --c-text-muted-sm: #9AA3B0;  /* 11–12px */
+  --c-text: #F2F2F2;
+  --c-text-2: #B8B8B8;
+  --c-text-muted: #949494;     /* only at >= 12px; 4.6:1 on seg-active */
+  --c-text-muted-sm: #A2A2A2;  /* 11–12px */
 
   --c-nav-active-bg: rgba(0, 255, 135, .10);
-  --c-nav-active-text: #F1F4F7;
-  --c-nav-hover-bg: rgba(235, 240, 250, .05);
-  --c-hover-strong: #1E232C;
-  --c-seg-active: #232935;
+  --c-nav-active-text: #F2F2F2;
+  --c-nav-hover-bg: rgba(255, 255, 255, .06);
+  --c-hover-strong: #262626;
+  --c-seg-active: #2C2C2C;
 
   --c-warn: #FFC65B;
   --c-warn-tint: rgba(255, 198, 91, .10);
@@ -133,13 +143,13 @@
   --c-chart-line: #00FF87;
   --c-chart-fill: rgba(0, 255, 135, .18);
   --c-chart-fill-end: rgba(0, 255, 135, 0);
-  --c-chart-grid: rgba(235, 240, 250, .07);
-  --c-chart-axis: #858E9C;
+  --c-chart-grid: rgba(255, 255, 255, .08);
+  --c-chart-axis: #949494;
   --c-series-1: #00FF87;
   --c-series-2: rgba(0, 255, 135, .68);
   --c-series-3: rgba(0, 255, 135, .44);
   --c-series-4: rgba(0, 255, 135, .26);
-  --c-series-5: rgba(235, 240, 250, .16);
+  --c-series-5: rgba(255, 255, 255, .18);
 
   --c-focus-ring: 0 0 0 2px var(--c-canvas), 0 0 0 4px var(--c-accent);
 }
@@ -148,20 +158,23 @@
 :root[data-theme='light'] {
   color-scheme: light;
 
-  --c-canvas: #F4F6F9;
+  /* The same neutral ramp in daylight: black ink on white paper, no blue-grey
+     cast. The dark theme's #080808/#181818 pair has a daylight twin of a
+     near-white page and a pure white card. */
+  --c-canvas: #F5F5F5;
   --c-rail: #FFFFFF;
   --c-surface: #FFFFFF;
-  --c-raised: #F3F5F8;
-  --c-inset: #F7F9FB;
-  --c-hairline: #E6EAF0;
-  --c-hairline-row: #EFF2F6;
-  --c-hairline-strong: #D8DEE7;
-  --c-scrim: rgba(15, 23, 42, .38);
+  --c-raised: #F0F0F0;
+  --c-inset: #F7F7F7;
+  --c-hairline: #E4E4E4;
+  --c-hairline-row: #EEEEEE;
+  --c-hairline-strong: #D5D5D5;
+  --c-scrim: rgba(0, 0, 0, .38);
   /* A white card on a near-white canvas needs a shadow to read as a surface;
      it replaces the dark theme's surface ramp. No border is added with it. */
-  --c-panel-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 6px 16px -10px rgba(15, 23, 42, .10);
+  --c-panel-shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 6px 16px -10px rgba(0, 0, 0, .10);
   --c-popover: #FFFFFF;
-  --c-popover-shadow: 0 20px 44px -18px rgba(15, 23, 42, .22), 0 2px 6px rgba(15, 23, 42, .06);
+  --c-popover-shadow: 0 20px 44px -18px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .06);
 
   --c-accent: #087A4C;
   --c-accent-hover: #066B42;
@@ -170,15 +183,15 @@
   --c-ink-on-accent: #FFFFFF;
   --c-accent-quiet: #05543A;   /* >= 5.4:1 on its own 14% tint, not 4.5 */
 
-  --c-text: #0F141B;
-  --c-text-2: #4A5563;
-  --c-text-muted: #67717F;
-  --c-text-muted-sm: #5A6472;
+  --c-text: #121212;
+  --c-text-2: #4A4A4A;
+  --c-text-muted: #676767;
+  --c-text-muted-sm: #5B5B5B;
 
   --c-nav-active-bg: rgba(8, 122, 76, .09);
   --c-nav-active-text: #06663F;
-  --c-nav-hover-bg: #F1F4F8;
-  --c-hover-strong: #E9EDF3;
+  --c-nav-hover-bg: #F0F0F0;
+  --c-hover-strong: #E8E8E8;
   --c-seg-active: #FFFFFF;
 
   --c-warn: #8A5A00;
@@ -190,15 +203,30 @@
   --c-chart-line: #087A4C;
   --c-chart-fill: rgba(8, 122, 76, .16);
   --c-chart-fill-end: rgba(8, 122, 76, 0);
-  --c-chart-grid: #E9EDF3;
-  --c-chart-axis: #67717F;
+  --c-chart-grid: #E8E8E8;
+  --c-chart-axis: #676767;
   --c-series-1: #087A4C;
   --c-series-2: rgba(8, 122, 76, .66);
   --c-series-3: rgba(8, 122, 76, .42);
   --c-series-4: rgba(8, 122, 76, .24);
-  --c-series-5: #DCE2EA;
+  --c-series-5: #DCDCDC;
 
   --c-focus-ring: 0 0 0 2px var(--c-surface), 0 0 0 4px var(--c-accent);
+}
+
+/* --- media panel (photographic aside) --------------------------------------
+   The club application puts a night-room photograph beside the form (see
+   `auth.css` → `.auth-media`). That panel is a photo, not a surface, so it is
+   dark in BOTH themes: the scrim keeps the white copy >= 5:1 over the brightest
+   part of the image, and the accent stays the neon green the wordmark is drawn
+   with. No other screen reads these tokens. */
+:root {
+  --c-media-base: #0B0D0F;
+  --c-media-scrim: rgba(6, 8, 10, .70);
+  --c-media-text: #F5F5F5;
+  --c-media-text-2: #D6D6D6;
+  --c-media-hairline: rgba(255, 255, 255, .20);
+  --c-media-accent: #00FF87;
 }
 
 @media (prefers-reduced-motion: reduce) {

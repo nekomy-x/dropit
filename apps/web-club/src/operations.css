@@ -3,7 +3,7 @@
    the same string ("Jump to… ⌘K"), which is what fixes the
    label-content-name-mismatch axe rule. */
 .command-trigger { display:flex; align-items:center; gap:8px; min-height:var(--hit-desktop); padding:0 10px; border:0; border-radius:var(--r-control); color:var(--c-text-2); background:var(--c-raised); font-family:var(--font-sans); font-size:var(--fs-12); }
-.command-trigger:hover { color:var(--c-text); background:#1D212B; }
+.command-trigger:hover { color:var(--c-text); background:var(--c-hover-strong); }
 /* kbd at 11px in the muted-sm ramp colour: 7.3:1 on --c-surface (was 3.96:1). */
 .command-trigger kbd, .command-search-row kbd { padding:2px 5px; border-radius:var(--r-control); color:var(--c-text-muted-sm); background:rgba(255,255,255,.06); font:11px var(--font-mono); }
 .command-backdrop { position:fixed; inset:0; z-index:80; display:flex; justify-content:center; align-items:flex-start; padding:96px var(--sp-4) var(--sp-6); background:var(--c-scrim); }
@@ -47,7 +47,7 @@
 /* One rail material for both authenticated shells. It reads the token layer
    directly rather than the `--ops-*` aliases, which exist only on
    `.club-app-shell` and would leave the DJ shell unstyled. `--c-rail`
-   (#0B0E14) is a step away from the canvas (#0A0C11), so a rail painted with
+   (#0E0E0E) is a step away from the canvas (#080808), so a rail painted with
    it dissolves into the page; the club shell had this override and the DJ
    shell did not, which is why the two sidebars looked unrelated. */
 .panel-shell > .panel-rail {
@@ -112,7 +112,7 @@
 .club-app-shell .bg-\[\#191919\],
 .club-app-shell .bg-\[\#151515\] { background-color: var(--ops-surface) !important; }
 .club-app-shell .bg-\[\#080808\] { background-color: var(--ops-ink) !important; }
-.club-app-shell .text-\[\#06130C\] { color: #07130d; }
+.club-app-shell .text-\[\#06130C\] { color: var(--c-ink-on-accent); }
 
 .club-page-heading-row {
   display: flex;
@@ -148,12 +148,11 @@
   background: var(--c-raised);
 }
 .operation-empty-icon { display: grid; width: 36px; height: 36px; flex: 0 0 auto; place-items: center; border: 0; border-radius: var(--r-tile); background: var(--c-raised); color: var(--c-text-2); }
-.operation-empty-title { color: #dedee3; font-size: 13px; font-weight: 600; }
-.operation-empty-detail { margin-top: 4px; color: #9999a2; font-size: 12px; line-height: 1.5; }
+.operation-empty-title { color: var(--c-text); font-size: var(--fs-13); font-weight: 600; }
+.operation-empty-detail { margin-top: 4px; color: var(--c-text-2); font-size: var(--fs-12); line-height: 1.5; }
 
 /* Tables inside the club workspace are the canonical `.data-table`
    (styles/panel.css), which reads every colour from the token layer. The
    dark-only duplicate that used to live here (`td { color: #c4c4cb }`, a
    white-alpha `thead`) won on specificity and left table text at 1.73:1 in
    the light theme, so it is gone rather than re-coloured. */
-

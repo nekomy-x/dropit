@@ -113,7 +113,8 @@ class RequestSentScreen extends StatelessWidget {
                           ),
                           _ReceiptRow(
                             label: 'Payment',
-                            value: request.priceLabel,
+                            value:
+                                '${request.priceLabel} · ${request.paymentLabel}',
                           ),
                           _ReceiptRow(
                             label: 'Request ID',
@@ -155,7 +156,8 @@ class RequestSentScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => Padding(
+      builder: (_) => DropSheet(
+          child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -180,7 +182,7 @@ class RequestSentScreen extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -205,14 +207,16 @@ class _ReceiptRow extends StatelessWidget {
       child: Row(
         children: [
           Text(label, style: DropType.caption),
-          const Spacer(),
-          Text(
+          const SizedBox(width: 12),
+          Expanded(
+              child: Text(
             value,
+            textAlign: TextAlign.end,
             style: DropType.caption.copyWith(
               fontWeight: bold ? FontWeight.w600 : FontWeight.normal,
               color: valueColor ?? DropTokens.muted,
             ),
-          ),
+          )),
         ],
       ),
     );
@@ -238,6 +242,16 @@ class _CelebrationState extends State<_Celebration>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _c.stop();
+    } else if (!_c.isAnimating) {
+      _c.repeat();
+    }
   }
 
   @override

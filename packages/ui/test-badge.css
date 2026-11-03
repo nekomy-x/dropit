@@ -14,6 +14,11 @@
    The outline is the only non-error border in the product that carries meaning,
    so the words always travel with it: colour alone never states a status. The
    colour is `--c-warn` (the same token the preview banner uses).
+
+   The mark is the panel's `triangle-alert` warning sign, not a leading dot: the
+   owner asked for a sign instead of the 5px disc, and the same glyph already
+   means "needs attention" in the admin rail and the club dashboard, so the pill
+   reads as a caution rather than as a decorative bullet.
    ========================================================================== */
 
 .test-badge {
@@ -34,12 +39,9 @@
   white-space: nowrap;
 }
 
-.test-badge-dot {
-  width: 5px;
-  height: 5px;
+.test-badge-icon {
   flex: 0 0 auto;
-  border-radius: var(--r-chip);
-  background: currentColor;
+  color: currentColor;
 }
 
 /* In a top bar the pill is context and gives up its space first. */

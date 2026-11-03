@@ -206,6 +206,45 @@ async fn e2e_catalog_search_validation_and_rbac() {
     let (s, _) = call(&env, "GET", "/v1/catalog/search?q=test", None, None).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED, "no token");
 
+    // Мусор вместо токена (не JWT и не UUID) → 401.
+    let (s, _) = call(
+        &env,
+        "GET",
+        "/v1/catalog/search?q=test",
+        None,
+        Some("not-a-token"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "garbage token");
+
+    // Валидный UUID, но такого устройства нет → 401.
+    let unknown_device = Uuid::now_v7();
+    let (s, _) = call(
+        &env,
+        "GET",
+        "/v1/catalog/search?q=test",
+        None,
+        Some(&unknown_device.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "unknown device token");
+
+    // Выданный device-token мобильного гостя → 200: это второй носитель,
+    // который принимает `authorize_catalog_caller` (гостю JWT не выдаётся).
+    let device_id = Uuid::now_v7();
+    repo.create_guest_device(device_id, "ios", Some("1.0.0"))
+        .await
+        .expect("device row");
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/catalog/search?q=test&limit=5",
+        None,
+        Some(&device_id.to_string()),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "device token: {body}");
+
     // club_owner (Role::Club) → 403.
     let club_sub = Uuid::now_v7();
     let club_jwt = env

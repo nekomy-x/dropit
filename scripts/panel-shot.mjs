@@ -115,6 +115,26 @@ const FIXTURES = {
   },
   qr: { session_id: 'sess_01h8xk2m9p', qr_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', expires_at: '2026-10-27T03:30:00Z' },
   earnings: { period: 'day', gross_minor: 183500, net_minor: 128450, payments: 47 },
+  clubInvite: { club_name: 'Barrio Latino', city: 'Madrid', email: 'owner@barrio.test', contact: 'owner@barrio.test', slug: 'barrio-latino', expires_at: '2026-11-05T12:00:00Z' },
+  djInvite: { display_name: 'DJ Noche', club_name: 'Barrio Latino', expires_at: '2026-11-05T12:00:00Z' },
+  onboarding: {
+    list: {
+      items: [
+        { id: '7f1c2b40-9a11-4d2e-8f03-1c5b6a7d8e90', club_name: 'Barrio Latino', city: 'Madrid', contact: 'owner@barrio.test', price_minor: 500, status: 'pending_moderation', created_at: '2026-10-27T18:00:00Z', reviewed_at: null, club_id: null, invite_state: 'none' },
+        { id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', club_name: 'Vinyl Room', city: 'Barcelona', contact: 'hello@vinyl.test', price_minor: 700, status: 'approved', created_at: '2026-10-26T12:00:00Z', reviewed_at: '2026-10-26T13:00:00Z', club_id: '3c9e1f70-2b4a-4c8d-9e10-5a6b7c8d9e01', invite_state: 'pending' },
+      ],
+      next_cursor: null,
+    },
+    detail: {
+      id: '7f1c2b40-9a11-4d2e-8f03-1c5b6a7d8e90',
+      club: { name: 'Barrio Latino', city: 'Madrid', address: 'Calle Mayor 1', website: 'https://barrio.test', contact: 'owner@barrio.test', genres: ['Techno', 'House'] },
+      venue: { name: 'Barrio Latino', type: 'club', address: 'Calle Mayor 1', city: 'Madrid', district: 'Centro', capacity: 400, seats: 120, area_m2: 600 },
+      qr: { price_minor: 500, zones: ['Main floor', 'Terrace'] },
+      club_name: 'Barrio Latino', city: 'Madrid', contact: 'owner@barrio.test', email: 'owner@barrio.test',
+      price_minor: 500, status: 'pending_moderation', reject_reason: null, reviewed_by: null, reviewed_at: null,
+      created_at: '2026-10-27T18:00:00Z', source_ip: '203.0.113.7', club_id: null, invite_state: 'none',
+    },
+  },
   // Admin mail (docs/mail-infra-contract.md §7): the same snake_case DTO the
   // list/stats/suppressions routes return, so an `--app admin --page /mail`
   // shot shows the populated screen instead of a demo build's error state.
@@ -174,6 +194,9 @@ for (const page$ of pages) {
     for (const size of sizes) {
       const context = await browser.newContext({ viewport: size, deviceScaleFactor: 1, reducedMotion: 'reduce' });
       const page = await context.newPage();
+      await page.route('**/v1/status', (route) => route.fulfill({
+        json: { mode: 'test', source: 'adaptive', open_signup: true, payments: 'mock' },
+      }));
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       page.on('console', (message) => {
@@ -192,6 +215,7 @@ for (const page$ of pages) {
         await page.route('**/v1/club/**', async (route) => {
           const url = route.request().url();
           const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+          if (url.includes('/club/onboarding/invite/')) return json(FIXTURES.clubInvite);
           if (url.includes('/club/dashboard')) return json(FIXTURES.dashboard);
           if (url.includes('/club/profile')) return json(FIXTURES.profile);
           if (url.includes('/club/djs')) return json(FIXTURES.djs);
@@ -199,6 +223,17 @@ for (const page$ of pages) {
           if (url.includes('/club/earnings')) return json(FIXTURES.earnings);
           if (url.includes('/qr/generate')) return json(FIXTURES.qr);
           return json({});
+        });
+
+        await page.route('**/v1/dj/invite/**', async (route) => {
+          route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURES.djInvite) });
+        });
+
+        await page.route('**/v1/admin/onboarding-applications**', async (route) => {
+          const url = route.request().url();
+          const json = (body) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+          if (/\/onboarding-applications\/[^/?]+$/.test(url)) return json(FIXTURES.onboarding.detail);
+          return json(FIXTURES.onboarding.list);
         });
 
         await page.route('**/v1/admin/mail**', async (route) => {

@@ -15,16 +15,21 @@ import { useLocale } from '../locale';
  * POST /v1/auth/club/login (email + password) → TokenPair | TotpChallenge;
  * on `mfa_required` the second step POSTs /v1/auth/club/2fa {email, totp_code}.
  *
- * Skin A (see components/auth/AuthKit.tsx): one card, two fields, one action.
- * The other ways into this account — registration and the one-time club access
- * token — are links under the form, not competing tabs above it.
+ * One card, two fields, one action. The screen carries no introduction and no
+ * note under the form: the way in is the whole content. The two ways out are
+ * the recovery link and the application link — a club that has no account yet
+ * applies, it does not register. The one-time access token keeps its own small
+ * link inside the form because it is an operator path, not a second offer.
  */
 export default function LoginPage() {
   const { t } = useLocale();
   const navigate = useNavigate();
   const location = useLocation();
   const requested = (location.state as { from?: unknown } | null)?.from;
-  const returnTo = typeof requested === 'string' && /^\/(dashboard|sessions|pricing|djs|earnings)(?:[/?#]|$)/.test(requested)
+  // Deep links that survive the login redirect: every club destination the rail
+  // offers. `/developers` and `/qr` were missing, so signing in from either one
+  // landed on the dashboard instead of the page that was asked for.
+  const returnTo = typeof requested === 'string' && /^\/(dashboard|sessions|pricing|djs|earnings|qr|developers)(?:[/?#]|$)/.test(requested)
     ? requested
     : '/dashboard';
 
@@ -104,28 +109,16 @@ export default function LoginPage() {
     <AuthScreen
       role={t('auth.clubPanel')}
       title={challenge ? t('auth.enterCode') : t('auth.signIn')}
-      subtitle={
-        challenge
-          ? t('auth.twoFactorFor', { email: form.email })
-          : t('auth.clubSignInSubtitle')
-      }
+      subtitle={challenge ? t('auth.twoFactorFor', { email: form.email }) : undefined}
       links={
         <>
           <Link to="/reset-password" className="auth-link">
             {t('auth.forgotPassword')}
           </Link>
           <Link to="/register" className="auth-link auth-link-muted">
-            {t('auth.registerLink')}
-          </Link>
-          <Link to="/dj/login" className="auth-link auth-link-muted">
-            {t('auth.djConsole')}
+            {t('auth.applyTitle')}
           </Link>
         </>
-      }
-      footer={
-        mode === 'credentials'
-          ? t('auth.sessionMemoryNote')
-          : t('auth.tokenNote')
       }
     >
       {challenge ? (
@@ -176,7 +169,7 @@ export default function LoginPage() {
       ) : (
         <form className="auth-form" onSubmit={onSubmitPassword} noValidate>
           <div className="auth-field">
-            <label htmlFor="email" className="field-label">{t('auth.workEmail')}</label>
+            <label htmlFor="email" className="field-label">{t('auth.email')}</label>
             <input
               id="email"
               type="email"

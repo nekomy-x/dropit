@@ -1,0 +1,131 @@
+/* API keys — admin oversight of developer keys.
+   Tokens only (`var(--c-*)`, `var(--r-*)`, `var(--fs-*)`, `var(--sp-*)`); the
+   table, buttons, fields, chips and cards come from the shared panel kit. */
+
+.ak-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.ak-filter-select {
+  flex: 0 1 200px;
+  min-width: 160px;
+}
+
+.ak-filter-search {
+  flex: 1 1 260px;
+  max-width: 380px;
+  min-width: 0;
+}
+
+.ak-cell-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+
+.ak-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* The desktop grid only. Below 768px the shared `data-table--stack` block owns
+   the table (one record per row), so every rule that assumes a nine-column
+   grid stays on the desktop side of the breakpoint — otherwise `width: 1%`,
+   `white-space: nowrap` and the 940px floor would leak into the stacked rows
+   and push the page sideways again.
+   Nine columns cannot compress into a phone width; the desktop wrap scrolls
+   instead of squeezing every cell into two lines. Same rule the mail list uses. */
+@media (min-width: 768px) {
+  .ak-table th:last-child,
+  .ak-table td:last-child {
+    width: 1%;
+    white-space: nowrap;
+  }
+
+  .ak-table { min-width: 940px; }
+
+  /* A count is one token, not a paragraph: "2 scopes" must not wrap in a cell. */
+  .ak-table td:nth-child(5) { white-space: nowrap; }
+}
+
+.ak-error { margin-bottom: var(--sp-4); }
+
+.ak-notice {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-tile);
+  background: var(--c-accent-tint);
+  color: var(--c-accent-quiet);
+  font-size: var(--fs-12);
+}
+
+.ak-dialog-body {
+  margin: 0;
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+.ak-skeleton {
+  display: grid;
+  gap: var(--sp-3);
+}
+
+.ak-skeleton .skeleton {
+  display: block;
+  width: 100%;
+}
+
+.ak-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+}
+
+.ak-summary dt {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+.ak-summary dd {
+  margin: 2px 0 0;
+  color: var(--c-text);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.ak-summary dd.ak-summary-date {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  font-variant-numeric: normal;
+}
+
+.ak-path {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* Phone layout: the table itself is handled by the shared `data-table--stack`
+   contract (markup carries `data-table--stack`, `data-label` on each cell,
+   `cell-primary` on the club and `cell-actions` on the button strip). Only the
+   screen's own chrome needs a rule here: a two-up summary, filters that take
+   the full width instead of sitting in a 200px column, and row actions that
+   wrap left instead of hugging the right edge of a finger. */
+@media (max-width: 720px) {
+  .ak-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ak-row-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .ak-filter-select,
+  .ak-filter-search { flex: 1 1 100%; max-width: none; }
+}

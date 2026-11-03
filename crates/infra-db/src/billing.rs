@@ -5,11 +5,15 @@
 //!   2. confirm → GUARD (session active + request pending) → processing;
 //!   3. вебхук захвата → идемпотентно по (aggregate_id, event_type):
 //!      TX = payment→captured + ledger двойная проводка + split-строки;
-//!   4. дубль вебхука (другой event_id) → NO-OP (не вторая проводка!).
+//!   4. дубль вебхука (другой event_id) → NO-OP (не вторая проводка!);
+//!   5. возврат (админ) → [`BillingRepo::apply_refund`]: провайдер уже вернул
+//!      деньги, затем одна TX = `refunded_minor` + пропорциональный реверс
+//!      сплитов + ledger `reversal` + outbox + аудит.
 //!
 //! Инварианты:
 //!   * Σ split(payment) == amount_minor;
 //!   * Σ ledger_entry(txn_id) == 0 (микро-инвариант каждой проводки);
+//!   * Σ прироста split.reversed_minor за возврат == сумма возврата;
 //!   * ledger — append-only, ошибки — сторно, не UPDATE.
 
 use chrono::{DateTime, Utc};
@@ -37,6 +41,22 @@ pub enum BillingError {
     /// чужого `payment_id`/суммы недопустима (→ 409 `idempotency_conflict`).
     #[error("idempotency key belongs to another request")]
     IdempotencyConflict,
+    /// Возврат возможен только из `captured`/`partially_refunded`
+    /// (→ 409 `invalid_payment_status`).
+    #[error("payment status does not allow a refund")]
+    InvalidPaymentStatus,
+    /// Платёж возвращён полностью: возвращать больше нечего
+    /// (→ 409 `already_refunded`).
+    #[error("payment already fully refunded")]
+    AlreadyRefunded,
+    /// Сумма возврата вне `1..=остаток`. `max_refundable_minor` — сколько
+    /// ещё можно вернуть (→ 422 `invalid_refund_amount`).
+    #[error("refund amount out of range, max refundable {max_refundable_minor}")]
+    RefundAmountOutOfRange { max_refundable_minor: i64 },
+    /// Разрез платежа не сходится с его суммой (Σ split ≠ amount): реверс
+    /// сплитов невозможен без потери денег. Это порча данных, не ответ клиенту.
+    #[error("split rows do not sum to the payment amount")]
+    SplitInvariantViolated,
 }
 
 /// Список колонок `payment` для `SELECT … FROM payment` — единый
@@ -108,6 +128,72 @@ pub enum CreatePaymentOutcome {
     /// Найден существующий «активный» платёж — replay/гонка: новый
     /// intent создаваться не должен, возвращается эта строка.
     Existing(PaymentRow),
+}
+
+/// Запись о выполненном возврате — то, что отдаётся повторно по тому же
+/// `Idempotency-Key`.
+///
+/// Хранится в payload outbox-события `payment.refunded`: событие пишется
+/// **той же транзакцией**, что и реверс денег, поэтому «событие есть» ⇔
+/// «возврат применён». Отдельной таблицы возвратов в схеме нет, а миграция
+/// вне рамок задачи, так что журнал событий — единственный durable-след
+/// возврата (он же нужен уведомлениям, ADR-002).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RefundRecord {
+    pub payment_id: Uuid,
+    pub request_id: Uuid,
+    /// Сумма ЭТОГО возврата.
+    pub amount_minor: i64,
+    pub refund_id: String,
+    /// Всего возвращено по платежу после этого возврата.
+    pub refunded_minor: i64,
+    pub currency: String,
+    /// Статус платежа после возврата: `partially_refunded` | `refunded`.
+    pub status: String,
+    pub reason: Option<String>,
+    pub idempotency_key: Option<String>,
+}
+
+/// Исход [`BillingRepo::apply_refund`]: возврат применён сейчас или это
+/// replay по уже использованному `Idempotency-Key`.
+#[derive(Debug)]
+pub struct RefundOutcome {
+    pub record: RefundRecord,
+    pub replayed: bool,
+}
+
+/// Параметры применения возврата. Вызывается ПОСЛЕ успешного возврата у
+/// провайдера: здесь деньги только записываются.
+pub struct ApplyRefund<'a> {
+    pub payment_id: Uuid,
+    pub amount_minor: i64,
+    /// Идентификатор возврата провайдера (`re_…`).
+    pub refund_id: &'a str,
+    pub reason: Option<&'a str>,
+    /// `None` — ключа не было: replay невозможен, каждый вызов — новый возврат.
+    pub idempotency_key: Option<&'a str>,
+    pub admin_id: Uuid,
+}
+
+/// Строка сплита под реверс (`FOR UPDATE`).
+#[derive(Debug, sqlx::FromRow)]
+struct SplitRowForRefund {
+    id: Uuid,
+    payee_type: String,
+    amount_minor: i64,
+    reversed_minor: i64,
+}
+
+/// Канонический порядок получателей при распределении остатка возврата:
+/// платформа первой, как и в `compute_split`, где дробный цент уходит ей.
+fn payee_rank(payee_type: &str) -> u8 {
+    match payee_type {
+        "platform" => 0,
+        "club" => 1,
+        "dj" => 2,
+        // Неизвестный получатель — в конец: он не должен забирать остаток.
+        _ => 3,
+    }
 }
 
 #[derive(Clone)]
@@ -681,6 +767,277 @@ impl BillingRepo {
         };
         tx.commit().await?;
         Ok(row)
+    }
+
+    // ---------------------------------------------------------
+    // Шаг 4: возврат средств (админ) — реверс сплитов + ledger
+    // ---------------------------------------------------------
+
+    /// Ищет выполненный возврат по `Idempotency-Key`.
+    ///
+    /// Читает журнал `payment.refunded` (см. [`RefundRecord`]). Вызывается
+    /// ДО обращения к провайдеру: повтор с тем же ключом не должен вернуть
+    /// деньги второй раз.
+    pub async fn find_refund_by_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<RefundRecord>, BillingError> {
+        let row: Option<(serde_json::Value,)> = sqlx::query_as(
+            "SELECT payload FROM outbox \
+             WHERE aggregate_type = 'payment' AND event_type = 'payment.refunded' \
+               AND payload->>'idempotency_key' = $1 \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some((payload,)) => {
+                let record = serde_json::from_value(payload).map_err(|_| {
+                    BillingError::Db(sqlx::Error::Decode("bad refund record".into()))
+                })?;
+                Ok(Some(record))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Применяет возврат: ОДНА транзакция на всё.
+    ///
+    /// Провайдер к этому моменту уже вернул деньги (вызывающий слой делает
+    /// это ДО транзакции: держать блокировки строк через сетевой вызов —
+    /// хуже, чем узкое окно между возвратом и записью). Внутри транзакции:
+    ///
+    ///   1. `payment … FOR UPDATE` — параллельные возвраты по одному
+    ///      платежу сериализуются;
+    ///   2. replay по `Idempotency-Key` (ДО проверки статуса: повтор того же
+    ///      запроса на уже полностью возвращённый платёж — это replay, а не
+    ///      конфликт);
+    ///   3. гейт статуса: `captured` | `partially_refunded`;
+    ///   4. сумма: `1..=остаток` (иначе [`BillingError::RefundAmountOutOfRange`]);
+    ///   5. `payment.refunded_minor += amount`, статус `refunded` при полном
+    ///      возврате, иначе `partially_refunded`;
+    ///   6. реверс сплитов пропорционально остаткам долей
+    ///      ([`dropit_domain::payment::allocate_refund`]) — инвариант
+    ///      `Σ прироста reversed_minor == amount`, статус строки `reversed`
+    ///      или `partially_reversed`;
+    ///   7. ledger-проводка `reversal`: `Σ ledger_entry(txn) == 0`;
+    ///   8. outbox `payment.refunded` (журнал + replay-запись);
+    ///   9. `audit_log` `payment_refunded` с diff.
+    ///
+    /// Любая ошибка откатывает всё: деньги в БД не двигаются частично.
+    pub async fn apply_refund(&self, req: ApplyRefund<'_>) -> Result<RefundOutcome, BillingError> {
+        let mut tx = self.pool.begin().await?;
+
+        let payment = sqlx::query_as::<_, PaymentRow>(&format!(
+            "SELECT {PAYMENT_COLS} FROM payment WHERE id = $1 FOR UPDATE"
+        ))
+        .bind(req.payment_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(BillingError::NotFound)?;
+
+        // Replay ДО гейта статуса: иначе повтор с тем же ключом на уже
+        // возвращённом платеже выглядел бы как «возвращать нечего».
+        if let Some(key) = req.idempotency_key {
+            let existing: Option<(Uuid, serde_json::Value)> = sqlx::query_as(
+                "SELECT aggregate_id, payload FROM outbox \
+                 WHERE aggregate_type = 'payment' AND event_type = 'payment.refunded' \
+                   AND payload->>'idempotency_key' = $1 \
+                 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(key)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some((payment_id, payload)) = existing {
+                if payment_id != req.payment_id {
+                    // Ключ уже отработал по ДРУГОМУ платежу: отдать чужой
+                    // refund_id/сумму нельзя.
+                    tx.rollback().await?;
+                    return Err(BillingError::IdempotencyConflict);
+                }
+                let record: RefundRecord = serde_json::from_value(payload).map_err(|_| {
+                    BillingError::Db(sqlx::Error::Decode("bad refund record".into()))
+                })?;
+                tx.rollback().await?;
+                return Ok(RefundOutcome {
+                    record,
+                    replayed: true,
+                });
+            }
+        }
+
+        match payment.status.as_str() {
+            "captured" | "partially_refunded" => {}
+            "refunded" => {
+                tx.rollback().await?;
+                return Err(BillingError::AlreadyRefunded);
+            }
+            _ => {
+                tx.rollback().await?;
+                return Err(BillingError::InvalidPaymentStatus);
+            }
+        }
+
+        // Остаток считаем от заблокированной строки: параллельный возврат
+        // уже учтён в refunded_minor.
+        let max_refundable_minor = (payment.amount_minor - payment.refunded_minor).max(0);
+        if req.amount_minor <= 0 || req.amount_minor > max_refundable_minor {
+            tx.rollback().await?;
+            return Err(BillingError::RefundAmountOutOfRange {
+                max_refundable_minor,
+            });
+        }
+
+        // Сплиты под блокировкой. Порядок блокировки — по id (детерминированно,
+        // без взаимных блокировок), порядок РАСПРЕДЕЛЕНИЯ — канонический.
+        let mut splits = sqlx::query_as::<_, SplitRowForRefund>(
+            "SELECT id, payee_type, amount_minor, reversed_minor \
+             FROM split WHERE payment_id = $1 ORDER BY id FOR UPDATE",
+        )
+        .bind(req.payment_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        splits.sort_by_key(|row| payee_rank(&row.payee_type));
+
+        // Инвариант разреза: Σ amount == сумма платежа, иначе реверс
+        // «пропорционально» вернёт не то, что нужно.
+        let split_total: i64 = splits.iter().map(|row| row.amount_minor).sum();
+        let left_shares: Vec<i64> = splits
+            .iter()
+            .map(|row| (row.amount_minor - row.reversed_minor).max(0))
+            .collect();
+        let left_total: i64 = left_shares.iter().sum();
+        if split_total != payment.amount_minor || left_total != max_refundable_minor {
+            tx.rollback().await?;
+            return Err(BillingError::SplitInvariantViolated);
+        }
+
+        let allocation = dropit_domain::payment::allocate_refund(
+            max_refundable_minor,
+            req.amount_minor,
+            &left_shares,
+        )
+        .map_err(|_| BillingError::SplitInvariantViolated)?;
+
+        for (row, increment) in splits.iter().zip(allocation.iter()) {
+            if *increment == 0 {
+                continue;
+            }
+            sqlx::query(
+                "UPDATE split SET reversed_minor = reversed_minor + $2, \
+                 status = CASE WHEN reversed_minor + $2 >= amount_minor \
+                               THEN 'reversed' ELSE 'partially_reversed' END \
+                 WHERE id = $1",
+            )
+            .bind(row.id)
+            .bind(increment)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Ledger: зеркало проводки захвата с обратным знаком.
+        // capture: revenue:platform −amount, payable:* +доли,
+        //          revenue:platform_commission +комиссия;
+        // reversal: revenue:platform +refund, payable:* −доли,
+        //          revenue:platform_commission −комиссия.
+        // Σ == refund − (club + dj + platform) == 0 по инварианту возврата.
+        let mut by_payee = std::collections::BTreeMap::<&str, i64>::new();
+        for (row, increment) in splits.iter().zip(allocation.iter()) {
+            *by_payee.entry(row.payee_type.as_str()).or_insert(0) += *increment;
+        }
+        let club_part = *by_payee.get("club").unwrap_or(&0);
+        let dj_part = *by_payee.get("dj").unwrap_or(&0);
+        let platform_part = *by_payee.get("platform").unwrap_or(&0);
+
+        let txn = Uuid::now_v7();
+        let currency = payment.currency.as_str();
+        let mut entries: Vec<(&str, i64)> = vec![("revenue:platform", req.amount_minor)];
+        if club_part != 0 {
+            entries.push(("payable:club", -club_part));
+        }
+        if dj_part != 0 {
+            entries.push(("payable:dj", -dj_part));
+        }
+        if platform_part != 0 {
+            entries.push(("revenue:platform_commission", -platform_part));
+        }
+        for (account, amount) in entries {
+            sqlx::query(
+                "INSERT INTO ledger_entry (id, txn_id, account, currency, amount_minor, \
+                 entry_type, ref) VALUES ($1, $2, $3, $4, $5, 'reversal', $6)",
+            )
+            .bind(Uuid::now_v7())
+            .bind(txn)
+            .bind(account)
+            .bind(currency)
+            .bind(amount)
+            .bind(req.payment_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let updated = sqlx::query_as::<_, PaymentRow>(&format!(
+            "UPDATE payment SET refunded_minor = refunded_minor + $2, \
+             status = CASE WHEN refunded_minor + $2 >= amount_minor \
+                           THEN 'refunded' ELSE 'partially_refunded' END \
+             WHERE id = $1 RETURNING {PAYMENT_COLS}"
+        ))
+        .bind(req.payment_id)
+        .bind(req.amount_minor)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let record = RefundRecord {
+            payment_id: updated.id,
+            request_id: updated.request_id,
+            amount_minor: req.amount_minor,
+            refund_id: req.refund_id.to_string(),
+            refunded_minor: updated.refunded_minor,
+            currency: updated.currency.clone(),
+            status: updated.status.clone(),
+            reason: req.reason.map(str::to_string),
+            idempotency_key: req.idempotency_key.map(str::to_string),
+        };
+        let payload = serde_json::to_value(&record)
+            .map_err(|_| BillingError::Db(sqlx::Error::Decode("refund record serialize".into())))?;
+
+        sqlx::query(
+            "INSERT INTO outbox (id, aggregate_type, aggregate_id, event_type, payload) \
+             VALUES ($1, 'payment', $2, 'payment.refunded', $3)",
+        )
+        .bind(Uuid::now_v7())
+        .bind(updated.id)
+        .bind(&payload)
+        .execute(&mut *tx)
+        .await?;
+
+        // Аудит — в той же транзакции: запись «кто вернул деньги» не должна
+        // пережить откат возврата и не должна потеряться при коммите.
+        sqlx::query(
+            "INSERT INTO audit_log (actor_type, actor_id, action, entity, diff) \
+             VALUES ('admin', $1, 'payment_refunded', $2, $3)",
+        )
+        .bind(req.admin_id)
+        .bind(updated.id.to_string())
+        .bind(serde_json::json!({
+            "entity_type": "payment",
+            "entity_id": updated.id,
+            "request_id": updated.request_id,
+            "amount_minor": req.amount_minor,
+            "refunded_minor": updated.refunded_minor,
+            "reason": req.reason,
+            "refund_id": req.refund_id,
+            "status": updated.status,
+        }))
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(RefundOutcome {
+            record,
+            replayed: false,
+        })
     }
 
     /// Инвариант-чекер (для тестов и ночной джобы F6):

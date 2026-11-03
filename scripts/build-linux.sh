@@ -6,8 +6,7 @@
 #    (в ~/.rustup добавить таргет нельзя — каталог только для чтения
 #    в песочнице агента);
 #  * линкер/cc — zig (musl + glibc из коробки, собирает C-часть ring);
-#  * cargo-zigbuild пишет кэш в ~/Library/Caches, поэтому HOME подменяется
-#    на записываемый каталог, а CARGO_HOME/rustup/cargo-bin задаются явно.
+#  * CARGO_HOME/rustup/cargo-bin и кэш Zig задаются явно; HOME не меняется.
 #
 # Артефакты: build/
 #   dropit-api, dropit-workers      (статические musl-бинарники)
@@ -34,9 +33,9 @@ mode="${1:-all}"
 
 export CARGO_HOME="$REPO_ROOT/.cargo-home"
 export RUSTUP_HOME="$RUSTUP_WRITABLE"
-export HOME="$SANDBOX_HOME"
+export ZIG_GLOBAL_CACHE_DIR="$SANDBOX_HOME/.cache/zig"
 export PATH="$ZIG_DIR:$CARGO_HOME/bin:$SYSTEM_CARGO_BIN:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-mkdir -p "$HOME/Library/Caches" "$HOME/.cache" "$OUT"
+mkdir -p "$SANDBOX_HOME/Library/Caches" "$ZIG_GLOBAL_CACHE_DIR" "$OUT"
 
 # Быстрая релизная сборка: LTO в профиле репозитория включён, для стенда
 # важнее время сборки, чем последние 5 % перфоманса.
@@ -70,11 +69,13 @@ build_web() {
   ( cd "$REPO_ROOT/apps/web-admin" && npm run --silent build )
 
   rm -rf "$OUT/web"
-  mkdir -p "$OUT/web/club" "$OUT/web/admin" "$OUT/web/dj"
+  mkdir -p "$OUT/web/club" "$OUT/web/admin" "$OUT/web/dj" "$OUT/web/status"
   cp -R "$REPO_ROOT/apps/web-club/dist/."  "$OUT/web/club/"
   cp -R "$REPO_ROOT/apps/web-admin/dist/." "$OUT/web/admin/"
   cp "$REPO_ROOT/apps/web-dj/index.html"   "$OUT/web/dj/index.html"
-  du -sh "$OUT/web/club" "$OUT/web/admin" "$OUT/web/dj"
+  # Публичная статус-страница `/status/`: статичная, без сборки.
+  cp -R "$REPO_ROOT/apps/web-status/."     "$OUT/web/status/"
+  du -sh "$OUT/web/club" "$OUT/web/admin" "$OUT/web/dj" "$OUT/web/status"
 }
 
 case "$mode" in

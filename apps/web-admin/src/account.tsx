@@ -134,6 +134,22 @@ export interface AccountFact {
 }
 
 /**
+ * The optional developer entry of the settings dialog.
+ *
+ * It is a row, not a second dialog: the panel that ships a developer surface
+ * passes the row copy and a handler that opens (and normally closes the dialog
+ * first). A panel without such a surface passes nothing and the row does not
+ * exist — an account dialog must never advertise a page that is not there.
+ */
+export interface DeveloperAccessEntry {
+  /** One line under the row title. */
+  hint: string;
+  /** Label of the row's button. */
+  actionLabel: string;
+  onOpen: () => void;
+}
+
+/**
  * Account settings — the one dialog every panel opens from the account menu.
  *
  * Content order follows what a user came for: who they are (read-only facts the
@@ -147,12 +163,14 @@ export function AccountSettings({
   facts = [],
   onClose,
   onSignOut,
+  developerAccess,
 }: {
   open: boolean;
   identity: AccountIdentity;
   facts?: AccountFact[];
   onClose: () => void;
   onSignOut: () => void;
+  developerAccess?: DeveloperAccessEntry;
 }) {
   const { t } = useLocale();
   const { theme, setTheme } = useTheme();
@@ -201,6 +219,18 @@ export function AccountSettings({
       ) : null}
 
       <LanguageList idPrefix="account" />
+
+      {developerAccess ? (
+        <div className="panel-setting-row">
+          <div className="panel-setting-copy">
+            <span className="panel-setting-title">{t('account.developer')}</span>
+            <p className="panel-setting-hint">{developerAccess.hint}</p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={developerAccess.onOpen}>
+            {developerAccess.actionLabel}
+          </button>
+        </div>
+      ) : null}
 
       <div className="panel-setting-row">
         <div className="panel-setting-copy">

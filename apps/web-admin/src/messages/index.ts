@@ -33,6 +33,8 @@ import { platformSettingsCatalog } from './platform-settings';
 import { dashboardCatalog } from './dashboard';
 import { loginCatalog } from './login';
 import { mailCatalog } from './mail';
+import { onboardingCatalog } from './onboarding';
+import { apiKeysCatalog } from './api-keys';
 import { deploymentCatalog } from './deployment';
 
 export interface CatalogProblem {
@@ -67,6 +69,10 @@ const AREAS: ReadonlyArray<{ name: string; catalog: MessageCatalog }> = [
   { name: 'dashboard', catalog: dashboardCatalog },
   { name: 'login', catalog: loginCatalog },
   { name: 'mail', catalog: mailCatalog },
+  // Club onboarding: the application queue and its invite link.
+  { name: 'onboarding', catalog: onboardingCatalog },
+  // API-key oversight: every club's scoped keys, read-only plus revocation.
+  { name: 'apiKeys', catalog: apiKeysCatalog },
 ];
 
 export function buildCatalog(): { catalog: MessageCatalog; problems: CatalogProblem[] } {

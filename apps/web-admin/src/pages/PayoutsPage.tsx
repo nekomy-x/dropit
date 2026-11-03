@@ -124,7 +124,7 @@ export default function PayoutsPage() {
             </header>
 
             <div className="table-wrap">
-              <table className="data-table" style={{ minWidth: 760 }}>
+              <table className="data-table data-table--stack" style={{ minWidth: 760 }}>
                 <thead>
                   <tr>
                     <th scope="col">{t('payouts.colPayout')}</th>
@@ -138,15 +138,15 @@ export default function PayoutsPage() {
                 <tbody>
                   {data.items.map((payout) => (
                     <tr key={payout.id}>
-                      <td className="is-mono is-muted">{payout.id}</td>
-                      <td>
+                      <td data-label="" className="cell-primary is-mono">{payout.id}</td>
+                      <td data-label={t('payouts.colPayee')}>
                         <span className="chip chip-neutral">{payout.payee_type}</span>
                         <span className="is-mono" style={{ marginLeft: 8, color: 'var(--c-text-muted-sm)' }}>{payout.payee_id.slice(0, 8)}</span>
                       </td>
-                      <td className="is-num is-strong">{money(payout.amount_minor)}</td>
-                      <td><StatusBadge status={payout.status} /></td>
-                      <td className="is-num">{payout.attempts}</td>
-                      <td>{payout.is_final ? t('payouts.yes') : t('payouts.no')}</td>
+                      <td data-label={t('payouts.colAmount')} className="is-num is-strong">{money(payout.amount_minor)}</td>
+                      <td data-label={t('payouts.colStatus')}><StatusBadge status={payout.status} /></td>
+                      <td data-label={t('payouts.colAttempts')} className="is-num">{payout.attempts}</td>
+                      <td data-label={t('payouts.colFinal')}>{payout.is_final ? t('payouts.yes') : t('payouts.no')}</td>
                     </tr>
                   ))}
                 </tbody>

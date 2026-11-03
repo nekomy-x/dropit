@@ -21,6 +21,7 @@
  * Exit code 0 = every route passed in both themes.
  */
 import { createRequire } from 'node:module';
+import { signInPanelIfNeeded } from './panel-test-auth.mjs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,7 +41,7 @@ const onlyRoute = flag('route', null);
 const APPS = {
   club: {
     base: flag('club-base', 'http://localhost:5173'),
-    routes: ['/dashboard', '/sessions', '/djs', '/pricing', '/earnings', '/dj', '/dj/login', '/login'],
+    routes: ['/dashboard', '/sessions', '/djs', '/pricing', '/earnings', '/dj', '/dj/login', '/login', '/register', '/club/invite/preview-token', '/dj/invite/preview-token'],
   },
   admin: {
     base: flag('admin-base', 'http://localhost:5174'),
@@ -52,7 +53,7 @@ const APPS = {
       // live admin screens backed by the platform API
       '/admin/dashboard', '/admin/clubs', '/admin/djs', '/admin/guests', '/admin/payments',
       '/admin/payouts', '/admin/incidents', '/admin/audit-log', '/admin/platform-settings',
-      '/admin/mail',
+      '/admin/mail', '/admin/onboarding',
     ],
   },
 };
@@ -105,6 +106,29 @@ djs: {
   pricing: { items: [{ id: 'price-1', club_id: 'club-1', price_minor: 500, dj_share_bp: null, valid_from: '2026-10-01T00:00:00Z', valid_to: null, created_at: '2026-10-01T00:00:00Z' }] },
   qr: { session_id: 'sess_01h8xk2m9p', qr_token: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', expires_at: '2026-10-27T03:30:00Z' },
   earnings: { period: 'day', gross_minor: 183500, net_minor: 128450, payments: 47 },
+  // Closed onboarding (docs/onboarding-contract.md): an approved application
+  // reads back its own facts, so the activation screen shows the real rows
+  // instead of the 404 state.
+  clubInvite: { club_name: 'Barrio Latino', city: 'Madrid', email: 'owner@barrio.test', contact: 'owner@barrio.test', slug: 'barrio-latino', expires_at: '2026-11-05T12:00:00Z' },
+  djInvite: { display_name: 'DJ Noche', club_name: 'Barrio Latino', expires_at: '2026-11-05T12:00:00Z' },
+  onboarding: {
+    list: {
+      items: [
+        { id: '7f1c2b40-9a11-4d2e-8f03-1c5b6a7d8e90', club_name: 'Barrio Latino', city: 'Madrid', contact: 'owner@barrio.test', price_minor: 500, status: 'pending_moderation', created_at: '2026-10-27T18:00:00Z', reviewed_at: null, club_id: null, invite_state: 'none' },
+        { id: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d', club_name: 'Vinyl Room', city: 'Barcelona', contact: 'hello@vinyl.test', price_minor: 700, status: 'approved', created_at: '2026-10-26T12:00:00Z', reviewed_at: '2026-10-26T13:00:00Z', club_id: '3c9e1f70-2b4a-4c8d-9e10-5a6b7c8d9e01', invite_state: 'pending' },
+      ],
+      next_cursor: null,
+    },
+    detail: {
+      id: '7f1c2b40-9a11-4d2e-8f03-1c5b6a7d8e90',
+      club: { name: 'Barrio Latino', city: 'Madrid', address: 'Calle Mayor 1', website: 'https://barrio.test', contact: 'owner@barrio.test', genres: ['Techno', 'House'] },
+      venue: { name: 'Barrio Latino', type: 'club', address: 'Calle Mayor 1', city: 'Madrid', district: 'Centro', capacity: 400, seats: 120, area_m2: 600 },
+      qr: { price_minor: 500, zones: ['Main floor', 'Terrace'] },
+      club_name: 'Barrio Latino', city: 'Madrid', contact: 'owner@barrio.test', email: 'owner@barrio.test',
+      price_minor: 500, status: 'pending_moderation', reject_reason: null, reviewed_by: null, reviewed_at: null,
+      created_at: '2026-10-27T18:00:00Z', source_ip: '203.0.113.7', club_id: null, invite_state: 'none',
+    },
+  },
   // Mail (docs/mail-infra-contract.md §7). Rows are the exact snake_case DTO
   // the admin list returns, so the screen is measured against real shape.
   mail: {
@@ -269,7 +293,10 @@ const measure = (page) => page.evaluate(() => {
         contrasts.push({ ratio: Math.round(ratio * 100) / 100, size, text: el.textContent.trim().slice(0, 36), cls: String(el.className).slice(0, 40) });
       }
     }
-    const interactive = ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) || el.hasAttribute('tabindex');
+    // Headings with tabindex=-1 receive programmatic focus after a step
+    // change; they are not touch controls. Native/ARIA buttons still count.
+    const interactive = ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)
+      || el.getAttribute('role') === 'button' || (el.hasAttribute('tabindex') && el.tabIndex >= 0);
     if (interactive && visible(el)) {
       const name = el.getAttribute('aria-label')
         || el.getAttribute('title')
@@ -316,14 +343,23 @@ for (const [appName, config] of Object.entries(APPS)) {
     for (const theme of THEMES) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
       const page = await context.newPage();
+      await page.route('**/v1/status', (route) => route.fulfill({
+        json: { mode: 'test', source: 'adaptive', open_signup: true, payments: 'mock' },
+      }));
       const consoleErrors = [];
       const externalHosts = new Set();
+      const catalogImageHosts = new Set();
       page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
       page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
       page.on('request', (request) => {
         try {
           const url = new URL(request.url());
-          if (!['localhost', '127.0.0.1'].includes(url.hostname)) externalHosts.add(url.hostname);
+          if (!['localhost', '127.0.0.1', new URL(config.base).hostname].includes(url.hostname)) {
+            // Live catalog artwork is product content; UI fonts, scripts and
+            // icons must still be first-party. Never exempt other resource types.
+            if (request.resourceType() === 'image' && /^is\d+-ssl\.mzstatic\.com$/.test(url.hostname)) catalogImageHosts.add(url.hostname);
+            else externalHosts.add(url.hostname);
+          }
         } catch { /* ignore */ }
       });
 
@@ -335,6 +371,7 @@ for (const [appName, config] of Object.entries(APPS)) {
         await page.route('**/v1/club/**', async (r) => {
           const url = r.request().url();
           const json = (body) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+          if (url.includes('/club/onboarding/invite/')) return json(FIXTURES.clubInvite);
           if (url.includes('/club/dashboard')) return json(FIXTURES.dashboard);
           if (url.includes('/club/profile')) return json(FIXTURES.profile);
           if (url.includes('/club/djs')) return json(FIXTURES.djs);
@@ -342,6 +379,9 @@ for (const [appName, config] of Object.entries(APPS)) {
           if (url.includes('/club/earnings')) return json(FIXTURES.earnings);
           if (url.includes('/qr/generate')) return json(FIXTURES.qr);
           return json({});
+        });
+        await page.route('**/v1/dj/invite/**', async (r) => {
+          r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURES.djInvite) });
         });
       }
 
@@ -357,11 +397,21 @@ for (const [appName, config] of Object.entries(APPS)) {
           if (/\/mail\/[^/?]+$/.test(url)) return json(FIXTURES.mail.detail);
           return json(FIXTURES.mail.list);
         });
+        // Applications queue (docs/onboarding-contract.md). Populated rows so
+        // the audit measures the table, the status chips and the approve panel
+        // instead of an empty state.
+        await page.route('**/v1/admin/onboarding-applications**', async (r) => {
+          const url = r.request().url();
+          const json = (body) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+          if (/\/onboarding-applications\/[^/?]+$/.test(url)) return json(FIXTURES.onboarding.detail);
+          return json(FIXTURES.onboarding.list);
+        });
       }
 
       const label = `${appName} ${route} [${theme}]`;
       try {
         await page.goto(`${config.base}${route}`, { waitUntil: 'networkidle', timeout: 60000 });
+        await signInPanelIfNeeded(page, appName === 'admin' ? 'admin' : route === '/dj' ? 'dj' : 'club', route);
         await page.waitForTimeout(500);
         const data = await measure(page);
 
@@ -380,7 +430,7 @@ for (const [appName, config] of Object.entries(APPS)) {
           `${sizes.length} sizes ${JSON.stringify(sizes)}${tooSmall.length ? ` — below: ${tooSmall}` : ''}`);
 
         record(consoleErrors.length === 0, `${label} no console errors`, consoleErrors.slice(0, 3).join(' | ') || 'clean');
-        record(externalHosts.size === 0, `${label} no external hosts`, [...externalHosts].join(', ') || 'all first-party');
+        record(externalHosts.size === 0, `${label} no external UI assets`, [...externalHosts].join(', ') || (catalogImageHosts.size ? `first-party UI; catalog artwork: ${[...catalogImageHosts].join(', ')}` : 'all first-party'));
 
         // overflow ladder at the current theme
         const overflows = {};
@@ -400,6 +450,46 @@ for (const [appName, config] of Object.entries(APPS)) {
         record(mobile.smallTargets.length === 0, `${label} touch targets >= 44px @390`,
           mobile.smallTargets.slice(0, 5).join(' | ') || 'none under 44px');
         record(mobile.unnamed.length === 0, `${label} accessible names`, mobile.unnamed.slice(0, 4).join(' | ') || 'all named');
+
+        // Tables on a phone. A dense data table is a desktop instrument; below
+        // 768px it either becomes a list of labelled rows (`data-table--stack`)
+        // or it must declare that it is a genuine matrix that scrolls sideways
+        // (`data-mobile="scroll"`). A table that does neither is a 760px grid
+        // inside a 326px card: the columns past the fold are silently clipped,
+        // which is the exact bug this check exists for. A stacked table must
+        // label every value cell, otherwise the value loses its column.
+        const tables = await page.evaluate(() => {
+          const clipped = [];
+          const unlabelled = [];
+          let stacked = 0;
+          for (const table of document.querySelectorAll('table.data-table')) {
+            const rect = table.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) continue;
+            if (table.classList.contains('data-table--stack')) {
+              stacked += 1;
+              for (const cell of table.querySelectorAll('tbody td')) {
+                if (cell.closest('[hidden]')) continue;
+                if (!cell.hasAttribute('data-label') && !cell.classList.contains('cell-primary')) {
+                  unlabelled.push(cell.textContent.trim().slice(0, 24) || '(empty cell)');
+                }
+              }
+              continue;
+            }
+            if (table.getAttribute('data-mobile') === 'scroll') continue;
+            const wrap = table.parentElement;
+            if (!wrap) continue;
+            const available = Math.ceil(wrap.getBoundingClientRect().width);
+            if (table.scrollWidth > available + 1) {
+              clipped.push(`${table.getAttribute('aria-label') || String(table.className).slice(0, 30)} ${table.scrollWidth}px in ${available}px`);
+            }
+          }
+          return { clipped, unlabelled, stacked };
+        });
+        record(tables.clipped.length === 0, `${label} mobile tables fit or declare scroll @390`,
+          tables.clipped.length ? tables.clipped.slice(0, 4).join(' | ') : `${tables.stacked} stacked, rest fit`);
+        record(tables.unlabelled.length === 0, `${label} stacked rows carry column labels @390`,
+          tables.unlabelled.slice(0, 5).join(' | ') || 'every value cell labelled');
+
 
         // Walk the tab order, but stop at the end of the document rather than
         // pressing a fixed number of times: `body` is `document.activeElement`

@@ -42,6 +42,7 @@ import { downloadBlob, exportPdf, exportRaster, exportSvg, printCard } from '../
 import { decodeSvg, type DecodeResult } from '../qr/decode-check';
 import type { ColorMode, Ecc, EyeCenter, EyeFrame, ModuleShape, QrStyle } from '../qr/types';
 import './qr-studio.css';
+import { guestJoinUrl } from '../guest/links';
 
 /** The square print size used for PDF and the print dialog. */
 const PRINT_SIZE = 'sticker' as const;
@@ -90,7 +91,7 @@ export default function QrStudioPage() {
     try {
       const issued = await generateSessionQr(shift.id);
       setToken(issued);
-      dispatch({ type: 'value', value: issued.qr_token });
+      dispatch({ type: 'value', value: guestJoinUrl(issued.qr_token) });
     } catch {
       push({ title: t('qr.failed'), tone: 'error' });
     } finally {

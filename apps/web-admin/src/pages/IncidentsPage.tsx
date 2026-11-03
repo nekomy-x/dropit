@@ -12,6 +12,7 @@ import StatusBadge from '../components/StatusBadge';
 import Icon from '../components/Icon';
 import PageHeading from '../components/PageHeading';
 import { useLocale } from '../locale';
+import './incidents.css';
 
 /**
  * Incidents page — a LIVE admin function (F6):
@@ -82,23 +83,22 @@ export default function IncidentsPage() {
               {data.items.map((incident) => (
                 <li
                   key={incident.id}
-                  className="list-row"
-                  style={{ alignItems: 'flex-start', flexWrap: 'wrap', paddingBlock: 14 }}
+                  className="list-row incident-row"
+                  style={{ flexWrap: 'wrap', paddingBlock: 14 }}
                 >
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                       <StatusBadge status="failed" />
-                      <span style={{ color: 'var(--c-text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-11)' }}>{incident.kind}</span>
+                      <span style={{ color: 'var(--c-text-muted)', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>{incident.kind}</span>
                     </div>
-                    <p style={{ margin: '8px 0 0', color: 'var(--c-text)', fontSize: 'var(--fs-13)', lineHeight: 1.5 }}>{incident.message}</p>
+                    <p style={{ margin: '8px 0 0', color: 'var(--c-text)', fontSize: 'var(--fs-13)', lineHeight: 1.5, overflowWrap: 'anywhere' }}>{incident.message}</p>
                     <p style={{ margin: '4px 0 0', color: 'var(--c-text-muted-sm)', fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>
                       {incident.id}
                     </p>
                   </div>
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    style={{ flex: '0 0 auto' }}
+                    className="btn btn-primary incident-action"
                     onClick={() => onResolve(incident)}
                     disabled={resolvingId === incident.id}
                   >

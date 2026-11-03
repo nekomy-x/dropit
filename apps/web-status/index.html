@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Service status — DROP IT</title>
+    <meta
+      name="description"
+      content="Current state of the DROP IT services: club panel, DJ console, API, music requests, guest entry and payments."
+    />
+    <!-- Static page: no bundler, no build step, no external requests. The
+         stylesheet carries the product tokens as plain custom properties, and
+         the script reads /v1/status/services. -->
+    <link rel="stylesheet" href="status.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#checks">Skip to service checks</a>
+
+    <main class="page">
+      <header class="head">
+        <p class="brand">
+          <span class="brand-name">DROP IT</span>
+          <span class="brand-divider" aria-hidden="true"></span>
+          <span class="brand-sub">Status</span>
+        </p>
+        <button type="button" class="refresh" id="refresh">
+          <span class="refresh-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13.3 6.7A5.5 5.5 0 1 0 13 10" />
+              <path d="M13.5 3v4h-4" />
+            </svg>
+          </span>
+          <span id="refresh-label">Refresh</span>
+        </button>
+      </header>
+
+      <div class="summary">
+        <div class="summary-line">
+          <h1 class="title">Service status</h1>
+          <p class="pill" id="overall" role="status" aria-live="polite" data-state="unknown">
+            <span class="pill-dot" aria-hidden="true"></span>
+            <span id="overall-text">Checking…</span>
+          </p>
+        </div>
+        <p class="checked" id="checked">Loading the status…</p>
+      </div>
+
+      <div class="banner" id="banner" role="alert" hidden>
+        <p class="banner-text" id="banner-text"></p>
+        <button type="button" class="retry" id="retry">Try again</button>
+      </div>
+
+      <div class="groups" id="checks" aria-busy="true">
+        <p class="loading" id="loading">Loading status…</p>
+      </div>
+
+      <noscript>
+        <p class="banner">
+          This page reads the status endpoint with JavaScript, so without it the
+          current state cannot be shown. The API itself is unaffected.
+        </p>
+      </noscript>
+
+      <section class="legend" aria-labelledby="legend-title">
+        <h2 class="group-title" id="legend-title">What the states mean</h2>
+        <ul class="legend-list">
+          <li class="legend-item">
+            <span class="dot" data-state="ok" aria-hidden="true"></span>
+            <span class="legend-word">Operational</span>
+            <span class="legend-detail">Working as expected.</span>
+          </li>
+          <li class="legend-item">
+            <span class="dot" data-state="degraded" aria-hidden="true"></span>
+            <span class="legend-word">Degraded</span>
+            <span class="legend-detail">Working, but slower or with retries.</span>
+          </li>
+          <li class="legend-item">
+            <span class="dot" data-state="down" aria-hidden="true"></span>
+            <span class="legend-word">Down</span>
+            <span class="legend-detail">Not working. Requests fail or are refused.</span>
+          </li>
+          <li class="legend-item">
+            <span class="dot" data-state="unknown" aria-hidden="true"></span>
+            <span class="legend-word">Unknown</span>
+            <span class="legend-detail">The check could not determine a state.</span>
+          </li>
+        </ul>
+      </section>
+
+      <p class="foot-note" id="foot-note">Refreshes every 30 seconds while this tab is visible.</p>
+    </main>
+
+    <script src="status.js" defer></script>
+  </body>
+</html>

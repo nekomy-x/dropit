@@ -7,19 +7,14 @@
        apps/web-club/src/styles/auth.css
        apps/web-admin/src/styles/auth.css
 
-   Two skins, one language
-   -----------------------
-   The auth screens are two jobs, so they get two layouts rather than one layout
-   with two modes:
-
-     A. `.auth-screen` — signing in. Someone who already has an account and
-        wants the room. One narrow card, two fields, one action, recovery links
-        underneath. Nothing to read.
-
-     B. `.auth-wizard` — creating an account or resetting a password. Someone
-        who needs orientation. A step rail that says where they are and what is
-        left, the form beside it, and the honest limits of the stand spelled out
-        once instead of in a banner above the form.
+   One skin, one column
+   --------------------
+   Every auth screen is one narrow card: brand, title, the form, the links out.
+   Sign-in, the club application, invitation activation and password recovery are
+   different jobs on paper, but they are all "fill this in, then get to the
+   work", and a rail beside the form made the account screens look like a
+   different product from the sign-in the same person just used. A flow that has
+   two steps states the position inside the card and nowhere else.
 
    Everything here reads `--c-*` / `--r-*` / `--fs-*` from tokens.css: no raw
    colour, radius or font size. Radii stay on the four-value scale (16 / 12 / 10
@@ -94,31 +89,72 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
 }
 /* Auth fields are boxes, not underlines.
    `panel.css` draws a product field as a bottom rule with no frame (right for a
-   dense table). An auth screen holds two fields and nothing else, where the same
-   rule reads as an empty divider. The kit's own rule is `.field-input.auth-input`,
-   so these selectors carry three classes and win on specificity — the files are
-   bundled in a different order per app, so cascade order is not a contract. */
-.auth-screen .field-input.auth-input,
-.auth-wizard .field-input.auth-input {
+   dense table). An auth screen holds a short form and nothing else, where the
+   same rule reads as an empty divider. The kit's own rule is
+   `.field-input.auth-input`, so these selectors carry three classes and win on
+   specificity — the files are bundled in a different order per app, so cascade
+   order is not a contract. */
+.auth-screen .field-input.auth-input {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--c-hairline);
   border-radius: var(--r-control);
   background: var(--c-inset);
 }
-.auth-screen .field-input.auth-input:hover,
-.auth-wizard .field-input.auth-input:hover {
+.auth-screen .field-input.auth-input:hover {
   border-color: var(--c-hairline-strong);
 }
-.auth-screen .field-input.auth-input:focus,
-.auth-wizard .field-input.auth-input:focus {
+.auth-screen .field-input.auth-input:focus {
   border-color: var(--c-accent);
   outline: 2px solid var(--c-accent);
   outline-offset: 0;
   box-shadow: none;
 }
-.auth-screen .auth-password .field-input.auth-input,
-.auth-wizard .auth-password .field-input.auth-input { padding-right: 44px; }
+.auth-screen .auth-password .field-input.auth-input { padding-right: 44px; }
+
+/* Supporting line: the token-mode note, the DJ way in on the application
+   screen. Never a caption under every field — only where the form cannot say
+   the fact itself. */
+.auth-hint {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+}
+.auth-aside {
+  margin: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+/* Read-only rows of an approved application: label left, value right, one
+   hairline between rows. Not inputs: nothing on an invitation is editable
+   except the password below it. */
+.auth-summary {
+  display: grid;
+  margin: 0;
+  border-top: 1px solid var(--c-hairline-row);
+}
+.auth-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--c-hairline-row);
+}
+.auth-summary-label {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+.auth-summary-value {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 
 /* Password reveal: the field keeps its full width, the button floats inside
    the right padding so nothing shifts when it appears. */
@@ -168,13 +204,25 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
 .auth-alert-title { font-weight: 600; }
 .auth-alert-text { display: block; margin-top: 2px; color: inherit; opacity: .85; }
 
-/* Recovery and role links: text buttons, 44px targets on touch. */
+/* Recovery and role links: text buttons, 44px targets on touch.
+   The row is mounted outside `.auth-card-body`, so it carries the body's own
+   16px gap itself; without it the links touch the primary button above them. */
 .auth-links {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 16px;
-  margin-top: 4px;
+  margin-top: 20px;
+}
+/* A row inside the form is one step below the signature button: the form's
+   own 16px gap already separates it, so only the extra 4px is added. */
+.auth-form .auth-links { margin-top: 4px; }
+/* The lead-in ("Already have an account?") takes its own line, so the links
+   below it stay one scannable row instead of trailing the sentence. */
+.auth-links-lead {
+  flex: 1 0 100%;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
 }
 .auth-link {
   display: inline-flex;
@@ -194,12 +242,6 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
 .auth-link:hover { color: var(--c-text); text-decoration: underline; text-underline-offset: 2px; }
 .auth-link-muted { color: var(--c-text-2); }
 
-.auth-foot {
-  margin: 18px 0 0;
-  color: var(--c-text-muted);
-  font-size: var(--fs-12);
-  line-height: 1.5;
-}
 .auth-foot-sep { margin: 0 6px; color: var(--c-text-muted-sm); }
 /* A secondary link that may drop out on a narrow screen: the brand lockup
    already leads home, so on a phone the footer keeps one line. Only the link is
@@ -237,15 +279,18 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
 }
 
 /* ---------------------------------------------------------------------------
-   Skin A — sign in
-   One narrow card, centred. The only decoration is the brand lockup.
+   The card
+   One narrow card, centred. The only decoration is the brand lockup. The top
+   padding clears the fixed corner cluster (pill + theme toggle), so a card that
+   grows taller than the viewport — open registration on a laptop — starts below
+   it instead of underneath it.
    ------------------------------------------------------------------------ */
 .auth-screen {
   position: relative;
   display: grid;
   min-height: 100dvh;
   place-items: center;
-  padding: 32px 16px;
+  padding: 72px 16px;
   background: var(--c-canvas);
   color: var(--c-text);
   font-family: var(--font-sans);
@@ -269,7 +314,6 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
   box-shadow: var(--c-panel-shadow);
 }
 .auth-card-brand { margin-bottom: 20px; }
-.auth-card .auth-form { margin-top: 20px; }
 .auth-card-foot {
   margin: 18px 0 0;
   padding-top: 16px;
@@ -280,221 +324,15 @@ a.auth-brand:hover .auth-brand-role { color: var(--c-text-2); }
 }
 
 /* ---------------------------------------------------------------------------
-   Skin B — create an account / reset a password
-   A step rail beside the form on desktop, a compact header above it on touch.
+   Auth rhythm
+   The card is one column: brand, head, the blocks of the form, then the ways
+   out. Spacing is owned by the body wrapper so a screen that adds an alert or a
+   second step does not also have to add margins.
    ------------------------------------------------------------------------ */
-.auth-wizard {
+.auth-card-body {
   display: grid;
-  min-height: 100dvh;
-  background: var(--c-canvas);
-  color: var(--c-text);
-  font-family: var(--font-sans);
-  font-size: var(--fs-13);
-  line-height: var(--lh-text);
-  /* The deployment strip is mounted once at the app root and sits on the
-     bottom edge; without this the last link of the last step rendered under
-     it. Keyed on the attribute the component writes, so a normal install is
-     untouched. */
-}
-html[data-deployment-bar] .auth-wizard {
-  padding-bottom: calc(max(var(--deployment-bar-h), var(--deployment-bar-pad, 0px)) + env(safe-area-inset-bottom));
-}
-.auth-wizard-top {
-  position: fixed;
-  z-index: 2;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.auth-aside {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  padding: 32px 28px;
-  background: var(--c-rail);
-}
-.auth-aside-fill { flex: 1; }
-
-.auth-steps {
-  display: grid;
-  gap: 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.auth-step {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-}
-.auth-step-mark {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: var(--r-chip);
-  background: var(--c-raised);
-  color: var(--c-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  font-weight: 600;
-  line-height: 1;
-}
-.auth-step.is-current .auth-step-mark { background: var(--c-accent); color: var(--c-ink-on-accent); }
-.auth-step.is-done .auth-step-mark { background: var(--c-accent-tint-strong); color: var(--c-accent-quiet); }
-.auth-step-title {
-  display: block;
-  color: var(--c-text-2);
-  font-size: var(--fs-13);
-  font-weight: 500;
-  line-height: 1.35;
-}
-.auth-step.is-current .auth-step-title { color: var(--c-text); font-weight: 600; }
-.auth-step-note {
-  display: block;
-  margin-top: 1px;
-  color: var(--c-text-muted-sm);
-  font-size: var(--fs-11);
-  line-height: 1.5;
-}
-
-.auth-facts {
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding-top: 20px;
-  border-top: 1px solid var(--c-hairline);
-}
-.auth-fact { display: grid; gap: 1px; }
-.auth-fact dt {
-  color: var(--c-text-muted-sm);
-  font-size: var(--fs-11);
-}
-.auth-fact dd {
-  margin: 0;
-  color: var(--c-text-2);
-  font-size: var(--fs-12);
-  line-height: 1.5;
-}
-
-.auth-main {
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  padding: 32px 24px 48px;
-}
-/* One measure for every auth form: the sign-in card is 404px, so a
-   registration or recovery step is not a second, wider product. */
-.auth-wizard-card { width: min(440px, 100%); }
-.auth-wizard-card .auth-head { margin-bottom: 20px; }
-.auth-wizard-card .auth-form { margin-top: 20px; }
-
-/* Role choice on the register screen: a radio the label wraps, so the tile is
-   one keyboard- and pointer-target and focus stays visible. */
-.auth-choice-grid {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.auth-choice {
-  display: flex;
-  width: 100%;
-  padding: 12px;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  flex-direction: column;
-  gap: 2px;
-  padding: 12px;
-  border-radius: var(--r-tile);
-  /* A tile is a surface: on the light canvas `--c-raised` is within 1% of the
-     page, so the tile read as nothing at all. Surface + shadow is the same
-     separation the panels use. */
-  background: var(--c-surface);
-  box-shadow: var(--c-panel-shadow);
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.auth-choice:hover { background: var(--c-raised); }
-.auth-choice:focus-within { outline: 2px solid var(--c-accent); outline-offset: 2px; }
-.auth-choice.is-selected { background: var(--c-accent-tint-strong); }
-.auth-choice-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.auth-choice-title {
-  color: var(--c-text);
-  font-size: var(--fs-13);
-  font-weight: 600;
-}
-.auth-choice-note {
-  color: var(--c-text-muted-sm);
-  font-size: var(--fs-11);
-  line-height: 1.45;
-}
-.auth-choice-mark {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border: 1px solid var(--c-text-muted);
-  border-radius: var(--r-chip);
-}
-.auth-choice.is-selected .auth-choice-mark {
-  border-color: var(--c-accent);
-  background: var(--c-accent);
-}
-
-/* The generated demo identity: a small definition list, selectable so a
-   password can be copied instead of retyped. */
-.auth-identity {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 10px 12px;
-  border-radius: var(--r-tile);
-  background: var(--c-inset);
-}
-.auth-identity-row {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  gap: 10px;
-  padding: 3px 0;
-}
-.auth-identity-row dt {
-  color: var(--c-text-muted-sm);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-}
-.auth-identity-row dd {
-  margin: 0;
-  color: var(--c-text-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-11);
-  overflow-wrap: anywhere;
-  user-select: all;
-}
-
-/* Divider between the one-click path and the manual form. */
-.auth-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--c-text-muted-sm);
-  font-size: var(--fs-11);
-}
-.auth-divider::before,
-.auth-divider::after {
-  height: 1px;
-  flex: 1;
-  background: var(--c-hairline);
-  content: '';
+  gap: 16px;
+  margin-top: 20px;
 }
 
 /* Six-digit code: one input per digit, so paste and backspace behave. Like
@@ -523,73 +361,26 @@ html[data-deployment-bar] .auth-wizard {
 /* Focus is the caret plus the accent rule — same rule as every other field. */
 .auth-otp-input:focus { outline: none; border-bottom-color: var(--c-accent); }
 
-/* Progress rail shown instead of the step list below the desktop breakpoint. */
-.auth-progress {
-  display: none;
-  gap: 4px;
-  width: 100%;
-  margin-bottom: 14px;
-}
-.auth-progress-seg {
-  height: 3px;
-  flex: 1;
-  border-radius: var(--r-chip);
-  background: var(--c-raised);
-}
-.auth-progress-seg.is-done { background: var(--c-accent); }
-
 /* --- responsive ----------------------------------------------------------- */
-@media (min-width: 1024px) {
-  .auth-wizard {
-    grid-template-columns: 320px minmax(0, 1fr);
-    /* One full-height row, so the rail's surface reaches the bottom edge
-       instead of stopping under its own content. */
-    grid-template-rows: minmax(100dvh, auto);
-    align-content: stretch;
-  }
-  .auth-aside { border-right: 1px solid var(--c-hairline); }
-  /* Start at the top: the step rail is read from the top-left, so a vertically
-     centred form made the two halves disagree about where the page begins. */
-  .auth-main { align-content: start; padding: 88px 40px 56px; }
-}
-
+/* The card stays centred at every width; below 1024px only the page padding
+   and the title step down, because the card has to sit on a phone screen. */
 @media (max-width: 1023px) {
-  /* Rows sized by their content: a stretched row left a dead band above the
-     form on a phone. */
-  .auth-wizard { align-content: start; }
-  .auth-aside {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 14px;
-    padding: 16px;
-    border-bottom: 1px solid var(--c-hairline);
-  }
-  .auth-aside-fill,
-  .auth-steps,
-  .auth-facts { display: none; }
-  .auth-progress { display: flex; }
-  .auth-main { align-content: start; padding: 24px 16px 40px; }
-  .auth-wizard-card .auth-head { margin-bottom: 16px; }
   .auth-title { font-size: var(--fs-20); }
-  /* The compact header carries the progress rail, and it is only there to say
-     where the person is: 6px above the rule, never a band of its own. */
-  .auth-progress { margin-bottom: 18px; }
-  .auth-wizard-card .auth-form { margin-top: 16px; }
 }
 
 @media (max-width: 640px) {
-  .auth-screen-top,
-  .auth-wizard-top { top: 12px; right: 12px; }
+  .auth-screen { padding: 60px var(--page-gutter-mobile); }
+  .auth-screen-top { top: 12px; right: 12px; }
   /* The lockup is a link home; give it a thumb target on touch. */
   a.auth-brand { min-height: var(--hit-mobile); }
-  .auth-card { padding: 18px; }
+  .auth-card { padding: var(--sp-4); }
+  .auth-card-body { gap: 14px; margin-top: 16px; }
+  .auth-head { margin-bottom: 16px; }
   .auth-input { height: var(--hit-mobile); }
   .auth-reveal { width: var(--hit-mobile); height: var(--hit-mobile); right: 0; }
   .auth-password .auth-input { padding-right: 48px; }
   .auth-switch-item { height: var(--hit-mobile); min-width: var(--hit-mobile); }
   .auth-link { min-height: var(--hit-mobile); }
-  .auth-choice { padding: 12px; }
   .auth-otp { gap: 6px; }
   .auth-otp-input { height: 48px; }
 }
@@ -597,8 +388,7 @@ html[data-deployment-bar] .auth-wizard {
 @media (prefers-reduced-motion: reduce) {
   .auth-link,
   .auth-reveal,
-  .auth-switch-item,
-  .auth-choice { transition-duration: 1ms; }
+  .auth-switch-item { transition-duration: 1ms; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -608,7 +398,6 @@ html[data-deployment-bar] .auth-wizard {
    (see the caret block in `panel.css`).
    ------------------------------------------------------------------------ */
 .auth-switch-item:focus-visible,
-.auth-choice:focus-visible,
 .auth-link:focus-visible,
 .auth-reveal:focus-visible {
   outline: 2px solid var(--c-accent);
@@ -619,13 +408,144 @@ html[data-deployment-bar] .auth-wizard {
    Disabled primary on an auth screen
    `panel.css` drops a disabled primary to the neutral surface, which is right in
    a dense toolbar but leaves an auth form with a button that looks like a
-   caption on the light canvas. On these two screens the disabled primary keeps
+   caption on the light canvas. On the auth screens the disabled primary keeps
    the accent tint and its dark accent label: still obviously a control, still
    obviously not yet available. Scoped to `.auth-*` so panel buttons keep the
    behaviour the rest of the product documents.
    ------------------------------------------------------------------------ */
-.auth-screen .btn-primary:disabled,
-.auth-wizard .btn-primary:disabled {
+.auth-screen .btn-primary:disabled {
   background: var(--c-accent-tint);
   color: var(--c-accent-quiet);
+}
+
+/* ---------------------------------------------------------------------------
+   Split skin — the club application
+   ---------------------------------------------------------------------------
+   One screen (the club application) carries a photograph beside the form: it is
+   the only public screen where the person has not used the product yet, and the
+   copy next to the fields says what the club is applying for. Every other auth
+   screen keeps the single centred card — a rail beside a sign-in form made the
+   account screens look like a different product from the sign-in the same person
+   just used (see the header of this file).
+
+   The photograph is a real night room (`public/apply-aside.jpg`, derived from the
+   product's own club photo), the scrim is one solid `--c-media-scrim`, and the
+   panel is dark in both themes: a photo does not have a light twin. Below 1100px
+   the column is not rendered at all — a phone keeps the same centred card, brand
+   lockup included.
+   ------------------------------------------------------------------------ */
+.auth-media { display: none; }
+
+@media (min-width: 1100px) {
+  .auth-screen-split {
+    grid-template-columns: minmax(0, 46fr) minmax(560px, 54fr);
+    place-items: stretch;
+    padding: 0;
+  }
+  .auth-screen-split .auth-media {
+    display: grid;
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .auth-screen-split .auth-card {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    justify-self: center;
+    margin: 72px 32px;
+  }
+  /* The lockup lives on the photograph on this layout: one brand per screen. */
+  .auth-screen-split .auth-card-brand { display: none; }
+}
+
+/* The photograph column: opaque base under the image so the panel reads dark
+   while the JPEG is still decoding, and so the contrast of the copy does not
+   depend on that frame. */
+.auth-media {
+  position: relative;
+  min-height: 100dvh;
+  padding: 40px 44px 44px;
+  overflow: hidden;
+  background-color: var(--c-media-base);
+  background-image: url('/apply-aside.jpg');
+  background-position: center;
+  background-size: cover;
+  color: var(--c-media-text);
+}
+.auth-media::before {
+  position: absolute;
+  inset: 0;
+  background: var(--c-media-scrim);
+  content: '';
+}
+.auth-media-inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 64px;
+  min-height: 0;
+}
+
+/* The lockup on the photo: same brand component, media tokens. The bars stay
+   the neon green the mark is drawn with in every theme. */
+.auth-media .auth-brand { color: var(--c-media-text); min-height: 28px; }
+.auth-media .auth-brand-role {
+  border-left-color: var(--c-media-hairline);
+  color: var(--c-media-text-2);
+}
+.auth-media .brand-logo { color: var(--c-media-text); }
+.auth-media .brand-logo-letters { fill: var(--c-media-text); }
+.auth-media .brand-logo-stop-a,
+.auth-media .brand-logo-stop-b { stop-color: var(--c-media-accent); }
+.auth-media a.auth-brand:focus-visible {
+  outline: 2px solid var(--c-media-accent);
+  outline-offset: 3px;
+}
+
+/* Bottom block: one statement, then the three steps of the product. The steps
+   are a numbered list because they are a sequence, not a feature grid. */
+.auth-media-copy {
+  display: grid;
+  gap: 20px;
+  max-width: 36ch;
+}
+.auth-media-title {
+  margin: 0;
+  color: var(--c-media-text);
+  font-size: var(--fs-28);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+}
+.auth-media-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--c-media-hairline);
+  list-style: none;
+}
+.auth-media-step {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--c-media-hairline);
+  color: var(--c-media-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.45;
+}
+/* The step number is a list index, not an ID or a timestamp — the mono face is
+   reserved for those (DESIGN.md), so it stays on the sans stack with tabular
+   figures. */
+.auth-media-step-index {
+  padding-top: 1px;
+  color: var(--c-media-accent);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
 }

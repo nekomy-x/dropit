@@ -38,7 +38,7 @@ dc_die()  { dc_err "$*"; exit 1; }
 
 # Source deploy/prod/.env.local if present. It is a plain KEY=value bash file.
 dc_load_local_env() {
-  local f=${1:-$DC_PROD_DIR/.env.local}
+  local f=${1:-${DROPIT_DEPLOY_ENV:-$DC_PROD_DIR/.env.local}}
   if [ -f "$f" ]; then
     set -a
     # shellcheck disable=SC1090

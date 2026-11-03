@@ -58,7 +58,7 @@ export default function DjsPage() {
           </header>
 
           <div className="table-wrap">
-            <table className="data-table" style={{ minWidth: 720 }}>
+            <table className="data-table data-table--stack" style={{ minWidth: 720 }}>
               <thead>
                 <tr>
                   <th scope="col">{t('djs.colDj')}</th>
@@ -70,15 +70,15 @@ export default function DjsPage() {
               <tbody>
                 {data.items.map((dj) => (
                   <tr key={dj.id}>
-                    <td className="is-strong">
+                    <td data-label="" className="cell-primary">
                       <span style={{ display: 'block' }}>{dj.displayName}</span>
-                      <span style={{ color: 'var(--c-text-muted-sm)', fontSize: 'var(--fs-11)' }}>{dj.email}</span>
+                      <span style={{ display: 'block', color: 'var(--c-text-muted-sm)', fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>{dj.email}</span>
                     </td>
-                    <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>
+                    <td data-label={t('djs.colClub')} className="is-mono" style={{ color: 'var(--c-text-muted)', overflowWrap: 'anywhere' }}>
                       {dj.clubId ?? t('djs.unassigned')}
                     </td>
-                    <td><StatusBadge status={dj.stripeOnboardingStatus} /></td>
-                    <td><StatusBadge status={dj.status} /></td>
+                    <td data-label={t('djs.colStripe')}><StatusBadge status={dj.stripeOnboardingStatus} /></td>
+                    <td data-label={t('djs.colStatus')}><StatusBadge status={dj.status} /></td>
                   </tr>
                 ))}
               </tbody>

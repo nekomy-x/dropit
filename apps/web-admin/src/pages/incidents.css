@@ -1,0 +1,24 @@
+/* Incidents — one card of unresolved issues, each with its one action.
+ *
+ * The row is a sentence and a button. On the desktop the button sits at the end
+ * of the sentence, which reads as "here is the problem, here is the fix". On a
+ * phone that same row gave the button ~100px of a 288px card and wrapped the
+ * message every three words, so the row stacks: the message keeps the full
+ * width and the action becomes a full-width thumb target underneath it. Tokens
+ * only; the row, button and typography come from the shared panel kit.
+ *
+ * The selector is doubled (`.list-row.incident-row`) so these rules hold no
+ * matter which stylesheet is injected first.
+ */
+.list-row.incident-row { align-items: flex-start; }
+
+@media (max-width: 640px) {
+  .list-row.incident-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .list-row.incident-row .incident-action {
+    width: 100%;
+    justify-content: center;
+  }
+}

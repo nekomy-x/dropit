@@ -1,0 +1,829 @@
+/* Developers — page-local styles for keys, reference and guides.
+   Tokens only (`var(--c-*)`, `var(--r-*)`, `var(--fs-*)`, `var(--sp-*)`); the
+   page reuses `.panel` / `.btn-*` / `.field-*` / `.data-table` / `.seg` / `.chip`
+   from the shared kit. Nothing here introduces a colour, a radius or a size that
+   the token layer does not define. */
+
+/* --- tabs ----------------------------------------------------------------- */
+/* `.seg` is the shared segmented control; the tab row only needs to scroll on a
+   phone instead of pushing the page wide. */
+.dev-tabs {
+  margin-bottom: var(--sp-4);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* --- keys toolbar and table ----------------------------------------------- */
+/* The panel head is title + detail on the left and the actions on the right.
+   Below the tablet breakpoint the detail would wrap into a narrow column beside
+   the buttons, so the head stacks: the sentence keeps the full width and the
+   toolbar becomes a row of its own. */
+@media (max-width: 900px) {
+  .dev-panel .club-panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-3);
+  }
+  .dev-panel .club-panel-actions { flex: 0 1 auto; }
+}
+
+.dev-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* On a phone the two actions share one row instead of stacking into two. */
+@media (max-width: 560px) {
+  .dev-toolbar { gap: var(--sp-1); }
+  .dev-toolbar .btn { flex: 0 1 auto; }
+}
+
+/* The name column owns the width it needs and truncates instead of wrapping
+   character by character: a key called "Smoke docs key" must stay one line and
+   its full value stays reachable through `title`. */
+.dev-key-name {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--c-text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-cell-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+
+.dev-prefix {
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+/* The prefix is a value, and its copy control sits beside it: an icon button,
+   not a second sentence repeating the key name in every row. The control keeps
+   the shell's own hit sizes (32px here, 44px at touch widths). */
+.dev-prefix-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.dev-scopes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.dev-scope-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  /* The chrome of the row belongs to the row; the ids are the content. */
+  padding-left: 8px;
+}
+
+.dev-scope-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-row-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* Revoking is destructive, so its icon carries the error colour at rest and
+   the same tint on hover the text button used. */
+.dev-icon-danger:not(:disabled) { color: var(--c-error); }
+.dev-icon-danger:not(:disabled):hover { background: var(--c-error-tint); color: var(--c-error); }
+.dev-icon-danger:disabled { opacity: .45; cursor: not-allowed; }
+
+.dev-keys-table th:last-child,
+.dev-keys-table td:last-child { width: 1%; white-space: nowrap; }
+
+/* Column budget: a fixed layout, so the table can be exactly as wide as the
+   panel at every window size. With `table-layout: auto` the browser treats a
+   Russian header like "Последнее использование" as a minimum width, the columns
+   sum to more than the panel and the last action button is clipped behind the
+   table's own horizontal scroll. Here the name column takes what is left and
+   truncates, every machine column has a stated width, and nothing can push the
+   table wider than its container. */
+.dev-keys-table { table-layout: fixed; width: 100%; }
+.dev-keys-table th { white-space: normal; }
+/* Proportions, not pixels: at a 1024 content width the fixed pixel budget left
+   the name column empty and the table airy; percentages rebalance with the
+   panel, while the date column keeps enough room for the longest locale. */
+.dev-keys-table th:nth-child(1) { width: 30%; }
+.dev-keys-table th:nth-child(2) { width: 13%; }
+.dev-keys-table th:nth-child(3) { width: 9%; }
+.dev-keys-table th:nth-child(4) { width: 10%; }
+.dev-keys-table th:nth-child(5) { width: 9%; }
+.dev-keys-table th:nth-child(6) { width: 17%; }
+.dev-keys-table th:nth-child(7) { width: 12%; }
+.dev-keys-table td { overflow-wrap: anywhere; }
+.dev-keys-table td:nth-child(2),
+.dev-keys-table td:nth-child(3),
+.dev-keys-table td:nth-child(4),
+.dev-keys-table td:nth-child(5),
+.dev-keys-table td:nth-child(6),
+.dev-keys-table td:nth-child(7) { white-space: nowrap; }
+.dev-keys-table th:last-child,
+.dev-keys-table td:last-child { padding-right: 0; }
+
+/* Table rows are denser than a toolbar: 28px icon controls and 8px gutters
+   keep seven columns inside a 1280 window. Only from 721px — below that the
+   shared 44px touch rule has to win, and these selectors are more specific. */
+@media (min-width: 721px) {
+  .dev-row-actions .panel-icon-button { width: 28px; height: 28px; }
+  .dev-keys-table th,
+  .dev-keys-table td { padding-left: 8px; padding-right: 8px; }
+  .dev-keys-table th:last-child,
+  .dev-keys-table td:last-child { padding-right: 0; }
+}
+
+.dev-keys-table tr.is-open td { background: transparent; }
+
+/* An expanded row keeps its own surface, and the scope row under it shares it,
+   so the detail reads as part of the row rather than as a block dropped under
+   the table. */
+.dev-keys-table tbody tr.is-open { background: var(--c-inset); }
+.dev-keys-table tbody tr.is-open td { border-bottom: 0; }
+.dev-keys-scope-row td {
+  padding: var(--sp-2) 0 var(--sp-3);
+  background: var(--c-inset);
+  border-bottom: 1px solid var(--c-hairline-row);
+  white-space: normal;
+}
+
+.dev-hint {
+  margin: var(--sp-3) 0 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
+
+/* --- create dialog -------------------------------------------------------- */
+.dev-form {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.dev-scopes {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dev-scope-group { margin-top: var(--sp-4); }
+
+.dev-scope-origin {
+  margin-top: var(--sp-2);
+  color: var(--c-text-muted);
+}
+
+/* A checklist group label, not an eyebrow: normal case (repeated uppercase
+   letter-spaced labels are the pattern docs/ui/PANEL-DESIGN.md rules out) and
+   one step above the hint it follows. */
+.dev-scope-group-title {
+  margin: 0 0 var(--sp-2);
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+}
+
+.dev-scope-options {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+/* A scope row is a label with a checkbox, so the whole row is the hit target. */
+.dev-scope-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-tile);
+  cursor: pointer;
+}
+
+.dev-scope-option:hover { background: var(--c-inset); }
+.dev-scope-option.is-checked { background: var(--c-accent-tint); }
+
+.dev-scope-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.dev-scope-title {
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.dev-scope-id {
+  color: var(--c-text-muted-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-scope-desc {
+  margin-top: 2px;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: 1.45;
+}
+
+.dev-scope-risk { align-self: start; }
+
+.dev-advanced {
+  border-top: 1px solid var(--c-hairline);
+  padding-top: var(--sp-4);
+}
+
+.dev-advanced-summary {
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dev-advanced-summary:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-mark);
+}
+
+.dev-advanced-body {
+  display: grid;
+  gap: var(--sp-4);
+  margin-top: var(--sp-4);
+}
+
+.dev-advanced-wide { grid-column: 1 / -1; }
+
+/* --- secret reveal -------------------------------------------------------- */
+.dev-secret {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-tile);
+  background: var(--c-inset);
+}
+
+.dev-secret-value {
+  flex: 1 1 260px;
+  min-width: 0;
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.dev-dialog-body {
+  margin: 0;
+  color: var(--c-text-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+
+/* --- usage ---------------------------------------------------------------- */
+.dev-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+}
+
+.dev-summary dt {
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+.dev-summary dd {
+  margin: 2px 0 0;
+  color: var(--c-text);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.dev-summary dd.dev-summary-date {
+  font-size: var(--fs-13);
+  font-weight: 500;
+  font-variant-numeric: normal;
+}
+
+.dev-method {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+
+.dev-usage-table .is-mono {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* --- reference ------------------------------------------------------------ */
+.dev-ref-meta {
+  margin: 0 0 var(--sp-4);
+  color: var(--c-text-muted);
+  font-size: var(--fs-12);
+}
+
+.dev-ref-meta-sep { margin: 0 var(--sp-1); }
+
+.dev-ref-section + .dev-ref-section { margin-top: var(--sp-5); }
+
+.dev-ref-section-title {
+  margin: 0 0 var(--sp-2);
+  color: var(--c-text);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.dev-ref-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dev-op { border-top: 1px solid var(--c-hairline-row); }
+
+.dev-op-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+  cursor: pointer;
+}
+
+.dev-op-summary:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-mark);
+}
+
+.dev-op-path {
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+
+.dev-op-title {
+  min-width: 0;
+  flex: 1 1 240px;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.dev-op-scope {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-op-body {
+  display: grid;
+  gap: var(--sp-4);
+  padding: 0 0 var(--sp-4) var(--sp-5);
+}
+
+.dev-op-description {
+  margin: 0;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+  max-width: 82ch;
+}
+
+.dev-op-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.dev-op-label {
+  margin: 0 0 var(--sp-2);
+  color: var(--c-text-muted);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.dev-op-empty {
+  margin: 0;
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-12);
+}
+
+.dev-op-params,
+.dev-op-responses {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--c-text-2);
+  font-size: var(--fs-12);
+}
+
+.dev-op-params li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.dev-op-param-loc,
+.dev-op-param-type {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+}
+
+.dev-op-required {
+  color: var(--c-warn);
+  font-size: var(--fs-11);
+}
+
+.dev-op-responses li {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.dev-op-status {
+  min-width: 4ch;
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-op-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.dev-ref-copy-error {
+  margin: 0 0 var(--sp-3);
+  color: var(--c-error);
+  font-size: var(--fs-12);
+}
+
+/* --- guides --------------------------------------------------------------- */
+.dev-guides {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.dev-guides-nav ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dev-guides-link {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--r-tile);
+  background: transparent;
+  color: var(--c-text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dev-guides-link:hover { background: var(--c-inset); color: var(--c-text); }
+
+.dev-guides-link.is-active {
+  background: var(--c-accent-tint);
+  color: var(--c-text);
+}
+
+.dev-guides-link-title {
+  font-size: var(--fs-13);
+  font-weight: 500;
+}
+
+.dev-guides-link-summary {
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+
+.dev-guides-link-scope {
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-guides-body {
+  min-width: 0;
+}
+
+.dev-guides-title {
+  margin: 0 0 var(--sp-1);
+  color: var(--c-text);
+  font-size: var(--fs-20);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.dev-guides-summary {
+  margin: 0 0 var(--sp-4);
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+
+/* --- markdown ------------------------------------------------------------- */
+.dev-md {
+  max-width: 78ch;
+  color: var(--c-text-2);
+  font-size: var(--fs-13);
+  line-height: 1.6;
+}
+
+.dev-md > * + * { margin-top: var(--sp-3); }
+
+.dev-md-h {
+  color: var(--c-text);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.dev-md-h2 { margin-top: var(--sp-5); font-size: var(--fs-20); }
+.dev-md-h3 { margin-top: var(--sp-4); font-size: var(--fs-15); }
+.dev-md-h4 { margin-top: var(--sp-4); font-size: var(--fs-13); }
+
+.dev-md-p { margin: 0; }
+
+.dev-md-list {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.dev-md-quote {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--c-hairline-strong);
+  color: var(--c-text-2);
+}
+
+.dev-md-rule {
+  height: 1px;
+  margin: var(--sp-4) 0;
+  border: 0;
+  background: var(--c-hairline);
+}
+
+.dev-md-code-inline {
+  padding: 1px 5px;
+  border-radius: var(--r-mark);
+  background: var(--c-inset);
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  overflow-wrap: anywhere;
+}
+
+.dev-md a {
+  color: var(--c-accent-quiet);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dev-md a:hover { color: var(--c-accent); }
+
+.dev-md-pre {
+  border-radius: var(--r-tile);
+  background: var(--c-inset);
+  overflow: hidden;
+}
+
+.dev-md-pre-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) var(--sp-3);
+}
+
+.dev-md-pre-lang {
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.dev-md-pre-body {
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-3);
+  overflow-x: auto;
+  color: var(--c-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.55;
+}
+
+.dev-md-pre-body code { white-space: pre; }
+
+.dev-md-pre-error {
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-2);
+  color: var(--c-error);
+  font-size: var(--fs-11);
+}
+
+/* A markdown table is a document, not a record list: stacking its cells would
+   destroy the column/row meaning the text depends on. It stays a real table and
+   scrolls sideways inside this wrapper instead. The scroller is focusable (a
+   keyboard user must be able to reach the overflow) and the arrow below it says
+   the table continues — shown only while it really does, measured by the
+   renderer. Tokens only; no fade, no shadow. */
+.dev-md-table-wrap { position: relative; }
+.dev-md-table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-hairline-strong) transparent;
+}
+.dev-md-table-scroll:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--r-mark);
+}
+.dev-md-table-hint {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--c-text-muted-sm);
+  font-size: var(--fs-11);
+  line-height: 1;
+  text-align: right;
+}
+
+.dev-md-table { font-size: var(--fs-12); }
+
+/* A document table is read column-wise, so it keeps a readable minimum instead
+   of squeezing three columns into 318px and breaking `requests:read` mid-word.
+   The wrapper scrolls sideways (with the hint above) on phones. */
+@media (max-width: 767px) {
+  .dev-md-table { min-width: 560px; }
+}
+
+/* --- responsive ----------------------------------------------------------- */
+@media (max-width: 960px) {
+  .dev-guides { grid-template-columns: minmax(0, 1fr); }
+  .dev-guides-nav ul {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(200px, 1fr);
+    overflow-x: auto;
+    padding-bottom: var(--sp-1);
+  }
+  .dev-op-columns { grid-template-columns: minmax(0, 1fr); }
+  .dev-op-body { padding-left: 0; }
+  .dev-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Seven columns need roughly 900px of table to stay readable. The rail takes
+   248px and the content padding 48px, so at a 1024–1100px window the table only
+   has ~730px: it would scroll sideways and hide the actions. Between 768px and
+   1100px each row becomes a labelled record here; below 768px the shared
+   `data-table--stack` block owns that same layout for every club table, so this
+   block stops at the shared breakpoint instead of competing with it. */
+@media (min-width: 768px) and (max-width: 1100px) {
+  /* Each row becomes a labelled record. */
+  .dev-keys-table,
+  .dev-keys-table tbody,
+  .dev-keys-table tr,
+  .dev-keys-table td {
+    display: block;
+    width: auto;
+  }
+  .dev-keys-table thead { display: none; }
+  .dev-keys-table tr {
+    padding: var(--sp-3) 0;
+    border-bottom: 1px solid var(--c-hairline-row);
+  }
+  .dev-keys-table tbody tr:hover td { background: transparent; }
+  .dev-keys-table td {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr);
+    justify-items: start;
+    align-content: start;
+    gap: 3px var(--sp-2);
+    padding: 3px 0;
+    border-bottom: 0;
+    text-align: left;
+  }
+  .dev-keys-table td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    grid-row: 1;
+    /* A column name may be longer than the label column ("Последнее
+       использование"): it wraps inside column 1 instead of running over the
+       value in column 2. */
+    min-width: 0;
+    color: var(--c-text-muted);
+    font-size: var(--fs-11);
+    font-weight: 500;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .dev-keys-table td > * { grid-column: 2; }
+  .dev-keys-table td:first-child {
+    display: block;
+    padding-top: 0;
+    padding-bottom: var(--sp-2);
+  }
+  .dev-keys-table td:first-child::before { content: none; }
+  .dev-key-name { max-width: none; white-space: normal; overflow: visible; }
+  .dev-keys-table th:nth-child(n),
+  .dev-keys-table td:nth-child(n) { min-width: 0; }
+  .dev-row-actions .panel-icon-button { width: var(--hit-mobile); height: var(--hit-mobile); }
+  .dev-keys-table td:last-child,
+  .dev-keys-table th:last-child { width: auto; white-space: normal; }
+  .dev-row-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .dev-keys-table tbody tr.is-open { background: transparent; }
+  .dev-keys-scope-row { display: block; padding: 0 0 var(--sp-3); }
+  .dev-keys-scope-row td { display: block; padding: 0; background: transparent; border-bottom: 0; }
+  .dev-keys-scope-row td::before { content: none; }
+  .dev-tabs { width: 100%; }
+  .dev-tabs .seg-item { flex: 1 1 0; }
+  .dev-toolbar { width: 100%; }
+}
+
+/* Phones — both developer tables stack through the shared contract. Only the
+   page's own cells need adjusting inside it: the name truncation becomes
+   wrapping, the nowrap columns are released, and the icon actions keep a
+   thumb-sized control. */
+@media (max-width: 767px) {
+  /* Scoped to the stacked tables themselves: the tab strip and the guide
+     markdown table on this page must not inherit these rules. */
+  .data-table--stack.dev-keys-table .dev-key-name {
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  /* Fixed-layout columns are gone in a stacked row, but their `nowrap` would
+     still push the wrapped value past the card. */
+  .data-table--stack.dev-keys-table td:nth-child(n) { white-space: normal; }
+  /* The desktop `width: 1%` on the action column is what keeps the grid tight;
+     in a stacked row it would squeeze the cell to a sliver and stack the three
+     icon controls vertically. */
+  .data-table--stack.dev-keys-table td:last-child,
+  .data-table--stack.dev-keys-table th:last-child { width: auto; }
+  .data-table--stack.dev-keys-table .dev-keys-scope-row { padding: 0 0 var(--sp-3); }
+  .data-table--stack.dev-keys-table .dev-keys-scope-row > td { padding: 0; }
+  .data-table--stack.dev-keys-table .dev-row-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: var(--sp-2);
+    padding-top: var(--sp-1);
+  }
+  .data-table--stack.dev-keys-table .dev-row-actions .panel-icon-button {
+    width: var(--hit-mobile);
+    height: var(--hit-mobile);
+  }
+  .data-table--stack.dev-keys-table .dev-prefix-row { flex-wrap: wrap; }
+}
+
+@media (max-width: 560px) {
+  .dev-summary { grid-template-columns: minmax(0, 1fr); }
+  .dev-op-summary { padding: var(--sp-2) 0; }
+  .dev-scope-option { grid-template-columns: auto minmax(0, 1fr); }
+  .dev-scope-risk { grid-column: 2; justify-self: start; }
+}

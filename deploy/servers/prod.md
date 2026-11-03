@@ -13,7 +13,7 @@ Server record for the DROP IT production host. Single source of truth for
 | Hardware | 1 vCPU, 956 MB RAM, 9.8 GB disk (~6.5 GB free) |
 | Role | **PROD**, currently running **Test Mode** |
 | Public surface | HTTP on `:80` only (no TLS yet — see "Known gaps") |
-| Stand URL | <http://150.241.68.57/> |
+| Stand URL | <http://150.241.68.57/> · status: <http://150.241.68.57/status/> |
 | Deployed by | `deploy/prod/deploy.sh` from the repo checkout |
 
 "PROD" here means the owner-designated production host. "Test Mode" means the
@@ -30,7 +30,7 @@ panels) is live against a real Postgres.
 |---|---|---|
 | `dropit-api` (axum gateway) | systemd `dropit-api.service`, `/srv/dropit/bin/dropit-api` | binds `127.0.0.1:8080` only |
 | `dropit-workers` (supervisor) | systemd `dropit-workers.service`, `/srv/dropit/bin/dropit-workers` | no listening port |
-| nginx | systemd `nginx.service` | public `:80`, reverse-proxies to the API |
+| nginx | systemd `nginx.service` | public `:80`, reverse-proxies to the API; serves `/status/` (public page) |
 | PostgreSQL 18 | systemd `postgresql.service`, cluster `18/main` | `127.0.0.1:5432`, unix socket `/var/run/postgresql` |
 | Redis 8 | systemd `redis-server.service` | `127.0.0.1:6379`, `MemoryMax=96M` |
 | chrony | systemd `chrony.service` | clock sync; webhook signature tolerance depends on it |
@@ -66,7 +66,8 @@ JVM/Node toolchain alongside Postgres.
 │   │                       (also owns /dj, /dj/login, /dj/invite/:token,
 │   │                        /connect, /login, /register — client-side routes)
 │   ├── admin/              admin SPA — Vite base '/admin/' -> nginx /admin/
-│   └── dj-mock/index.html  static DJ console PROTOTYPE  -> nginx /dj-mock/
+│   ├── dj-mock/index.html  static DJ console PROTOTYPE  -> nginx /dj-mock/
+│   └── status/             public service-status page   -> nginx /status/
 │                           (design mock, not the product surface)
 ├── etc/dropit.env          runtime env, secrets, 0600 dropit:dropit
 └── data/

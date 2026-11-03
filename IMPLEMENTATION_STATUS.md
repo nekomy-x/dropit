@@ -1,6 +1,6 @@
 # DROP IT — Статус реализации
 
-**Обновлено:** 2026-10-19
+**Обновлено:** 2026-10-28
 **Этап:** бэкенд доведён до плана за семь волн (W1–W7): инфра-крейты, воркеры,
 эндпоинты, WS multi-node, контракт, два прохода adversarial-ревью и закрытие
 11 критических дефектов (включая гонки confirm/выплат). Внешние
@@ -331,6 +331,91 @@ Q1–Q10 рабочие, значения — конфиги.
 
 ---
 
+## 7. Волна «веб → бэкенд» (2026-10-29)
+
+Проверка утверждения «весь функционал веб-версии реализован на бэкенде» и
+закрытие найденных пробелов. Аудит — `docs/audit/README.md` и три матрицы:
+`web-club-gaps.md`, `web-admin-gaps.md`, `web-status-gaps.md` (каждое
+утверждение с доказательством `файл:строка` с обеих сторон).
+
+Итог по коду: **140 путей / 156 операций**, OpenAPI совпадает с кодом
+(`openapi_contract` — 7/7), миграции `0001`–`0023` применяются с нуля.
+
+### 7.1 Что было пробелом и закрыто
+
+| Область | Новые маршруты |
+|---|---|
+| Онбординг клуба (был единственный `missing`) | `POST /v1/club/onboarding/apply`; `GET /v1/club/onboarding/invite/{token}`; `POST /v1/club/onboarding/invite/{token}/accept`; `GET /v1/admin/onboarding-applications`; `GET …/{id}`; `POST …/{id}/approve`; `POST …/{id}/reject`; `POST …/{id}/invite` |
+| Каталог пользователей | `GET/POST /v1/admin/users`; `GET/PATCH/DELETE /v1/admin/users/{id}`; `POST /v1/admin/users/bulk`; `GET /v1/admin/roles` |
+| Обзор и настройки | `GET /v1/admin/overview`; `GET /v1/admin/feature-flags`; `PATCH /v1/admin/feature-flags/{key}`; `GET /v1/admin/export` |
+| Админские мутации | `GET`/`DELETE /v1/admin/clubs/{id}`; `POST /v1/admin/djs`; `PATCH`/`DELETE /v1/admin/djs/{id}`; `POST /v1/admin/djs/{id}/restore`; `PATCH /v1/admin/guests/{id}` |
+| Деньги | `POST /v1/admin/payments/{id}/refund` (провайдер + пропорциональный реверс сплитов + ledger + outbox + аудит, идемпотентность) |
+| DJ-консоль | `GET /v1/dj/history`; `GET /v1/dj/stats/session`; `GET /v1/dj/invite/{token}` |
+
+Поля, которые UI уже читал, а API не отдавал: Stripe-статус клубов и DJ,
+`refunded_minor`/`failure_reason`/`captured_at`/`currency` платежей, `diff` и
+пагинация журнала аудита, `banned` гостя, `city`/`timezone`/`currency`/
+`created_at`/`stripe_account_id` профиля клуба, `timezone`/`dj_id`/
+`dj_display_name` открытой смены, `valid_from`/`valid_to` тарифа, `currency`
+доходов, `calls_30d` — теперь реально за 30 дней.
+
+Валидация вместо тихих дефолтов: мусорный `period` (earnings), `sort` (очередь
+DJ), `limit`/`cursor`, `role`/`status` каталога → `400 validation_error`;
+невалидная IANA-зона → `422 invalid_timezone`.
+
+### 7.2 Безопасность
+
+- `admin_user.role` больше не игнорируется: `readonly`-админ получает **403**
+  на всех новых мутациях (`rbac::require_admin_write`), чтение остаётся.
+  Матрица `/v1/admin/roles` честно помечает непокрытые ограничения как
+  `planned`.
+- Онбординг: пароль не задаёт никто, кроме владельца — approve создаёт клуб с
+  `password_hash='!'` и одноразовой ссылкой (128 бит, sha256 в БД, TTL 7 дней);
+  лимит 5 заявок/час на IP и 3 pending на контакт; идемпотентность по
+  `Idempotency-Key`.
+- Возврат платежа: только `captured`/`partially_refunded`, инварианты
+  `Σ reversed_minor == refund`, `Σ ledger(txn) == 0`, `refunded ≤ amount`
+  проверяются до записи; при ошибке провайдера БД не меняется.
+
+### 7.3 Тесты и миграции
+
+Новые e2e: `e2e_admin_users` (6), `e2e_admin_insights` (5), `e2e_onboarding`
+(10), `e2e_panels` (+6 → 17), `e2e_payments` (+6 → 16), `e2e_requests` (+1),
+`e2e_sessions` (+1 → 4), `e2e_developer_api` (+2 → 10), `e2e_status_services`
+(+2 → 4), `e2e_catalog` (+2 проверки авторизации каталога). Миграции: `0019`
+(каталог), `0020` (фича-флаги), `0021` (заявки), `0022` (invite клуба),
+`0023` (partial index для replay возвратов) — все применяются с нуля.
+
+Дополнительно найден и закрыт дефект, который всплыл на полном прогоне:
+`GET /v1/catalog/search` монтировался публично и **не проверял никого** —
+любой мог жечь квоту внешнего каталога. Теперь хендлер принимает ровно два
+удостоверения (JWT роли `guest` или выданный device-token из `guest_device`),
+иное → 403, без токена → 401; мобильный клиент шлёт device-token в `Bearer`,
+поэтому его путь не изменился.
+
+Гейты волны (2026-10-29):
+
+| Команда | Результат |
+|---|---|
+| `cargo test --workspace --no-fail-fast -- --test-threads=1` (под `scripts/db-test.sh`) | **655 passed / 0 failed** |
+| `cargo clippy --workspace --all-targets -- -D warnings` | ✅ 0 |
+| `cargo fmt --all -- --check` | ✅ 0 |
+| `cargo test -p dropit-gateway-api --test openapi_contract` | ✅ 7/7 (140 путей = 140) |
+| миграции `0001`–`0023` на пустой БД | ✅ 23/23 |
+| `npm run typecheck` в `apps/web-club` и `apps/web-admin` | ✅ |
+
+### 7.4 Что осознанно осталось
+
+| Что | Почему |
+|---|---|
+| `operator` vs `superadmin` не различаются на всех админ-роутах | жёстко различается только `readonly`; остальное помечено `planned` в `/v1/admin/roles` |
+| Часть вкладок админ-«Control center» ещё на локальном сторе | UI-трек идёт отдельно; бэкенд под users/djs/clubs/transactions/activity/settings/roles готов |
+| Зоны/заполненность зала, телеметрия DJ (чаевые, now-playing) | эндпоинтов нет, в UI помечены `preview`/«недоступно» — выдуманных чисел нет |
+| `apps/web-dj` | статический дизайн-прототип, публикуется как `/dj-mock/` |
+| Клубная валюта | в схеме её нет (есть платформенная `platform_settings.currency`); `PATCH /v1/club/profile` с другим кодом → `422 currency_locked` |
+
+---
+
 ## Приложение A. UI-трек (кратко)
 
 Экраны гостя 01–05 перенесены по макету pen.dev (токены/шрифты Anton/Inter/
@@ -339,6 +424,16 @@ React-каркасы на live-контрактах. Flutter-приложени�
 WS-live (редьюсеры, мок-стрим). Полная сверка UI — `docs/ui/README.md`.
 SDK Flutter/Android установлен на носителе
 (`/Volumes/Хранилище/Dev/mobile-sdk`), `flutter test` — зелёные.
+
+**Консоль DJ (2026-10-29).** `/dj` разделён на три вкладки: «Запросы» (обработка),
+«Управление залом», «Детали сессии». Вкладка «Запросы» — единственная, где DJ
+работает со списком: живое обновление через `POST /v1/ws/ticket` → `GET /v1/ws`
+(топик `queue`, кадр → перечитывание очереди) с таймерным резервом 12 с, полоса
+состояния (`live` / таймер / офлайн), 30-секундное превью из `track_cache.preview_url`,
+ссылки-поиск в Spotify/Apple Music/Deezer/YouTube, копирование трека и ISRC,
+отказ с причиной (уходит в `reason`) и клавиатурный цикл ↑↓/Enter/Backspace/P.
+Чаевые и загрузка очереди переехали в «Детали сессии». Разбор и приёмка —
+`docs/ui/dj-requests.md`.
 
 ## Приложение B. Журнал проверок (бэкенд)
 
@@ -359,10 +454,13 @@ SDK Flutter/Android установлен на носителе
 | 2026-10-19 | W7: гонки confirm-платежа, cross-request ON CONFLICT, двойная выплата, IP-антифрод | ✅ e2e-тесты гонок зелёные |
 | 2026-10-19 | `./scripts/db-test.sh cargo test --workspace --no-fail-fast -- --test-threads=1` | ✅ 415 passed / 0 failed / 0 ignored |
 | 2026-10-27 | Управление DJ в клубной панели (миграция 0012, `club_dj_remove`/`restore`, `dj_presence`, PATCH заметки) | ✅ `cargo test -p dropit-gateway-api --bin dropit-api e2e_panels` — 9 passed, включая новый `e2e_club_dj_management`; контракт OpenAPI — 6 passed |
+| 2026-10-28 | Developer API v1 (ADR-010): ключи со скоупами, `/v1/developer/**` (18 путей / 19 операций), документация (16 гайдов + OpenAPI 3.1), панель «Разработчикам», админ-обзор ключей | ✅ e2e_api_keys 2 passed, e2e_developer_api 8 passed, e2e_panels 10 passed, openapi_contract 7 passed, `scripts/developer-api-smoke.sh` GREEN, docs gate GREEN |
+| 2026-10-29 | Волна «веб → бэкенд»: онбординг клуба, каталог пользователей и роли, обзор/флаги/экспорт, админские мутации, возврат платежа, история DJ, поля клубной панели | ✅ 655 passed / 0 failed; clippy/fmt 0; openapi 7/7; миграции 23/23; live-smoke: `/healthz` 200, `/v1/status/services` 200, `/v1/admin/{users,overview,roles}` 401 без токена, `apply {}` 422 (`details.field`), `apply` 201 + повтор по `Idempotency-Key` 200 с тем же `application_id`, `/v1/catalog/search` без токена 401 |
 
 ## Приложение C. Документы
 
 - План доводки: `docs/BACKEND_COMPLETION_PLAN.md`
 - Контракт API: `docs/openapi.yaml` (0.7.0)
-- ADR: `docs/adr/ADR-001`…`ADR-006`
+- ADR: `docs/adr/ADR-001`…`ADR-010`
+- Developer API v1: `docs/api/README.md`, контракт `docs/api/openapi-developer.yaml`, ADR-010
 - Техкарта: `tehnicheskaya-karta.md`; архитектура: `arhitekturnoe-reshenie.md`

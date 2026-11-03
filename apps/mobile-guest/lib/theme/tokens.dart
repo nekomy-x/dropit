@@ -23,20 +23,20 @@ class DropTokens {
   static const borderSoft = Color(0x14FFFFFF);
   // Разделитель строк «комната/сессия».
   static const divider = Color(0x20FFFFFF);
-  // Blue tint for active controls and selected rows.
-  static const tint = Color(0x148AB4F8);
-  static const tintStrong = Color(0x268AB4F8);
-  static const tintFaint = Color(0x0D8AB4F8);
+  // DROP IT green tint for active controls and selected rows.
+  static const tint = Color(0x1400FF87);
+  static const tintStrong = Color(0x2600FF87);
+  static const tintFaint = Color(0x0D00FF87);
 
   // Primary action accent.
-  static const accent = Color(0xFF8AB4F8);
+  static const accent = Color(0xFF00FF87);
   // Нажатое состояние кнопки (DS · 02, pressed).
-  static const accentPressed = Color(0xFF7AA7E8);
-  static const accentMint = Color(0xFFAECBFA);
+  static const accentPressed = Color(0xFF00D873);
+  static const accentMint = Color(0xFF7CFFC0);
 
   // Текст на акценте — в экранах макета используется этот тёмный тон.
-  static const onAccent = Color(0xFF07111F);
-  static const ink = Color(0xFF07111F);
+  static const onAccent = Color(0xFF0A0A0A);
+  static const ink = Color(0xFF0A0A0A);
 
   // $drop-text — основной текст.
   static const text = Color(0xFFF2F5F3);
@@ -83,7 +83,7 @@ class DropTokens {
   static const sparklePale = Color(0xFFE6FFF1);
 
   // ─── Статусы запросов (guest 06·06b·06c·06d, 13) ─────────────────────
-  static const statusQueue = Color(0xFF8AB4F8); // в очереди
+  static const statusQueue = Color(0xFF00FF87); // в очереди
   static const statusAwait = Color(0xFFF4CD7A); // ожидает DJ
   static const statusDeclined = Color(0xFFFF969B); // отклонено
   static const statusPlayed = Color(0xFFA5AEA9); // сыграно (muted)
@@ -93,10 +93,10 @@ class DropTokens {
   static const chipIdleText = Color(0xFFBDC5BF);
 
   // ─── Тёмные tint-варианты акцента (бейджи, выбранные строки) ─────────
-  static const tint14 = Color(0x148AB4F8); // active badge
-  static const tint1A = Color(0x1A8AB4F8); // active room
-  static const tint1F = Color(0x1F8AB4F8); // progress rail
-  static const tintStrong2 = Color(0x268AB4F8);
+  static const tint14 = Color(0x1400FF87); // active badge
+  static const tint1A = Color(0x1A00FF87); // active room
+  static const tint1F = Color(0x1F00FF87); // progress rail
+  static const tintStrong2 = Color(0x2600FF87);
 
   // ─── Прочее из макета ────────────────────────────────────────────────
   static const railTrack = Color(0xFF343434); // рельс аудио-прогресса
@@ -106,7 +106,7 @@ class DropTokens {
   static const scanHintBright = Color(0xFFE4EBE7);
   static const scanHintDim = Color(0xFFBAC5BF);
   static const scanHintFaint = Color(0xFFBECAC3);
-  static const qrHint = Color(0xFF1E3558); // подпись на синей плитке QR
+  static const qrHint = Color(0xFF0A3D25); // подпись на зелёной плитке QR
   static const featuredMeta = Color(0xFFCDD5D0); // мета featured-карточки
   static const statLabel = Color(0xFFD2DAD5); // подписи статистики профиля
   static const divider26 = Color(0x26FFFFFF); // разделитель «or with email»
@@ -149,10 +149,10 @@ class DropTokens {
     colors: [Color(0x00101016), Color(0xE6101016)],
   );
   static const celebrationGlow = RadialGradient(
-    colors: [Color(0x388AB4F8), Color(0x008AB4F8)],
+    colors: [Color(0x3800FF87), Color(0x0000FF87)],
   );
 
-  // Brand gradient: #8AB4F8 → #AECBFA слева направо.
+  // Brand gradient: #00FF87 → #7CFFC0 слева направо.
   static const brandGradient = LinearGradient(
     begin: Alignment.centerLeft,
     end: Alignment.centerRight,

@@ -29,6 +29,20 @@ pub(crate) async fn test_repo() -> Option<IdentityRepo> {
     // НЕ трогаем; это тестовая БД, финансы чистим осознанно.
     let tables = [
         "audit_log",
+        // Заявки на онбординг клуба (миграция 0021) и фича-флаги (0020):
+        // таблицы создаются этими миграциями, до их применения TRUNCATE
+        // ошибку игнорирует (`let _ =`), поэтому список безопасен.
+        "club_application",
+        "feature_flag",
+        // Почта (0013): очередь/события/подавления. Без этого счётчики
+        // `mail_message` копятся между прогонами и e2e инвайта/DJ-письма
+        // становятся зависимыми от истории (замечание be-panel).
+        "mail_event",
+        "mail_message",
+        "mail_suppression",
+        "developer_idempotency",
+        "api_key_usage",
+        "api_key",
         "gdpr_action",
         "incident",
         "reconciliation_run",
@@ -40,7 +54,11 @@ pub(crate) async fn test_repo() -> Option<IdentityRepo> {
         "idempotency_response",
         "device_token_issue",
         "signup_attempt",
-        "outbox_event",
+        // Реальная таблица очереди — `outbox` (0004_requests.sql:75).
+        // `outbox_event` в списке не существовало, поэтому строки прошлых
+        // прогонов не чистились (на это указал агент возврата платежей:
+        // replay-ключи refund живут в payload outbox).
+        "outbox",
         "request",
         "session_guest",
         "qr_token",

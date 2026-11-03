@@ -153,7 +153,7 @@ export default function QrStepPage() {
         {/* Zones */}
         <div className="flex flex-col gap-3 border-t border-drop-line pt-5">
           <span className="connect-mono-label">{t('wizardZones')}</span>
-          <div className="flex gap-2">
+          <div className="wizard-zone-entry flex gap-2">
             <input
               value={zoneDraft}
               onChange={(event) => setZoneDraft(event.target.value)}

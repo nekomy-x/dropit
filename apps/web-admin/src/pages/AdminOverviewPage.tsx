@@ -261,7 +261,7 @@ export default function AdminOverviewPage() {
 
           {monitoredSessions.length ? (
             <div className="table-wrap">
-              <table className="data-table">
+              <table className="data-table data-table--stack">
                 <thead>
                   <tr>
                     <th scope="col">{t('overview.colVenue')}</th>
@@ -273,14 +273,16 @@ export default function AdminOverviewPage() {
                 <tbody>
                   {monitoredSessions.map((session) => (
                     <tr key={session.id}>
-                      <td className="is-strong"><Link to="/manage/clubs" className="table-link">{session.venue}</Link></td>
-                      <td className="is-muted">{session.city}</td>
-                      <td>
+                      {/* `cell-primary` is the stacked-row identity: on a phone it
+                          is the row's title line and carries no column label. */}
+                      <td className="is-strong cell-primary"><Link to="/manage/clubs" className="table-link">{session.venue}</Link></td>
+                      <td className="is-muted" data-label={t('overview.colCity')}>{session.city}</td>
+                      <td data-label={t('overview.colState')}>
                         <span className={`chip ${session.status === 'live' ? 'chip-accent' : session.status === 'paused' ? 'chip-warn' : 'chip-neutral'}`}>
                           {t(STATUS_MESSAGE_KEY[session.status] ?? 'status.unknown')}
                         </span>
                       </td>
-                      <td className="is-num">{count(session.requests)}</td>
+                      <td className="is-num" data-label={t('overview.colRequests')}>{count(session.requests)}</td>
                     </tr>
                   ))}
                 </tbody>

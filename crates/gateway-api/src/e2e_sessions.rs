@@ -323,6 +323,10 @@ async fn e2e_sessions_current() {
     assert_eq!(sess["club_id"], json!(session_a.club_id));
     assert_eq!(sess["club_name"], "E2E Club A");
     assert_eq!(sess["club_city"], "Madrid");
+    assert_eq!(
+        sess["timezone"], "Europe/Madrid",
+        "timezone клуба в ответе current"
+    );
     assert_eq!(sess["dj"]["id"], json!(dj_a));
     assert_eq!(sess["dj"]["display_name"], "DJ E2E Club A");
     assert_eq!(sess["requests_open"], true);
@@ -770,4 +774,78 @@ async fn e2e_qr_activate_deactivate_real_state() {
         hash_after_reactivate, hash_after_first,
         "reactivate issued a fresh token, old one stays deactivated"
     );
+}
+
+// ============================================================
+// W-8: ответы клубной сессии содержат club_id/timezone/expires_at
+// ============================================================
+
+/// `POST /v1/club/sessions` и `PATCH /v1/club/sessions/:id/close` отдают
+/// поля, которых не хватало UI клуба (`docs/audit/web-club-gaps.md`
+/// §4.1/§6.2): `club_id`, `timezone` и `expires_at` — плановое закрытие
+/// (следующий 07:00 в зоне сессии). У закрытой сессии `expires_at = null`:
+/// планового закрытия больше нет.
+#[tokio::test]
+async fn e2e_session_responses_carry_club_timezone_and_expiry() {
+    let repo = match crate::e2e::test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e session-fields пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let env = crate::e2e::app_env(Some(repo.clone()), Some(sessions), None).await;
+    let pool = repo.pool();
+
+    let club_id = Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1, 'Fields Club', 'fields-club', 'fields@club.test', 'no-hash')",
+    )
+    .bind(club_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let club_key = env
+        .keys
+        .issue_access(club_id, Role::Club, Uuid::now_v7())
+        .unwrap();
+
+    // --- создание: club_id + expires_at ---
+    let (s, body) = crate::e2e::call(
+        &env,
+        "POST",
+        "/v1/club/sessions",
+        Some(json!({ "timezone": "Europe/Madrid" })),
+        Some(&club_key),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create session: {body}");
+    assert_eq!(body["club_id"], json!(club_id), "club_id в ответе");
+    assert_eq!(body["timezone"], "Europe/Madrid");
+    let expires_at =
+        chrono::DateTime::parse_from_rfc3339(body["expires_at"].as_str().expect("expires_at"))
+            .expect("expires_at rfc3339")
+            .with_timezone(&chrono::Utc);
+    assert!(
+        expires_at > chrono::Utc::now(),
+        "плановое закрытие в будущем: {expires_at}"
+    );
+    let session_id = body["id"].as_str().unwrap().to_string();
+
+    // --- закрытие: expires_at пропадает, club_id остаётся ---
+    let (s, body) = crate::e2e::call(
+        &env,
+        "PATCH",
+        &format!("/v1/club/sessions/{session_id}/close"),
+        None,
+        Some(&club_key),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "close session: {body}");
+    assert_eq!(body["status"], "closed");
+    assert_eq!(body["club_id"], json!(club_id));
+    assert_eq!(body["timezone"], "Europe/Madrid");
+    assert!(body["expires_at"].is_null(), "closed: expires_at null");
 }

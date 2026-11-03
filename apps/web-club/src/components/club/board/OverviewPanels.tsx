@@ -12,6 +12,7 @@
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../../locale';
 import { QRCodeSVG } from 'qrcode.react';
+import { guestJoinUrl } from '../../../guest/links';
 import Icon from '../../Icon';
 import { CapacityBars, seriesColor, type DonutSegment } from '../../ui/charts';
 import SourceChip, { type MetricSource } from '../SourceChip';
@@ -103,11 +104,11 @@ export function GuestAccessPanel({
         <div className="access-qr">
           <div className="access-qr-frame">
             <QRCodeSVG
-              value={qr.token}
+              value={guestJoinUrl(qr.token)}
               size={116}
               marginSize={2}
               bgColor="#FFFFFF"
-              fgColor="#06130C"
+              fgColor="#0A0A0A"
               level="M"
               title={t('access.qrTitle')}
             />
@@ -156,7 +157,7 @@ export function RosterPanel({ djs, djsSource }: { djs: ReadonlyArray<BoardDj>; d
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table data-table--stack">
             <thead>
               <tr>
                 <th scope="col">{t('roster.colDj')}</th>
@@ -168,19 +169,19 @@ export function RosterPanel({ djs, djsSource }: { djs: ReadonlyArray<BoardDj>; d
             <tbody>
               {djs.map((dj) => (
                 <tr key={dj.id}>
-                  <td className="is-strong">
+                  <td className="is-strong cell-primary">
                     <span className="dj-cell">
                       <span className="list-thumb" aria-hidden="true">{dj.displayName.slice(0, 1).toUpperCase()}</span>
                       {dj.displayName}
                     </span>
                   </td>
-                  <td className="is-muted">{dj.email}</td>
-                  <td>
+                  <td className="is-muted" data-label={t('roster.colEmail')}>{dj.email}</td>
+                  <td data-label={t('roster.colStatus')}>
                     <span className={`chip ${dj.status === 'active' ? 'chip-accent' : dj.status === 'invited' ? 'chip-warn' : 'chip-error'}`}>
                       {dj.status}
                     </span>
                   </td>
-                  <td>{dj.isOnShift ? t('roster.onShift') : t('roster.offShift')}</td>
+                  <td data-label={t('roster.colShift')}>{dj.isOnShift ? t('roster.onShift') : t('roster.offShift')}</td>
                 </tr>
               ))}
             </tbody>

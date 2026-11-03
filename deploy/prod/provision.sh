@@ -66,7 +66,7 @@ TARGET=$(dc_target_host)
 # .env.local is the only place the root password and generated secrets live.
 # Anything missing is generated once and persisted so re-runs are stable.
 prepare_local_env() {
-  local file=$DC_PROD_DIR/.env.local
+  local file=${DC_LOCAL_ENV_FILE:-${DROPIT_DEPLOY_ENV:-$DC_PROD_DIR/.env.local}}
 
   if [ ! -f "$file" ]; then
     if [ -f "$DC_PROD_DIR/.env.example" ]; then
@@ -146,6 +146,7 @@ upload_bundle() {
   cp "$DC_PROD_DIR/systemd/dropit.env.example"               "$tmp/systemd/"
   cp "$DC_PROD_DIR/host/apply-config.sh"                     "$tmp/host/"
   cp "$DC_PROD_DIR/host/migrate.sh"                          "$tmp/host/"
+  cp "$DC_PROD_DIR/host/bootstrap-test-club.py"               "$tmp/host/"
   cp "$DC_PROD_DIR/host/provision-host.sh"                   "$tmp/host/"
   chmod 755 "$tmp/host/"*.sh
 

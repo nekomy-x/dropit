@@ -29,19 +29,34 @@ class DropScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: DropTokens.bg,
-      body: SafeArea(
-        top: false,
-        bottom: false,
-        child: Stack(
-          children: [
-            Positioned.fill(child: body),
-            if (tabBar != null)
-              Positioned(left: 12, right: 12, bottom: 12, child: tabBar!),
-          ],
-        ),
-      ),
-      bottomNavigationBar: bottomBar,
+      body: SafeArea(child: body),
+      bottomNavigationBar: bottomBar ??
+          (tabBar == null || MediaQuery.viewInsetsOf(context).bottom > 0
+              ? null
+              : SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: tabBar!,
+                )),
       floatingActionButton: floatingAction,
+    );
+  }
+}
+
+/// Scrollable sheet content above the keyboard and system navigation area.
+class DropSheet extends StatelessWidget {
+  const DropSheet({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(child: child),
+      ),
     );
   }
 }
@@ -69,7 +84,9 @@ class DropTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: DropTokens.tabBarHeight,
+      constraints: BoxConstraints(
+          minHeight: DropTokens.tabBarHeight +
+              (MediaQuery.textScalerOf(context).scale(12) - 12) * 2),
       decoration: BoxDecoration(
         color: DropTokens.bg,
         borderRadius: BorderRadius.circular(DropTokens.rTile),
@@ -110,25 +127,29 @@ class _TabItem extends StatelessWidget {
     return InkWell(
       borderRadius: BorderRadius.circular(DropTokens.rTile),
       onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 21,
-            color: active ? DropTokens.accent : DropTokens.tabInactive,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 12,
-              fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-              color: active ? DropTokens.textTabActive : DropTokens.muted,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 21,
+              color: active ? DropTokens.accent : DropTokens.tabInactive,
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 12,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                color: active ? DropTokens.textTabActive : DropTokens.muted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -315,7 +336,7 @@ class ArtTile extends StatelessWidget {
 }
 
 // ────────────────────────────────────────────────────────────────────────
-/// Главная кнопка (h54, pill, accent, Inter 16/600 #101813 + стрелка).
+/// Главная кнопка (h54, r10, DROP IT green, Inter 16/600 + стрелка).
 class PrimaryButton extends StatelessWidget {
   const PrimaryButton({
     super.key,
@@ -337,54 +358,58 @@ class PrimaryButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null && !loading;
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: Material(
-        color: enabled ? DropTokens.accent : DropTokens.surface2,
-        borderRadius: BorderRadius.circular(height / 2),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(height / 2),
-          onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (loading) ...[
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: DropTokens.onAccent,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text('Processing…',
-                      style:
-                          DropType.button.copyWith(color: DropTokens.onAccent)),
-                ] else ...[
-                  if (icon != null) ...[
-                    Icon(icon, size: 20, color: DropTokens.onAccent),
-                    const SizedBox(width: 10),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: DropType.button.copyWith(
-                        color: enabled ? DropTokens.onAccent : DropTokens.muted,
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: height),
+      child: SizedBox(
+        width: double.infinity,
+        child: Material(
+          color: enabled ? DropTokens.accent : DropTokens.surface2,
+          borderRadius: BorderRadius.circular(DropTokens.rInput),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(DropTokens.rInput),
+            onTap: enabled ? onPressed : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (loading) ...[
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: DropTokens.onAccent,
                       ),
                     ),
-                  ),
-                  if (trailingArrow && enabled) ...[
-                    const SizedBox(width: 12),
-                    const Icon(Icons.arrow_forward,
-                        size: 20, color: DropTokens.onAccent),
+                    const SizedBox(width: 10),
+                    Flexible(
+                        child: Text('Processing…',
+                            style: DropType.button
+                                .copyWith(color: DropTokens.muted))),
+                  ] else ...[
+                    if (icon != null) ...[
+                      Icon(icon, size: 20, color: DropTokens.onAccent),
+                      const SizedBox(width: 10),
+                    ],
+                    Flexible(
+                      child: Text(
+                        label,
+                        textAlign: TextAlign.center,
+                        style: DropType.button.copyWith(
+                          color:
+                              enabled ? DropTokens.onAccent : DropTokens.muted,
+                        ),
+                      ),
+                    ),
+                    if (trailingArrow && enabled) ...[
+                      const SizedBox(width: 12),
+                      const Icon(Icons.arrow_forward,
+                          size: 20, color: DropTokens.onAccent),
+                    ],
                   ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -412,27 +437,33 @@ class SecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: height,
-      width: double.infinity,
-      child: Material(
-        color: filled ? DropTokens.surface : Colors.transparent,
-        borderRadius: BorderRadius.circular(height / 2),
-        child: InkWell(
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: height),
+      child: SizedBox(
+        width: double.infinity,
+        child: Material(
+          color: filled ? DropTokens.surface : Colors.transparent,
           borderRadius: BorderRadius.circular(height / 2),
-          onTap: onPressed,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 15, color: DropTokens.muted),
-                const SizedBox(width: 8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(height / 2),
+            onTap: onPressed,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 15, color: DropTokens.muted),
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
+                    child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(label,
+                      textAlign: TextAlign.center,
+                      style:
+                          DropType.trackTitle.copyWith(color: DropTokens.text)),
+                )),
               ],
-              Text(
-                label,
-                style: DropType.trackTitle.copyWith(color: DropTokens.text),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -583,8 +614,8 @@ class SettingsRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        height: height,
-        padding: const EdgeInsets.symmetric(horizontal: 4),
+        constraints: BoxConstraints(minHeight: height),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         child: Row(
           children: [
             if (icon != null) ...[
@@ -601,11 +632,13 @@ class SettingsRow extends StatelessWidget {
               ),
             ),
             if (value != null)
-              Text(
+              Flexible(
+                  child: Text(
                 value!,
+                textAlign: TextAlign.end,
                 style: DropType.caption
                     .copyWith(color: valueColor ?? DropTokens.muted),
-              ),
+              )),
             if (showChevron) ...[
               const SizedBox(width: 6),
               const Icon(Icons.chevron_right,
@@ -674,6 +707,8 @@ class DropField extends StatefulWidget {
     required this.hint,
     this.prefixIcon,
     this.suffixIcon,
+    this.onSuffixPressed,
+    this.suffixTooltip,
     this.controller,
     this.obscure = false,
     this.height = 52,
@@ -684,6 +719,8 @@ class DropField extends StatefulWidget {
   final String hint;
   final IconData? prefixIcon;
   final IconData? suffixIcon;
+  final VoidCallback? onSuffixPressed;
+  final String? suffixTooltip;
   final TextEditingController? controller;
   final bool obscure;
   final double height;
@@ -742,6 +779,9 @@ class _DropFieldState extends State<DropField> {
               controller: widget.controller,
               focusNode: _focusNode,
               obscureText: widget.obscure,
+              autocorrect: widget.onSuffixPressed == null && !widget.obscure,
+              enableSuggestions:
+                  widget.onSuffixPressed == null && !widget.obscure,
               keyboardType: widget.keyboardType,
               onSubmitted: widget.onSubmitted,
               style: DropType.bodySm.copyWith(fontSize: 13),
@@ -761,7 +801,11 @@ class _DropFieldState extends State<DropField> {
             ),
           ),
           if (widget.suffixIcon != null)
-            Icon(widget.suffixIcon, size: 18, color: DropTokens.muted),
+            IconButton(
+              tooltip: widget.suffixTooltip,
+              onPressed: widget.onSuffixPressed,
+              icon: Icon(widget.suffixIcon, size: 18, color: DropTokens.muted),
+            ),
         ],
       ),
     );

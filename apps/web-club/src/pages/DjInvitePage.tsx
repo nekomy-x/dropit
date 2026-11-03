@@ -1,55 +1,194 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { acceptDjInvite, ApiRequestError } from '../api/client';
-import BrandLogo from '../components/BrandLogo';
+import {
+  acceptDjInvite,
+  ApiRequestError,
+  getDjInvite,
+  type DjInvitePreview,
+} from '../api/client';
+import {
+  AuthAlert,
+  AuthScreen,
+  AuthSummary,
+  PasswordField,
+} from '../components/auth/AuthKit';
 import { useLocale } from '../locale';
+
+/**
+ * DJ invitation activation — `/dj/invite/:token` (docs/onboarding-contract.md).
+ *
+ * A club invites a DJ; the link names the DJ and the club and the DJ sets a
+ * password. The invite endpoints take no TokenPair, so activation ends on the
+ * DJ sign-in screen rather than inside the console.
+ *
+ * The index is the legacy `?token=` form (`App.tsx` redirects it to the path)
+ * because mail already delivered to inboxes uses it. The route uses the same
+ * card as every other auth screen instead of the old standalone page: one
+ * visual language, tokens only.
+ */
+
+interface InviteError {
+  message: string;
+  code?: string;
+  hint?: string;
+}
+
+type InviteState =
+  | { status: 'loading' }
+  | { status: 'ready'; preview: DjInvitePreview }
+  | { status: 'error'; notFound: boolean; code?: string };
+
+const MIN_PASSWORD = 10;
 
 export default function DjInvitePage() {
   const { t } = useLocale();
-  const { token = '' } = useParams();
   const navigate = useNavigate();
+  const { token = '' } = useParams();
+  const [state, setState] = useState<InviteState>({ status: 'loading' });
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<InviteError | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const trimmed = token.trim();
+    if (trimmed === '') {
+      setState({ status: 'error', notFound: true });
+      return () => { cancelled = true; };
+    }
+    setState({ status: 'loading' });
+    getDjInvite(trimmed)
+      .then((preview) => {
+        if (!cancelled) setState({ status: 'ready', preview });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const apiError = err instanceof ApiRequestError ? err : null;
+        setState({
+          status: 'error',
+          notFound: apiError
+            ? apiError.status === 404 || apiError.code === 'invite_not_found'
+            : false,
+          code: apiError?.code,
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); setError(null);
-    if (password.length < 10) { setError(t('auth.passwordMin10')); return; }
-    if (password !== confirmation) { setError(t('auth.passwordMismatch')); return; }
+    event.preventDefault();
+    setError(null);
+    if (password.length < MIN_PASSWORD) {
+      setError({ message: t('auth.passwordMin10') });
+      return;
+    }
+    if (password !== confirmation) {
+      setError({ message: t('auth.passwordMismatch') });
+      return;
+    }
     setSubmitting(true);
-    try { await acceptDjInvite(token, password); navigate('/dj/login', { replace: true }); }
-    catch (err) { setError(err instanceof ApiRequestError ? err.message : t('auth.inviteFailed')); }
-    finally { setSubmitting(false); }
+    try {
+      await acceptDjInvite(token.trim(), password);
+      navigate('/dj/login', { replace: true });
+    } catch (err) {
+      if (err instanceof ApiRequestError) {
+        // The accept endpoint answers 401 unauthorized for an unknown, used or
+        // expired token and the preview answers 404; both are one dead link.
+        if (err.status === 404 || err.status === 401 || err.code === 'invite_not_found') {
+          setState({ status: 'error', notFound: true, code: err.code });
+          return;
+        }
+        if (err.code === 'validation_error' || err.code === 'validation_failed') {
+          setError({ message: t('auth.passwordMin10'), code: err.code });
+          return;
+        }
+        setError({ message: t('auth.inviteFailed'), code: err.code });
+        return;
+      }
+      setError({
+        message: err instanceof Error ? t('auth.serverNoAnswer') : t('auth.inviteFailed'),
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
-  return (
-    <div className="app-shell flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="flex items-center gap-3">
-          <BrandLogo size="large" />
-          <span className="text-[10px] uppercase tracking-[.18em] text-neutral-500">{t('auth.djEyebrow')}</span>
+
+  const links = (
+    <Link to="/dj/login" className="auth-link auth-link-muted">
+      {t('auth.backToSignIn')}
+    </Link>
+  );
+
+  if (state.status === 'loading') {
+    return (
+      <AuthScreen role={t('auth.djConsole')} title={t('auth.inviteTitle')} links={links}>
+        <div className="auth-form">
+          <p className="auth-hint">{t('auth.inviteLoading')}</p>
         </div>
-        <p className="mt-8 font-mono text-[10px] uppercase tracking-[.18em] text-brand-400">{t('auth.inviteEyebrow')}</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">{t('auth.inviteTitle')}</h1>
-        <p className="mt-2 text-sm text-neutral-500">{t('auth.inviteDetail')}</p>
-        <form onSubmit={submit} className="card mt-7 space-y-4" noValidate>
-          <div>
-            <label htmlFor="new-password" className="field-label">{t('auth.password')}</label>
-            <input id="new-password" type="password" autoComplete="new-password" className="field-input" value={password} onChange={(event) => setPassword(event.target.value)} />
-          </div>
-          <div>
-            <label htmlFor="confirm-password" className="field-label">{t('auth.confirmPassword')}</label>
-            <input id="confirm-password" type="password" autoComplete="new-password" className="field-input" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
-          </div>
-          {error ? <p className="text-sm text-red-300" role="alert">{error}</p> : null}
-          <button type="submit" disabled={submitting || !password || !confirmation} className="btn-primary w-full">
-            {submitting ? t('auth.activating') : t('auth.activateAccount')}
-          </button>
-          <p className="text-xs text-neutral-500">{t('auth.inviteHint')}</p>
-        </form>
-        <Link to="/dj/login" className="mt-5 inline-block text-sm text-neutral-500 hover:text-neutral-200">
-          {t('auth.alreadyActivated')}
-        </Link>
-      </div>
-    </div>
+      </AuthScreen>
+    );
+  }
+
+  if (state.status === 'error') {
+    return (
+      <AuthScreen role={t('auth.djConsole')} title={t('auth.inviteTitle')} links={links}>
+        <div className="auth-form">
+          <AuthAlert
+            tone="error"
+            title={state.notFound ? t('auth.inviteNotFoundTitle') : t('auth.inviteLoadFailed')}
+            code={state.code}
+          >
+            {state.notFound ? t('auth.inviteNotFoundHint') : null}
+          </AuthAlert>
+        </div>
+      </AuthScreen>
+    );
+  }
+
+  const { preview } = state;
+  return (
+    <AuthScreen role={t('auth.djConsole')} title={t('auth.inviteTitle')} links={links}>
+      <AuthSummary
+        rows={[
+          { label: t('auth.inviteSummaryDj'), value: preview.display_name },
+          { label: t('auth.inviteSummaryClub'), value: preview.club_name },
+        ]}
+      />
+      <form className="auth-form" onSubmit={submit} noValidate>
+        <PasswordField
+          id="dj-invite-password"
+          label={t('auth.password')}
+          autoComplete="new-password"
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            setError(null);
+          }}
+        />
+        <PasswordField
+          id="dj-invite-confirm"
+          label={t('auth.confirmPassword')}
+          autoComplete="new-password"
+          value={confirmation}
+          onChange={(value) => {
+            setConfirmation(value);
+            setError(null);
+          }}
+        />
+
+        {error ? (
+          <AuthAlert tone="error" title={error.message} code={error.code}>
+            {error.hint}
+          </AuthAlert>
+        ) : null}
+
+        <button type="submit" className="btn-primary" disabled={submitting}>
+          {submitting ? t('auth.activating') : t('auth.activate')}
+        </button>
+      </form>
+    </AuthScreen>
   );
 }

@@ -198,7 +198,32 @@ export function TrendChart({
   const area =
     count > 0 ? `${line} L ${xs[count - 1]!.toFixed(2)} ${baseline} L ${xs[0]!.toFixed(2)} ${baseline} Z` : '';
   const ticks = scale.ticks;
-  const labelStep = Math.max(1, Math.ceil(count / 7));
+  /**
+   * How many x labels actually fit beside each other.
+   *
+   * The step used to be a fixed `count / 7`, which is correct on a 900px panel
+   * and wrong on a phone: at 390px the plot is ~250px wide, so the first two
+   * 11px labels printed into each other and the axis read `00:0004:0008:00`.
+   * The count now comes from the measured plot width and the longest label in
+   * the series (an 11px axis label is ~6.6px per character, plus a 12px gap),
+   * so the same seven
+   * points print seven labels on a desktop panel and four on a phone. The last
+   * label is kept when it still has room, because "Now" is the reading the eye
+   * goes to first.
+   */
+  const labelChars = points.reduce((longest, point) => Math.max(longest, point.label.length), 1);
+  const labelWidth = labelChars * 6.6 + 12;
+  const labelSlots = Math.max(2, Math.floor(innerW / labelWidth) + 1);
+  const labelStep = Math.max(1, Math.ceil((count - 1) / Math.max(1, labelSlots - 1)));
+  const labelIndexes = new Set<number>();
+  if (count > 0) {
+    for (let index = 0; index < count; index += labelStep) labelIndexes.add(index);
+    const lastLabel = count - 1;
+    const highest = Math.max(...labelIndexes);
+    if (!labelIndexes.has(lastLabel) && lastLabel - highest >= Math.max(1, Math.round(labelStep * 0.6))) {
+      labelIndexes.add(lastLabel);
+    }
+  }
   const lastIndex = count - 1;
 
   // The hovered point is a reading, not decoration: it names the interval and
@@ -252,7 +277,7 @@ export function TrendChart({
           <path className="chart-area" d={area} />
           <path className="chart-line" d={line} pathLength={1} />
           {points.map((point, index) =>
-            index % labelStep === 0 || index === lastIndex ? (
+            labelIndexes.has(index) ? (
               <text
                 key={`label-${point.label}-${index}`}
                 className="chart-axis-label"

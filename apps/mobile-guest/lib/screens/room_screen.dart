@@ -51,6 +51,16 @@ class _RoomScreenState extends State<RoomScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _eq.stop();
+    } else if (!_eq.isAnimating) {
+      _eq.repeat();
+    }
+  }
+
+  @override
   void dispose() {
     _eq.dispose();
     super.dispose();
@@ -124,12 +134,13 @@ class _RoomScreenState extends State<RoomScreen>
                       const Icon(Icons.people_outline,
                           size: 14, color: DropTokens.muted),
                       const SizedBox(width: 6),
-                      Text(
+                      Expanded(
+                          child: Text(
                         'Requests open · set till 06:00',
                         style: DropType.caption.copyWith(
                           fontWeight: FontWeight.w500,
                         ),
-                      ),
+                      )),
                     ],
                   ),
                 ],
@@ -287,7 +298,7 @@ class _RoomScreenState extends State<RoomScreen>
               ],
             ),
           ),
-          const SizedBox(height: 100),
+          const SizedBox(height: 24),
         ],
       ),
     );

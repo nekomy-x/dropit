@@ -18,6 +18,7 @@ WORKDIR /build
 # Сначала манифесты и лок — кешируем разрешение зависимостей.
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY docs/api ./docs/api
 # Билдим выбранный бинарник release. Путь к bin-таргету разрешает воркспейс.
 RUN cargo build --release --bin ${BIN}
 
@@ -27,6 +28,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /build/target/release/${BIN} /usr/local/bin/dropit-bin
+COPY --from=builder /build/crates/infra-db/migrations /build/crates/infra-db/migrations
 ENV DROPIT_BIND=0.0.0.0:8080
 # /healthz имеет смысл только для API; для воркера порт не открывается.
 EXPOSE 8080

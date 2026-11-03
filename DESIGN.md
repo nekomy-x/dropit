@@ -28,23 +28,29 @@ theme; the light values are in the same file under
 `:root[data-theme='light']` and in `docs/ui/PANEL-DESIGN.md`. Values marked
 **(changed)** replaced the previous token set in the club panel redesign of
 2026-10-26; **(themed)** values changed again on 2026-10-27 when the light
-theme was introduced.
+theme was introduced; **(neutral, 2026-10-28)** replaces the blue-tinted
+graphite with a pure-grey ramp taken from the owner's swatch — page `#080808`,
+panel `#181818`, divider reading `#313131` on the panel. The old ramp
+(`#0A0C11` / `#12151C`) read blue next to every other black surface.
 
-- Canvas: `#0A0C11` **(themed — was `#090A0F`; light `#F4F6F9`)**
-- Navigation layer: `#0B0E14` **(themed — light `#FFFFFF`)**
-- Panel layer: `#12151C` **(themed)**; raised `#171B23`; inset `#0E1118`.
-  In the light theme a panel is white on `#F4F6F9` and is separated by
+- Canvas: `#080808` **(neutral — was `#0A0C11`; light `#F5F5F5`)**
+- Navigation layer: `#0E0E0E` **(neutral — light `#FFFFFF`)**
+- Panel layer: `#181818` **(neutral)**; raised `#202020`; inset `#111111`.
+  In the light theme a panel is white on `#F5F5F5` and is separated by
   `--c-panel-shadow`, because a surface ramp is invisible on white.
-- Floating layer (menus and dropdown lists): `--c-popover` `#1A1F28` **(new)**, light
+- Floating layer (menus and dropdown lists): `--c-popover` `#232323`, light
   `#FFFFFF`, with `--c-popover-shadow`. This is the only surface allowed to shadow on
   both themes: it leaves the page ramp, so it needs its own step and its own elevation.
   It is never a panel, and a panel never uses it.
-- Dividers: `rgba(235,240,250,.08)` hairline, and `rgba(235,240,250,.06)` for row
-  separators **(changed — was `#262626` / `#333333`)**
-- Primary text: `#F1F4F7` **(changed — was `#ECECEC`)**
-- Secondary text: `#B0B8C3` **(changed — was `#A3A3A3`)**
-- Muted text: `#858E9C` at 12px and above, `#9AA3B0` at 11–12px. **`#666666` is removed
-  (changed): it measures 3.06:1 on the dark surfaces, below the 4.5:1 AA floor, so it is
+- Dividers: `rgba(255,255,255,.11)` hairline (it lands on `#313131` over the
+  `#181818` panel, the divider in the swatch) and `rgba(255,255,255,.07)` for row
+  separators **(neutral — was the cool-white `rgba(235,240,250,…)` pair)**
+- Primary text: `#F2F2F2` **(neutral — was `#F1F4F7`)**
+- Secondary text: `#B8B8B8` **(neutral — was `#B0B8C3`)**
+- Muted text: `#949494` at 12px and above, `#A2A2A2` at 11–12px **(neutral — was
+  `#858E9C` / `#9AA3B0`)**. `#949494` is the lightest value that still measures
+  4.6:1 on `--c-seg-active` (`#2C2C2C`), the darkest surface it ever labels. **`#666666`
+  is removed: it measures 3.06:1 on the dark surfaces, below the 4.5:1 AA floor, so it is
   not usable for text at any size.**
 - DROP IT green: `#00FF87` (hover `#00D873`; tints at 8% and 14% alpha).
   **In the light theme the accent is `#087A4C`** (hover `#066B42`): the neon
@@ -163,34 +169,32 @@ until an animation runs. `prefers-reduced-motion: reduce` drops every duration t
 in the token layer, and the club panel then reports zero running animations. Keep live
 status changes understandable without motion.
 
-## Auth surfaces (two skins)
+## Auth surfaces (one card)
 
-The sign-in screens and the account screens are two different jobs, so they get
-two layouts rather than one layout with two modes. Both read the same tokens and
-live in `packages/ui/auth.css` (copied into both apps by
-`node scripts/sync-ui-tokens.mjs`); nothing on them declares a colour, radius or
-font size of its own.
+Every auth screen is the same object: one card, `min(404px, 100%)`, centred on
+the canvas — brand lockup and role label, title, the form, the links out, one
+honest line of footer. Sign-in, open registration and password recovery are
+different jobs, but they are all "fill this in, then get to the work"; a second
+layout for the account screens made registration look like a different product
+from the sign-in the same person had just used. There is no side rail, no step
+list and no facts column. The card lives in `packages/ui/auth.css`, copied into
+both apps by `node scripts/sync-ui-tokens.mjs`; nothing on it declares a colour,
+radius or font size of its own.
 
-**Skin A — signing in** (`/login`, `/dj/login`, `/admin/login`). Someone who
-already has an account wants the room. One card, `min(404px, 100%)`, brand
-lockup, title, two fields, one primary action, recovery links underneath, one
-honest line of footer. Nothing to read, nothing to choose. The DJ console and the
-admin panel use the same card with their own role label, so a person who works in
-both places does not relearn the screen.
-
-**Skin B — creating an account, recovering a password** (`/register`,
-`/reset-password`, `/reset-password/:token`). Someone who needs orientation. A
-step rail on the left states where they are and what is left; the form sits
-beside it; the rail's foot carries the facts that are true of this deployment
-(e-mail is not confirmed, the session lives in memory, the data is demo data).
-Below `1024px` the rail collapses into a progress bar above the form. Steps are a
-position indicator, not navigation: nobody wants to jump around a credential flow.
+`/login`, `/dj/login`, `/admin/login` fill the card with two fields and one
+action. `/register` adds the role tiles and, once a role is chosen, a second
+section under a hairline titled "Step 2 · {role}" with the "change role" action
+beside it — the position indicator is that caption, not a rail.
+`/reset-password` and `/reset-password/:token` fill the same card with one
+field and one action each. The fixed corner cluster (test-mode pill, theme
+toggle) sits above the card's top padding, so a card that grows past the
+viewport starts below it rather than underneath it.
 
 Shared atoms: `PasswordField` (reveal control with `aria-pressed`), `OtpInput`
-(six boxes, paste and backspace behave), `AuthAlert` (error / note / ok, each with
-its own word), `.auth-choice` role tiles, `.auth-identity` for a generated demo
-identity. The auth screens are the only place the product shows a 28px title on a
-standalone page.
+(six boxes, paste and backspace behave), `AuthAlert` (error / note / ok, each
+with its own word), `.auth-choice` role tiles, `.auth-next-step` for the second
+section of registration. Titles on this surface stay on the 20px step; a 28px
+title belongs to a landing page, not to a form.
 
 ## "Not production" indicator
 

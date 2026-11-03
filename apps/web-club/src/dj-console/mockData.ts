@@ -2,11 +2,49 @@ import type { DjConsoleRequest, DjConsoleState, DjHistoryEntry, DjTip } from './
 
 const minutesAgo = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
 
+/**
+ * Demo queue. The rows are chosen to cover every state the requests surface
+ * can render, so a preview build shows the real component instead of one
+ * happy row:
+ *
+ *   req_01  pending, VIP, tip, 30 s catalog preview, ISRC present
+ *   req_02  accepted, guest note, preview, ISRC
+ *   req_03  pending, no preview in the catalog (`previewUrl: null`) and no
+ *           ISRC — the disabled preview sentence and the missing copy control
+ *   req_04  played, so it leaves the queue and appears in the played history
+ *
+ * `previewUrl` points at a real file in `public/media/previews/` — 30 seconds
+ * of silence, because the demo build may not ship licensed audio. The control
+ * therefore behaves exactly as it does live (plays, marks the row, stops the
+ * previous one, ends by itself) without pretending to be music. The ISRCs use
+ * the `XX` (unassigned) country prefix and the `DRP` registrant, so demo data
+ * can never be mistaken for a real recording code.
+ */
 export const MOCK_DJ_REQUESTS: DjConsoleRequest[] = [
-  { id: 'req_mock_01', title: 'One More Time', artist: 'Daft Punk', style: 'French house', createdAt: minutesAgo(3), status: 'pending', sameTrackCount: 3, guestName: 'Alex', djShareMinor: 210, priceMinor: 300, tipMinor: 500 },
-  { id: 'req_mock_02', title: 'Show Me Love', artist: 'Robin S', style: 'House', createdAt: minutesAgo(8), status: 'accepted', sameTrackCount: 1, guestName: 'Mia', note: 'When the room is ready', djShareMinor: 140, priceMinor: 200 },
-  { id: 'req_mock_03', title: 'Music Sounds Better With You', artist: 'Stardust', style: 'Filter house', createdAt: minutesAgo(14), status: 'pending', sameTrackCount: 2, guestName: 'Sam', djShareMinor: 140, priceMinor: 200 },
-  { id: 'req_mock_04', title: 'Finally', artist: 'Kings of Tomorrow', style: 'Classic house', createdAt: minutesAgo(22), status: 'played', sameTrackCount: 1, djShareMinor: 210, priceMinor: 300, tipMinor: 500 },
+  {
+    id: 'req_mock_01', title: 'One More Time', artist: 'Daft Punk', style: 'French house',
+    createdAt: minutesAgo(3), status: 'pending', sameTrackCount: 3, guestName: 'Alex',
+    djShareMinor: 210, priceMinor: 300, tipMinor: 500, vip: true,
+    previewUrl: '/media/previews/one-more-time.mp3', isrc: 'XXDRP2600011',
+  },
+  {
+    id: 'req_mock_02', title: 'Show Me Love', artist: 'Robin S', style: 'House',
+    createdAt: minutesAgo(8), status: 'accepted', sameTrackCount: 1, guestName: 'Mia',
+    note: 'When the room is ready', djShareMinor: 140, priceMinor: 200,
+    previewUrl: '/media/previews/show-me-love.mp3', isrc: 'XXDRP2600012',
+  },
+  {
+    id: 'req_mock_03', title: 'Music Sounds Better With You', artist: 'Stardust', style: 'Filter house',
+    createdAt: minutesAgo(14), status: 'pending', sameTrackCount: 2, guestName: 'Sam',
+    djShareMinor: 140, priceMinor: 200, tipMinor: 1_000,
+    previewUrl: null, isrc: null,
+  },
+  {
+    id: 'req_mock_04', title: 'Finally', artist: 'Kings of Tomorrow', style: 'Classic house',
+    createdAt: minutesAgo(22), status: 'played', sameTrackCount: 1,
+    djShareMinor: 210, priceMinor: 300, tipMinor: 500,
+    previewUrl: '/media/previews/finally.mp3', isrc: 'XXDRP2600014',
+  },
 ];
 
 export const MOCK_DJ_HISTORY: DjHistoryEntry[] = [

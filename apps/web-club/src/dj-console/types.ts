@@ -43,6 +43,31 @@ export interface DjConsoleRequest {
   bpm?: number;
   key?: string;
   vip?: boolean;
+  /** Catalog 30-second preview (`track_cache.preview_url`). Absent means the
+   *  provider had none — the console says so instead of offering a dead
+   *  control. */
+  previewUrl?: string | null;
+  /** Recording code from the provider, used to copy a track into DJ software. */
+  isrc?: string | null;
+}
+
+/**
+ * How the request list is being kept current.
+ *
+ * `live` is the WebSocket channel (`/v1/ws`, queue topic); `timer` is the
+ * documented fallback when the socket cannot be established — it still updates
+ * on its own, just later; `offline` means the last read failed and the list on
+ * screen is the last one the API confirmed.
+ */
+export type DjLiveConnection = 'live' | 'timer' | 'offline';
+
+/** What a view needs to know about freshness, without reaching into the adapter. */
+export interface DjLiveStatus {
+  connection: DjLiveConnection;
+  /** Epoch ms of the last successful queue read. */
+  lastSyncAt: number | null;
+  /** Requests that arrived after the surface opened — highlighted, never hidden. */
+  newIds: ReadonlySet<string>;
 }
 
 export interface DjHistoryEntry {
@@ -111,7 +136,9 @@ export interface DjConsoleMockApi {
   history: DjHistoryEntry[];
   tips: DjTip[];
   telemetry: DjTelemetry;
-  action: (requestId: string, action: DjRequestAction) => void;
+  /** `reason` is only meaningful for `reject` and is sent to
+   *  POST /v1/dj/requests/{id}/reject (max 200 chars). */
+  action: (requestId: string, action: DjRequestAction, reason?: string) => void;
   pinRequest: (requestId: string) => void;
   setNowPlaying: (nowPlaying: DjNowPlaying) => void;
   addRequest: (request: DjConsoleRequest) => void;

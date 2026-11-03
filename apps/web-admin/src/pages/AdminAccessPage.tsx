@@ -5,6 +5,7 @@ import QuickActionConsole from '../components/admin-console/QuickActionConsole';
 import PageHeading from '../components/PageHeading';
 import Icon from '../components/Icon';
 import { useLocale } from '../locale';
+import './access.css';
 
 /** Role names are shared with the matrix: both name the same four roles. */
 const ROLE_LABEL_KEY: Record<ConsoleRole, string> = {
@@ -62,12 +63,12 @@ export default function AdminAccessPage() {
         </header>
         <ul className="list" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
           {ROLE_SUMMARY.map(({ role, purposeKey, scopeKey }) => (
-            <li key={role} className="list-row" style={{ alignItems: 'flex-start' }}>
+            <li key={role} className="list-row access-role-row">
               <span className="list-main">
                 <span className="list-title">{t(ROLE_LABEL_KEY[role])}</span>
                 <span className="list-sub">{t(purposeKey)}</span>
               </span>
-              <span className="list-sub" style={{ maxWidth: '48ch', margin: 0, textAlign: 'right' }}>{t(scopeKey)}</span>
+              <span className="list-sub access-role-scope">{t(scopeKey)}</span>
             </li>
           ))}
         </ul>

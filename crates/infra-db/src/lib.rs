@@ -3,8 +3,10 @@
 //! F0A: каркас + миграции. F1: идентичность (identity).
 //! F2: сессии, QR, join-гранты (sessions).
 
+pub mod api_keys;
 pub mod billing;
 pub mod catalog;
+pub mod developer;
 pub mod guest_verify;
 pub mod identity;
 pub mod jobs;
@@ -15,7 +17,12 @@ pub mod payouts;
 pub mod requests;
 pub mod sessions;
 
+pub use api_keys::{
+    ApiKeyError, ApiKeyRepo, ApiKeyRow, ApiKeyView, AuthenticatedKey, NewApiKey, NewApiKeyInput,
+    UsageRow, UsageSummary,
+};
 pub use billing::{BillingError, BillingRepo, CommissionParams, PaymentRow, SplitSnapshot};
+pub use developer::DeveloperRepo;
 pub use guest_verify::{GuestVerifyError, GuestVerifyRepo, VerifyOutcome};
 pub use identity::{
     connect, GuestDevice, IdentityError, IdentityRepo, PasswordSubject, RefreshTokenRow,

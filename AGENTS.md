@@ -1,5 +1,33 @@
 # DROP IT project instructions
 
+## Runtime location and cleanup
+
+- DROP IT runs on the VPS at `https://150.241.68.204`. Keep the application,
+  panels, API, workers, database and cache running there, not on the user's Mac.
+  Host details: `deploy/servers/test-15024168204.md`. Select this host explicitly
+  with `DROPIT_DEPLOY_ENV`; do not fall back to the older production target.
+- Do not start local dev, preview, demo or mock servers, backend services,
+  databases, Redis instances, Docker/Colima environments or mobile emulators
+  unless the user explicitly requests a local run. Use the VPS for browser and
+  integration checks. Local editing, finite builds and unit tests are allowed.
+- Point UI checks at the deployed server: `panel-audit.mjs` accepts
+  `--club-base https://150.241.68.204 --admin-base https://150.241.68.204`;
+  `panel-shot.mjs` accepts `--base`; `club-ui-check.mjs` uses `CLUB_UI_URL`.
+  Production-build audits also need `PANEL_TEST_ACCOUNTS_FILE` pointing to the
+  private test-account JSON so protected pages are audited after real sign-in,
+  rather than accidentally measuring a redirect to the login page.
+  Review checks before running them against the server: isolated test fixtures
+  and destructive test setup must not run against its shared database.
+- When an authorized local check finishes or fails, stop its entire process
+  tree, including Vite/esbuild, watchers, browser automation, build daemons and
+  any dedicated test containers or emulators. Track the PIDs and ports started
+  by the task. Verify that those processes and listeners have actually stopped
+  before reporting cleanup complete; closing a window or parent process alone
+  is insufficient. Escalate a stuck owned process from TERM to KILL if needed.
+- Preserve local source files, build artifacts and database/container data.
+  Do not stop unrelated apps or shared services. Local cleanup must leave the
+  deployed VPS running and its public links working.
+
 ## Product surface
 
 DROP IT is an operational product for club staff, DJs, and platform operators.

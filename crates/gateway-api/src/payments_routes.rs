@@ -16,8 +16,15 @@
 //! Провайдер — единственный: `ApiEnv.stripe` (`Arc<dyn StripeApi>`).
 //! По умолчанию `MockStripe` (деградация без `STRIPE_API_KEY`); в проде
 //! `LiveStripe` с настоящим HMAC.
+//!
+//! Возврат средств (F6, админ): `POST /v1/admin/payments/:id/refund` —
+//! деньги возвращаются у провайдера, затем ОДНОЙ транзакцией в БД
+//! фиксируются `payment.refunded_minor`, пропорциональный реверс сплитов,
+//! ledger-проводка `reversal` (Σ == 0), outbox `payment.refunded` и аудит.
+//! Инварианты и порядок шагов — в `BillingRepo::apply_refund`.
 
 use crate::payments::{intent_from_event, WEBHOOK_TOLERANCE_SECS};
+use crate::rbac::AuthContext;
 use crate::routes::{api_error, ApiEnv};
 use axum::{
     body::Bytes,
@@ -28,11 +35,12 @@ use axum::{
     Json, Router,
 };
 use dropit_common::{ApiError, ErrorEnvelope, Role};
-use dropit_infra_db::billing::CreatePaymentOutcome;
+use dropit_infra_db::billing::{ApplyRefund, CreatePaymentOutcome, RefundRecord};
 use dropit_infra_db::BillingError;
-use dropit_infra_stripe::{CaptureMethod, CreateIntent, StripeError};
+use dropit_infra_stripe::{CaptureMethod, CreateIntent, RefundReq, StripeError};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
+use serde_json::json;
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 // ============================================================
@@ -66,18 +74,31 @@ pub fn payments_router() -> Router<ApiEnv> {
     Router::new()
         .route("/v1/requests/:id/payment", post(create_payment_intent))
         .route("/v1/payments/:id/confirm", post(confirm_payment))
+        .route("/v1/payments/:id/test-confirm", post(confirm_test_payment))
         .route("/v1/stripe/webhook", post(stripe_webhook))
+        .route("/v1/admin/payments/:id/refund", post(admin_refund_payment))
 }
 
 /// Конверт ошибки с произвольным кодом/статусом (для бизнес-кодов, которых
 /// нет в `ApiError`: `webhook_signature_invalid`, `stripe_unavailable`).
 fn custom_error(status: StatusCode, code: &str, message: &str) -> Response {
+    error_with_details(status, code, message, None)
+}
+
+/// Тот же конверт, но с `details` (клиенту нужен `max_refundable_minor`
+/// и имя поля, чтобы показать ошибку рядом с вводом, а не общим текстом).
+fn error_with_details(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    details: Option<serde_json::Value>,
+) -> Response {
     (
         status,
         Json(ErrorEnvelope {
             code: code.to_string(),
             message: message.to_string(),
-            details: None,
+            details,
         }),
     )
         .into_response()
@@ -93,6 +114,7 @@ fn custom_error(status: StatusCode, code: &str, message: &str) -> Response {
 /// Провайдер — `ApiEnv.stripe`: MockStripe (деградация) или LiveStripe.
 #[derive(Serialize)]
 struct PaymentIntentResponse {
+    test_mode: bool,
     payment_id: Uuid,
     request_id: Uuid,
     amount_minor: i64,
@@ -100,6 +122,37 @@ struct PaymentIntentResponse {
     /// `client_secret` от провайдера — для Stripe SDK клиента.
     client_secret: String,
     status: String,
+}
+
+/// Called only after request ownership has been checked. A provider GET
+/// recovers the original secret without creating another PaymentIntent.
+async fn replay_payment_intent(
+    payment: dropit_infra_db::PaymentRow,
+    stripe: &dyn dropit_infra_stripe::StripeApi,
+) -> Response {
+    if stripe.is_mock() && !payment.stripe_payment_intent_id.as_deref().is_some_and(|id| id.starts_with("pi_mock_")) {
+        return api_error(ApiError::Conflict, "payment belongs to a different provider");
+    }
+    let client_secret = if payment.status == "intent" {
+        let Some(intent_id) = payment.stripe_payment_intent_id.as_deref() else {
+            return api_error(ApiError::Internal, "payment intent missing");
+        };
+        match stripe.retrieve_payment_intent(intent_id).await {
+            Ok(intent) => intent.client_secret.unwrap_or_default(),
+            Err(_) => return custom_error(StatusCode::BAD_GATEWAY, "stripe_unavailable", "could not resume checkout"),
+        }
+    } else {
+        String::new()
+    };
+    (StatusCode::OK, Json(PaymentIntentResponse {
+        test_mode: stripe.is_mock(),
+        payment_id: payment.id,
+        request_id: payment.request_id,
+        amount_minor: payment.amount_minor,
+        currency: payment.currency,
+        client_secret,
+        status: payment.status,
+    })).into_response()
 }
 
 async fn create_payment_intent(
@@ -201,24 +254,11 @@ async fn create_payment_intent(
 
     // АНТИ-ДВОЙНОЕ СПИСАНИЕ (быстрая проверка без блокировки): если для
     // этого request уже есть «активный» платёж (не cancelled/refunded/
-    // failed) — это replay/повтор. Возвращаем его БЕЗ вызова провайдера
-    // и БЕЗ создания нового intent. Два разных Idempotency-Key на один
+    // failed) — это replay/повтор. Восстанавливаем исходный intent
+    // БЕЗ создания нового. Два разных Idempotency-Key на один
     // request не должны плодить два интента → двойной capture.
     if let Ok(Some(existing)) = billing.find_active_payment_by_request(request_id).await {
-        return (
-            StatusCode::OK,
-            Json(PaymentIntentResponse {
-                payment_id: existing.id,
-                request_id,
-                amount_minor: existing.amount_minor,
-                currency: existing.currency.clone(),
-                // replay: у клиента уже есть оригинальный client_secret
-                // первого ответа; новый не выдаётся (и провайдер не дёргается).
-                client_secret: String::new(),
-                status: existing.status,
-            }),
-        )
-            .into_response();
+        return replay_payment_intent(existing, stripe.as_ref()).await;
     }
 
     // Создание PaymentIntent у провайдера (единственный Stripe-клиент).
@@ -268,6 +308,7 @@ async fn create_payment_intent(
         Ok(CreatePaymentOutcome::Created(payment)) => (
             StatusCode::CREATED,
             Json(PaymentIntentResponse {
+                test_mode: stripe.is_mock(),
                 payment_id: payment.id,
                 request_id,
                 amount_minor: payment.amount_minor,
@@ -278,20 +319,7 @@ async fn create_payment_intent(
             }),
         )
             .into_response(),
-        Ok(CreatePaymentOutcome::Existing(payment)) => (
-            StatusCode::OK,
-            Json(PaymentIntentResponse {
-                payment_id: payment.id,
-                request_id,
-                amount_minor: payment.amount_minor,
-                currency: payment.currency.clone(),
-                // Гонку выиграл параллельный создатель — его client_secret
-                // у того клиента; здесь новый не выдаётся.
-                client_secret: String::new(),
-                status: payment.status,
-            }),
-        )
-            .into_response(),
+        Ok(CreatePaymentOutcome::Existing(payment)) => replay_payment_intent(payment, stripe.as_ref()).await,
         Err(BillingError::RequestNotPending) => {
             api_error(ApiError::Conflict, "request is not pending")
         }
@@ -514,6 +542,58 @@ async fn confirm_payment(
 // Webhook-intake (Stripe)
 // ============================================================
 
+/// Same request/intent/confirmation/ledger flow, without an external charge.
+/// A live provider (including Stripe sandbox keys) cannot use this endpoint.
+async fn confirm_test_payment(
+    State(state): State<ApiEnv>,
+    Path(payment_id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    if !state.stripe.as_ref().is_some_and(|provider| provider.is_mock()) {
+        return api_error(ApiError::NotFound, "test payments are unavailable");
+    }
+    let guest = match resolve_guest_device_id(&headers, &state.keys) {
+        Ok(guest) => guest,
+        Err(error) => return error,
+    };
+    if headers.get("idempotency-key").and_then(|key| key.to_str().ok()).is_none_or(|key| key.trim().is_empty()) {
+        return api_error(ApiError::ValidationError, "Idempotency-Key header required");
+    }
+    let (Some(billing), Some(requests)) = (&state.billing, &state.requests) else {
+        return api_error(ApiError::ExternalServiceUnavailable, "database not configured");
+    };
+    let payment = match billing.find_payment(payment_id).await {
+        Ok(Some(payment)) => payment,
+        _ => return api_error(ApiError::NotFound, "payment not found"),
+    };
+    match requests.find_request(payment.request_id).await {
+        Ok(Some(request)) if request.guest_device_id == guest => {},
+        _ => return api_error(ApiError::NotFound, "payment not found"),
+    }
+    if !payment.stripe_payment_intent_id.as_deref().is_some_and(|id| id.starts_with("pi_mock_")) {
+        return api_error(ApiError::Conflict, "payment is not a test intent");
+    }
+    if payment.status != "captured" {
+        let response = confirm_payment(State(state.clone()), Path(payment_id), headers, Json(ConfirmRequest { payment_method: None })).await;
+        if !response.status().is_success()
+            && !matches!(billing.find_payment(payment_id).await, Ok(Some(ref current)) if current.status == "captured") {
+            return response;
+        }
+        let (club, dj) = match billing.request_participants(payment.request_id).await {
+            Ok(participants) => participants,
+            Err(_) => return api_error(ApiError::Internal, "db error"),
+        };
+        if let Err(error) = billing.handle_capture_webhook(
+            &format!("test-payment-{payment_id}"), "test.payment.succeeded",
+            payment_id, payment.amount_minor, club, dj,
+        ).await {
+            error!(%error, %payment_id, "test payment confirmation failed");
+            return api_error(ApiError::Conflict, "test payment could not be completed");
+        }
+    }
+    (StatusCode::OK, Json(json!({ "payment_id": payment_id, "status": "captured", "test_mode": true }))).into_response()
+}
+
 /// Приём вебхука. Сырое тело (bytes) + заголовок `Stripe-Signature` →
 /// `StripeApi::verify_webhook(payload, header, tolerance=300)`.
 /// Невалидная/просроченная подпись → 400 `webhook_signature_invalid`,
@@ -639,5 +719,355 @@ async fn stripe_webhook(State(state): State<ApiEnv>, headers: HeaderMap, body: B
         }
         Err(BillingError::NotFound) => api_error(ApiError::NotFound, "payment not found"),
         Err(_) => api_error(ApiError::Internal, "db error"),
+    }
+}
+
+// ============================================================
+// Возврат средств админом: POST /v1/admin/payments/:id/refund
+// ============================================================
+
+/// Тело возврата. Оба поля необязательны: без `amount_minor` возвращается
+/// весь остаток платежа.
+#[derive(Deserialize, Default)]
+pub struct RefundBody {
+    pub amount_minor: Option<i64>,
+    /// Причина для провайдера. Допустимы три значения Stripe — см.
+    /// [`REFUND_REASONS`]; прочие отклоняются 422, а не уходят в провайдер.
+    pub reason: Option<String>,
+}
+
+/// Причины, которые принимает `POST /v1/refunds` у провайдера.
+const REFUND_REASONS: [&str; 3] = ["duplicate", "fraudulent", "requested_by_customer"];
+
+/// Ответ возврата.
+///
+/// Денежные поля намеренно названы по-разному, чтобы их нельзя было
+/// перепутать:
+///   * `amount_minor` — сумма ПЛАТЕЖА (как в `GET /v1/admin/payments`);
+///   * `refund_amount_minor` — сумма ЭТОГО возврата;
+///   * `refunded_minor` — сколько возвращено по платежу всего.
+#[derive(Serialize)]
+pub struct RefundResponse {
+    pub payment_id: Uuid,
+    pub status: String,
+    pub refunded_minor: i64,
+    pub refund_id: String,
+    pub amount_minor: i64,
+    pub refund_amount_minor: i64,
+    pub currency: String,
+}
+
+fn refund_response(
+    payment_amount_minor: i64,
+    currency: &str,
+    record: &RefundRecord,
+) -> RefundResponse {
+    RefundResponse {
+        payment_id: record.payment_id,
+        status: record.status.clone(),
+        refunded_minor: record.refunded_minor,
+        refund_id: record.refund_id.clone(),
+        amount_minor: payment_amount_minor,
+        refund_amount_minor: record.amount_minor,
+        currency: currency.to_string(),
+    }
+}
+
+/// Разбор тела: пустое тело = «вернуть весь остаток», невалидный JSON и
+/// неизвестная причина — 422 в конверте (не text/plain от экстрактора).
+#[allow(clippy::result_large_err)]
+fn parse_refund_body(raw: &[u8]) -> Result<RefundBody, Response> {
+    if raw.iter().all(u8::is_ascii_whitespace) {
+        return Ok(RefundBody::default());
+    }
+    let body: RefundBody = serde_json::from_slice(raw).map_err(|_| {
+        error_with_details(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "refund body is not a valid JSON object",
+            Some(json!({ "field": "body" })),
+        )
+    })?;
+    if let Some(reason) = body.reason.as_deref() {
+        if !REFUND_REASONS.contains(&reason) {
+            return Err(error_with_details(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "validation_error",
+                "reason must be one of duplicate, fraudulent, requested_by_customer",
+                Some(json!({ "field": "reason", "allowed": REFUND_REASONS })),
+            ));
+        }
+    }
+    Ok(body)
+}
+
+/// `POST /v1/admin/payments/:id/refund` — возврат средств админом.
+///
+/// Порядок (деньги важнее удобства):
+///   1. RBAC: роль Admin + `require_admin_write` (readonly → 403);
+///   2. replay по `Idempotency-Key` — ДО провайдера и ДО гейта состояния:
+///      повтор не возвращает деньги второй раз и не превращается в 409;
+///   3. состояние: возвращать можно только `captured` /
+///      `partially_refunded`, иначе 409 (`already_refunded` — отдельным
+///      кодом);
+///   4. сумма: по умолчанию весь остаток; `1..=остаток`, иначе 422 с
+///      `details.max_refundable_minor`;
+///   5. возврат у провайдера. Ошибка провайдера → 502, БД не меняется;
+///   6. одна транзакция БД (`BillingRepo::apply_refund`): реверс сплитов,
+///      ledger, outbox, аудит.
+///
+/// Окно между успешным возвратом у провайдера и записью в БД узкое, но оно
+/// есть: держать блокировку строки через сетевой вызов хуже, чем возможный
+/// рассинхрон по одному платежу. Если БД откажет после возврата, ответ 5xx
+/// и запись в лог с `refund_id` — это сигнал на ручную сверку, а не молчание.
+async fn admin_refund_payment(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Path(payment_id): Path<Uuid>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = crate::rbac::require_admin_write(&ctx, &state).await {
+        return response;
+    }
+    let billing = match state.billing.clone() {
+        Some(b) => b,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let Some(stripe) = state.stripe.clone() else {
+        return custom_error(
+            StatusCode::BAD_GATEWAY,
+            "stripe_unavailable",
+            "stripe provider not configured",
+        );
+    };
+
+    let body = match parse_refund_body(&body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    let idem_key = headers
+        .get("idempotency-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let payment = match billing.find_payment(payment_id).await {
+        Ok(Some(payment)) => payment,
+        Ok(None) => return api_error(ApiError::NotFound, "payment not found"),
+        Err(_) => return api_error(ApiError::Internal, "db error"),
+    };
+
+    // Replay ДО гейта состояния и ДО провайдера: повтор с тем же ключом —
+    // тот же ответ. Проверять статус первым нельзя: сетевой ретрай уже
+    // успешного возврата приходил бы на `refunded` и получал 409 вместо
+    // того же 200.
+    if let Some(key) = idem_key.as_deref() {
+        match billing.find_refund_by_key(key).await {
+            Ok(Some(record)) if record.payment_id == payment_id => {
+                return (
+                    StatusCode::OK,
+                    Json(refund_response(
+                        payment.amount_minor,
+                        &payment.currency,
+                        &record,
+                    )),
+                )
+                    .into_response();
+            }
+            Ok(Some(_)) => {
+                return custom_error(
+                    StatusCode::CONFLICT,
+                    "idempotency_conflict",
+                    "Idempotency-Key already used for another payment",
+                )
+            }
+            Ok(None) => {}
+            Err(_) => return api_error(ApiError::Internal, "db error"),
+        }
+    }
+
+    // Состояние: возврат — только из захваченного платежа.
+    match payment.status.as_str() {
+        "captured" | "partially_refunded" => {}
+        "refunded" => {
+            return custom_error(
+                StatusCode::CONFLICT,
+                "already_refunded",
+                "payment is already fully refunded",
+            )
+        }
+        _ => {
+            return custom_error(
+                StatusCode::CONFLICT,
+                "invalid_payment_status",
+                "only a captured payment can be refunded",
+            )
+        }
+    }
+
+    // Сумма: по умолчанию весь остаток.
+    let max_refundable_minor = (payment.amount_minor - payment.refunded_minor).max(0);
+    let amount_minor = body.amount_minor.unwrap_or(max_refundable_minor);
+    if amount_minor <= 0 || amount_minor > max_refundable_minor {
+        return error_with_details(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_refund_amount",
+            "refund amount must be between 1 and the remaining amount",
+            Some(json!({
+                "field": "amount_minor",
+                "max_refundable_minor": max_refundable_minor,
+            })),
+        );
+    }
+
+    // Возвращать нечего, если платёж не связан с интентом провайдера.
+    let intent_id = payment
+        .stripe_payment_intent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let Some(intent_id) = intent_id else {
+        return custom_error(
+            StatusCode::CONFLICT,
+            "no_payment_intent",
+            "payment has no provider intent to refund",
+        );
+    };
+
+    // Провайдер. Ключ идемпотентности прокидывается как есть: повтор с тем
+    // же ключом провайдер сам схлопнет в один возврат. Без ключа клиента
+    // генерируется уникальный — два независимых возврата остаются двумя.
+    let stripe_key = idem_key
+        .clone()
+        .unwrap_or_else(|| format!("refund:{payment_id}:{}", Uuid::now_v7()));
+    let refund = match stripe
+        .refund(RefundReq {
+            payment_intent: intent_id,
+            amount_minor: Some(amount_minor),
+            reason: body.reason.clone(),
+            idempotency_key: stripe_key,
+        })
+        .await
+    {
+        Ok(result) => result,
+        Err(failure) => {
+            warn!(
+                error = %failure,
+                payment_id = %payment_id,
+                "stripe refund failed; database untouched"
+            );
+            return custom_error(
+                StatusCode::BAD_GATEWAY,
+                "stripe_unavailable",
+                "stripe refund failed",
+            );
+        }
+    };
+    // Провайдер — источник истины по деньгам, но сумму мы запросили явно;
+    // расхождение означает, что вернули не то, что просили: пишем в лог
+    // (сигнал на сверку) и фиксируем запрошенную сумму.
+    if refund.amount_minor != amount_minor {
+        error!(
+            payment_id = %payment_id,
+            refund_id = %refund.id,
+            requested_minor = amount_minor,
+            provider_minor = refund.amount_minor,
+            "stripe refunded an amount different from the request"
+        );
+    }
+
+    match billing
+        .apply_refund(ApplyRefund {
+            payment_id,
+            amount_minor,
+            refund_id: &refund.id,
+            reason: body.reason.as_deref(),
+            idempotency_key: idem_key.as_deref(),
+            admin_id: ctx.subject_id(),
+        })
+        .await
+    {
+        Ok(outcome) => {
+            info!(
+                payment_id = %payment_id,
+                refund_id = %outcome.record.refund_id,
+                amount_minor = outcome.record.amount_minor,
+                replayed = outcome.replayed,
+                "payment refunded"
+            );
+            (
+                StatusCode::OK,
+                Json(refund_response(
+                    payment.amount_minor,
+                    &payment.currency,
+                    &outcome.record,
+                )),
+            )
+                .into_response()
+        }
+        Err(BillingError::AlreadyRefunded) => custom_error(
+            StatusCode::CONFLICT,
+            "already_refunded",
+            "payment is already fully refunded",
+        ),
+        Err(BillingError::InvalidPaymentStatus) => custom_error(
+            StatusCode::CONFLICT,
+            "invalid_payment_status",
+            "only a captured payment can be refunded",
+        ),
+        // Гонка: пока шёл возврат у провайдера, остаток изменился. Деньги у
+        // провайдера уже вернулись — это не «ничего не произошло».
+        Err(BillingError::RefundAmountOutOfRange {
+            max_refundable_minor,
+        }) => {
+            error!(
+                payment_id = %payment_id,
+                refund_id = %refund.id,
+                amount_minor,
+                max_refundable_minor,
+                "refund applied by provider but the database rejected the amount; reconcile"
+            );
+            error_with_details(
+                StatusCode::CONFLICT,
+                "refund_conflict",
+                "another refund changed the payment while this one was in flight; reconcile with the provider",
+                Some(json!({ "max_refundable_minor": max_refundable_minor })),
+            )
+        }
+        Err(BillingError::IdempotencyConflict) => custom_error(
+            StatusCode::CONFLICT,
+            "idempotency_conflict",
+            "Idempotency-Key already used for another payment",
+        ),
+        Err(BillingError::SplitInvariantViolated) => {
+            error!(
+                payment_id = %payment_id,
+                refund_id = %refund.id,
+                "refund applied by provider but split rows do not sum to the payment amount; reconcile"
+            );
+            custom_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "split_invariant_violated",
+                "payment split does not sum to the payment amount",
+            )
+        }
+        Err(BillingError::NotFound) => api_error(ApiError::NotFound, "payment not found"),
+        Err(failure) => {
+            error!(
+                error = %failure,
+                payment_id = %payment_id,
+                refund_id = %refund.id,
+                "refund applied by provider but the database write failed; reconcile"
+            );
+            api_error(ApiError::Internal, "db error")
+        }
     }
 }

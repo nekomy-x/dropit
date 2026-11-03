@@ -157,7 +157,7 @@ class TermsScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      builder: (_) => const _FullTermsSheet(),
+      builder: (_) => const DropSheet(child: _FullTermsSheet()),
     );
   }
 

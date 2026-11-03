@@ -109,74 +109,65 @@
 
 @media (max-width: 720px) {
   .dj-invite-form { grid-template-columns: minmax(0, 1fr); }
-  .dj-row-actions { justify-content: flex-start; flex-wrap: wrap; }
-  .dj-row-actions .btn { flex: 0 1 auto; }
-  /* Stacked rows have no column to size: the actions wrap instead. */
-  .dj-table td:last-child,
-  .dj-table th:last-child { width: auto; white-space: normal; }
-
-  /* Six columns cannot be read inside a 320–390px viewport: the table needs
-     ~760px and would scroll horizontally, hiding presence and actions behind
-     a swipe. Below 720px each row becomes a labelled record instead — the
-     column name moves into the cell (`data-label`), so nothing loses meaning
-     and the actions stay reachable without horizontal scrolling. */
-  .dj-table,
-  .dj-table tbody,
-  .dj-table tr,
-  .dj-table td {
-    display: block;
-    width: auto;
-  }
-  .dj-table thead { display: none; }
-  .dj-table tr {
-    padding: 14px 0;
-    border-bottom: 1px solid var(--c-hairline-row);
-  }
-  .dj-table tr:last-child { border-bottom: 0; }
-  .dj-table tbody tr:hover td { background: transparent; }
-  /* Two columns: the column name, then every value stacked beside it. The
-     `::before` label is pinned to column 1, and each child is pinned to
-     column 2 so the cell's own markup does not have to change. */
-  .dj-table td {
-    display: grid;
-    grid-template-columns: 84px minmax(0, 1fr);
-    justify-items: start;
-    align-content: start;
-    gap: 3px 10px;
-    padding: 3px 0;
-    border-bottom: 0;
-    text-align: left;
-  }
-  /* Label sits in column 1, row 1 only; the value(s) auto-flow down column 2
-     with no extra row tracks, so a one-line cell stays one line tall. */
-  .dj-table td::before {
-    content: attr(data-label);
-    grid-column: 1;
-    grid-row: 1;
-    color: var(--c-text-muted);
-    font-size: var(--fs-11);
-    font-weight: 500;
-    line-height: 1.6;
-  }
-  .dj-table td > * { grid-column: 2; }
-  /* The DJ name is the row heading, not a labelled field. */
-  .dj-table td:first-child {
-    display: block;
-    padding-top: 0;
-    padding-bottom: 8px;
-  }
-  .dj-table td:first-child::before { content: none; }
-  .dj-note { max-width: none; }
-  .dj-table tr.is-open td,
-  .dj-row-panel td { background: transparent; }
-  .dj-table tr.is-open {
-    background: var(--c-inset);
-    border-radius: var(--r-tile);
-    padding: 14px 12px;
-  }
-  .dj-row-panel { padding: 0 0 14px; }
-  .dj-row-panel td { display: block; padding: 0 12px 12px; }
-  .dj-row-panel td::before { content: none; }
-  .dj-panel-foot { align-items: stretch; }
 }
 
+/* ---------------------------------------------------------------------------
+   Phones — the roster stacks through the shared `data-table--stack` contract
+   (packages/ui/panel.css renders each row as a labelled record below 768px).
+   What is left here is the page's own vocabulary inside that layout: the
+   second line of a cell wraps instead of being clipped, the row actions become
+   a wrapping row of thumb-sized controls, and an expanded row keeps its inset
+   surface.
+   ------------------------------------------------------------------------ */
+@media (max-width: 767px) {
+  /* On desktop this line is a one-line preview with an ellipsis; once the cell
+     is full width an ellipsis hides an address for no reason, so it wraps. */
+  .data-table--stack .dj-cell-sub {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  .data-table--stack .dj-note { max-width: none; }
+  /* The action column no longer sizes the table: the cell takes the row width
+     and its controls wrap. */
+  .data-table--stack.dj-table td:last-child,
+  .data-table--stack.dj-table th:last-child { width: auto; white-space: normal; }
+  .data-table--stack .dj-row-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    justify-content: stretch;
+  }
+  /* A thumb, not a word: every row action fills its share of the row and keeps
+     the 44px touch height, so "Edit note" is as reachable as "Remove". On a
+     pointer the same control stays a quiet text button — only the phone turns
+     it into a surface, which is why this lives here and not in the markup. */
+  .data-table--stack .dj-row-actions > .btn,
+  .data-table--stack .dj-row-actions > .trash-action {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: var(--hit-mobile);
+    padding: 0 12px;
+    background: var(--c-raised);
+    color: var(--c-text);
+  }
+  .data-table--stack .dj-row-actions > .btn:hover:not(:disabled),
+  .data-table--stack .dj-row-actions > .trash-action:hover:not(:disabled) { background: var(--c-hover-strong); }
+  /* The bin keeps its destructive meaning: it opens the confirm state, and
+     approach (hover / focus / open) still takes the error tone. */
+  .data-table--stack .dj-row-actions > .trash-action:disabled { background: transparent; }
+
+  /* An expanded row is one surface: the inset continues from the open row into
+     its confirmation block. */
+  .data-table--stack.dj-table tr.is-open {
+    padding: 14px 12px;
+    border-radius: var(--r-tile);
+    background: var(--c-inset);
+  }
+  .data-table--stack.dj-table tr.is-open td,
+  .data-table--stack .dj-row-panel td { background: transparent; }
+  .data-table--stack .dj-row-panel { padding: 0 0 14px; }
+  .data-table--stack .dj-row-panel > td { padding: 0 12px 12px; }
+  .dj-panel-foot { align-items: stretch; }
+}

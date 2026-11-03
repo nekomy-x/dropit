@@ -21,6 +21,9 @@ const NAV_SECTIONS: ReadonlyArray<NavSection> = [
       { to: '/manage/users', labelKey: 'adminNav.users', descriptionKey: 'adminNav.usersDescription', icon: 'lucide:users-round' },
       { to: '/manage/djs', labelKey: 'nav.djs', descriptionKey: 'adminNav.djsDescription', icon: 'lucide:disc-3' },
       { to: '/manage/clubs', labelKey: 'adminNav.clubs', descriptionKey: 'adminNav.clubsDescription', icon: 'lucide:building-2' },
+      // The onboarding queue sits next to Clubs because it is the step before a
+      // club exists: the application is reviewed here, then the club appears.
+      { to: '/onboarding', labelKey: 'adminNav.applications', descriptionKey: 'adminNav.applicationsDescription', live: true, icon: 'lucide:user-round-plus' },
       { to: '/manage/transactions', labelKey: 'adminNav.transactions', descriptionKey: 'adminNav.transactionsDescription', icon: 'lucide:credit-card' },
     ],
   },
@@ -40,6 +43,7 @@ const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     titleKey: 'adminNav.sectionPlatform',
     items: [
       { to: '/manage/access', labelKey: 'adminNav.roles', descriptionKey: 'adminNav.rolesDescription', icon: 'lucide:key-round' },
+      { to: '/api-keys', labelKey: 'nav.apiKeys', descriptionKey: 'adminNav.apiKeysDescription', icon: 'lucide:key-round' },
       { to: '/manage/settings', labelKey: 'adminNav.featureFlags', descriptionKey: 'adminNav.featureFlagsDescription', icon: 'lucide:toggle-right' },
       { to: '/platform-settings', labelKey: 'adminNav.economics', descriptionKey: 'adminNav.economicsDescription', icon: 'lucide:sliders-horizontal' },
       { to: '/audit-log', labelKey: 'adminNav.systemAudit', descriptionKey: 'adminNav.systemAuditDescription', icon: 'lucide:list-checks' },
@@ -310,6 +314,15 @@ export default function Layout() {
         facts={identity.facts}
         onClose={() => setSettingsOpen(false)}
         onSignOut={signOut}
+        developerAccess={{
+          hint: t('apiKeys.developerHint'),
+          actionLabel: t('account.developerAction'),
+          onOpen: () => {
+            // The platform's key surface is the read-only oversight list.
+            setSettingsOpen(false);
+            navigate('/api-keys');
+          },
+        }}
       />
     </div>
   );

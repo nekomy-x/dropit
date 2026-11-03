@@ -1,35 +1,42 @@
 /**
- * Admin auth kit — the same skin A the club panel signs in with, minus the
- * pieces that only exist in the club app (the wave wordmark, the recovery
- * routes). The admin panel has no self-service registration and no reset: its
- * accounts are created by an operator and always carry 2FA, so this screen is
- * only ever the sign-in card.
+ * Admin auth kit — the same screen the club panel signs in with. The sign-in
+ * card is one card on every surface: the DROP IT lockup, the title, the form and
+ * the ways out. What differs is the facts, not the skin — the admin panel has no
+ * self-service registration and no reset (its accounts are created by an
+ * operator and always carry 2FA), and the ways out lead to the club panel and to
+ * the operator who grants access.
  *
- * Styling is the shared `auth.css` (canonical: packages/ui/auth.css), copied
- * into both apps by scripts/sync-ui-tokens.mjs. Nothing here declares a colour
- * or a radius of its own.
+ * Styling is the shared `auth.css` and `brand-logo.css` (canonical:
+ * packages/ui/), copied into both apps by scripts/sync-ui-tokens.mjs. Nothing
+ * here declares a colour or a radius of its own.
  */
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { CircleAlert, CircleCheck, Eye, EyeOff, Info } from 'lucide-react';
-import Icon from '../Icon';
+import BrandLogo from '../BrandLogo';
 import { ThemeToggle } from '../../theme';
 import { useLocale } from '../../locale';
 import { DeploymentPill } from '../DeploymentStatus';
 import { IS_DEMO } from '../../app-mode';
 import '../../styles/auth.css';
+import '../../styles/brand-logo.css';
 
-/** The sign-in card: brand, title, the form, and the corner cluster — the theme
- *  control. The environment fact (test / maintenance) is the fixed bottom strip
- *  mounted once at the app root, never a second badge in the corner. */
+/** The sign-in card: brand, title, the form, the ways out, and the corner
+ *  cluster — the theme control. The environment fact (test / maintenance) is the
+ *  fixed bottom strip mounted once at the app root, never a second badge in the
+ *  corner. */
 export function AdminAuthScreen({
   title,
   subtitle,
   children,
+  links,
   footer,
 }: {
   title: string;
-  subtitle: string;
+  /** Short qualifier only; the sign-in card carries no intro paragraph. */
+  subtitle?: string;
   children: ReactNode;
+  /** Recovery and role links, in the club kit's row: primary then muted. */
+  links?: ReactNode;
   footer?: ReactNode;
 }) {
   const { t } = useLocale();
@@ -40,16 +47,20 @@ export function AdminAuthScreen({
         <ThemeToggle />
       </div>
       <div className="auth-card">
-        <a href="/connect" className="auth-brand auth-card-brand" aria-label="DROP IT — public site">
-          <span className="auth-brand-mark"><Icon name="lucide:headphones" size={16} /></span>
-          <span className="auth-brand-word">DROP IT</span>
+        {/* The lockup is its own accessible name ("DROP IT" from the wordmark
+            plus the role label); an aria-label here would override the visible
+            text and fail WCAG 2.5.3. Like the club card, the mark leads to the
+            product's public page rather than to either panel. */}
+        <a href="/connect" className="auth-brand auth-card-brand">
+          <BrandLogo size="small" />
           <span className="auth-brand-role">{t('login.adminPanel')}</span>
         </a>
         <div className="auth-head">
           <h1 className="auth-title auth-title-sm">{title}</h1>
-          <p className="auth-sub">{subtitle}</p>
+          {subtitle ? <p className="auth-sub">{subtitle}</p> : null}
         </div>
-        {children}
+        <div className="auth-card-body">{children}</div>
+        {links ? <div className="auth-links">{links}</div> : null}
         {footer ? <p className="auth-card-foot">{footer}</p> : null}
       </div>
     </div>

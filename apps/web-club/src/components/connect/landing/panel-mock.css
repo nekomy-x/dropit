@@ -11,7 +11,8 @@
         reads the same `--c-*` names the panel does;
      2. fits the shell inside the window (the panel is a full-page app; here it
         is an embedded screen with no scroll of its own);
-     3. runs the unfold — the one piece of motion on the page.
+     3. frames the one-shot entrance: the window lifts into place and its
+        contents settle in sequence, using transform and opacity only.
 
    No colour literal is used for anything the panel itself paints: the palette
    below is the dark set copied from `packages/ui/tokens.css`, which is the only
@@ -21,33 +22,33 @@
 
 .connect-panel-section {
   /* --- panel tokens, dark set (identical to :root[data-theme='dark']) ------ */
-  --c-canvas: #0a0c11;
-  --c-rail: #0b0e14;
-  --c-surface: #12151c;
-  --c-raised: #171b23;
-  --c-inset: #0e1118;
-  --c-hairline: rgba(235, 240, 250, 0.08);
-  --c-hairline-row: rgba(235, 240, 250, 0.06);
-  --c-hairline-strong: rgba(235, 240, 250, 0.14);
-  --c-scrim: rgba(3, 5, 9, 0.72);
+  --c-canvas: #080808;
+  --c-rail: #0e0e0e;
+  --c-surface: #181818;
+  --c-raised: #202020;
+  --c-inset: #111111;
+  --c-hairline: rgba(255, 255, 255, 0.1);
+  --c-hairline-row: rgba(255, 255, 255, 0.07);
+  --c-hairline-strong: rgba(255, 255, 255, 0.16);
+  --c-scrim: rgba(0, 0, 0, 0.72);
   --c-panel-shadow: none;
-  --c-popover: #1a1f28;
-  --c-popover-shadow: 0 18px 44px -14px rgba(2, 4, 8, 0.78), 0 2px 8px rgba(2, 4, 8, 0.38);
+  --c-popover: #232323;
+  --c-popover-shadow: 0 18px 44px -14px rgba(0, 0, 0, 0.78), 0 2px 8px rgba(0, 0, 0, 0.38);
   --c-accent: #00ff87;
   --c-accent-hover: #00d873;
   --c-accent-tint: rgba(0, 255, 135, 0.08);
   --c-accent-tint-strong: rgba(0, 255, 135, 0.14);
-  --c-ink-on-accent: #06130c;
+  --c-ink-on-accent: #0a0a0a;
   --c-accent-quiet: #7cffc0;
-  --c-text: #f1f4f7;
-  --c-text-2: #b0b8c3;
-  --c-text-muted: #858e9c;
-  --c-text-muted-sm: #9aa3b0;
+  --c-text: #f2f2f2;
+  --c-text-2: #b8b8b8;
+  --c-text-muted: #929292;
+  --c-text-muted-sm: #a2a2a2;
   --c-nav-active-bg: rgba(0, 255, 135, 0.1);
-  --c-nav-active-text: #f1f4f7;
-  --c-nav-hover-bg: rgba(235, 240, 250, 0.05);
-  --c-hover-strong: #1e232c;
-  --c-seg-active: #232935;
+  --c-nav-active-text: #f2f2f2;
+  --c-nav-hover-bg: rgba(255, 255, 255, 0.06);
+  --c-hover-strong: #262626;
+  --c-seg-active: #2c2c2c;
   --c-warn: #ffc65b;
   --c-warn-tint: rgba(255, 198, 91, 0.1);
   --c-error: #ff6b6b;
@@ -79,53 +80,21 @@
   letter-spacing: -0.03em;
 }
 
-/* ---------------------------------------------------------------------------
-   Unfold — the one piece of scroll-linked motion on the page
-
-   The window is hinged on its top edge (`transform-origin: 50% 0%`) and starts
-   tipped away from the reader: the bottom edge falls back and both side edges
-   converge, so the panel reads as a screen lying down and being raised. `--u` rises from 0 to 1 while the panel travels the last screen of
-   its entrance, so the panel opens as it arrives and is flat exactly when it is
-   read; it only ever increases, so it never tips back on the way up and a
-   second visit to the section finds it unfolded.
-
-   The travel is measured on the stage — the untransformed layout box — because
-   `getBoundingClientRect()` on the window includes the transform and would feed
-   its own tilt back into the progress.
-
-   `--u: 1` is the stylesheet default: without JavaScript, before hydration and
-   under reduced motion the panel is simply flat and fully legible. The tilt is
-   never what makes the content readable.
-   ------------------------------------------------------------------------ */
-.connect-panel-unfold {
-  --u: 1;
+/* Entrance timing lives in usePanelEntrance. The resting CSS is always the
+   complete, sharp preview; no filter, hidden content or permanent GPU layer. */
+.connect-panel-stage {
   margin-top: 44px;
-  perspective: 1400px;
-  /* The vanishing point sits level with the hinge, so the left and right edges
-     converge symmetrically instead of sliding towards one corner. */
-  perspective-origin: 50% 0%;
 }
 
 .connect-panel-window {
+  position: relative;
   overflow: hidden;
   border-radius: var(--r-surface);
   background: var(--c-canvas);
   color: var(--c-text);
   font-family: var(--font-sans);
   box-shadow: inset 0 0 0 1px var(--c-hairline), 0 64px 120px -70px rgba(0, 0, 0, 0.95);
-  /* The hinge is the TOP edge: the window hangs from it and swings away, so the
-     panel never slides out from under the heading while it opens. */
-  transform-origin: 50% 0%;
-  /* Tilt and approach share one driver, so they can never disagree: 0.72 → 1 of
-     the size, 32° → 0 of the tilt. A negative rotateX around the top edge leans
-     the far edge back, which is the direction a screen falls away from a reader
-     standing in front of it. */
-  transform: rotateX(calc((1 - var(--u)) * -32deg)) scale(calc(0.72 + var(--u) * 0.28));
-  will-change: transform;
-}
-/* The unfold is finished: stop promoting the window to its own layer. */
-.connect-panel-unfold[data-unfold='flat'] .connect-panel-window {
-  will-change: auto;
+  transform-origin: 50% 0;
 }
 
 /* Window chrome ------------------------------------------------------------ */
@@ -156,6 +125,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Two addresses: the whole one where the bar is wide enough, and the
+   screen-and-club pair on a phone, where the date would push the line into a
+   mid-word ellipsis. The ellipsis on `.connect-panel-url` stays as the fallback
+   for a translation longer than either variant. */
+.connect-panel-url-short {
+  display: none;
+}
 
 /* ---------------------------------------------------------------------------
    The panel shell, embedded
@@ -164,6 +140,7 @@
    window on a landing those three only fight the layout, so they are unset
    here — the preview is one screen, not a scrolling app.
    ------------------------------------------------------------------------ */
+/* Embed the full-page shell without changing the panel's own layout. */
 .connect-panel-window .panel-shell {
   min-height: 0;
   background: var(--c-canvas);
@@ -229,13 +206,21 @@
 }
 
 @media (max-width: 1023px) {
+  /* The panel used to be pulled up into the hero so the photo bled behind its
+     heading. Above 1024px that still reads: the hero is 770px tall and its
+     lower third is a near-black scrim, so the eyebrow lands on the dark part of
+     the frame. Below 1024px the hero is shorter (660/580px), the scrim is much
+     lighter at the bottom, and the same pull-up put the eyebrow and the
+     headline on top of visible crowd. The section therefore takes its place in
+     the flow and the heading stands on plain canvas with the section's own top
+     padding above it. */
   .connect-panel-section {
-    margin-top: -110px;
+    margin-top: 0;
   }
   .connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
     padding: 40px 28px 44px;
   }
-  .connect-panel-unfold {
+  .connect-panel-stage {
     margin-top: 32px;
   }
   .connect-panel-window .panel-content {
@@ -243,42 +228,278 @@
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Phones
+   The preview is the panel's real first screen, and on a phone most of that
+   screen's height is room rather than content: a 38px window chrome over a 64px
+   panel top bar, 18px of content padding inside a 20px card padding, and a KPI
+   card anatomy that was drawn for a 245px column. This block keeps the anatomy
+   — label, icon tile, value, source chip, caption — and takes the air out of
+   it. Nothing is hidden and no figure changes; every rule is scoped to
+   `.connect-panel-window` so the real panel keeps its own metrics.
+   ------------------------------------------------------------------------ */
 @media (max-width: 767px) {
-  .connect-panel-section {
-    margin-top: -70px;
-  }
+  /* 36px of section padding under a section that no longer overlaps the hero:
+     the eyebrow sits 36px below the photo. */
   .connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
-    padding: 32px 18px 36px;
+    padding: 36px 18px 24px;
   }
-  .connect-panel-topbar {
-    padding: 0 14px;
+  /* Heading: the same words, one step tighter. */
+  .connect-panel-section .connect-eyebrow {
+    font-size: var(--fs-11);
+    line-height: 1.35;
   }
+  .connect-panel-section .connect-display {
+    margin-top: 8px;
+  }
+  .connect-panel-section__inner > div[data-reveal]:first-child > div {
+    gap: 12px;
+  }
+  .connect-panel-stage {
+    margin-top: 16px;
+  }
+
+  /* Window chrome: the bar is a caption, not a control. 34px keeps the three
+     dots and one line of 12px type; the address drops its date on a phone
+     instead of being cut mid-word by the ellipsis. */
   .connect-panel-chrome {
+    height: 34px;
+    gap: 8px;
     padding: 0 12px;
   }
-  /* The panel's own rule is one KPI per row under 640. Two columns still fit
-     and halve the preview height, which keeps the section readable on a phone
-     without changing the panel. */
+  .connect-panel-url {
+    font-size: var(--fs-12);
+  }
+  .connect-panel-url-wide {
+    display: none;
+  }
+  .connect-panel-url-short {
+    display: inline;
+  }
+
+  /* The panel's top bar is the one row of the screen that carries no reading:
+     a search field, a ⌘K hint and a theme switch, all inert inside a static
+     preview. On a phone it costs 52–64px above the board and the window chrome
+     above already says "this is a screen", so the preview starts at the page
+     head. The panel itself keeps its bar. */
+  .connect-panel-window .panel-topbar {
+    display: none;
+  }
+  /* Card padding. The panel's 20px was measured against a 1320px content
+     column; at 322px of card the same 20px is a third of the text measure. */
+  .connect-panel-window {
+    --pad-panel: 14px;
+  }
+  .connect-panel-window .panel-content {
+    padding: 16px 16px 12px;
+  }
+
+  /* Page head: the freshness marker takes the corner beside the club name
+     instead of opening a second row under the title. */
+  .connect-panel-window .panel-page-head {
+    position: relative;
+    gap: 0;
+    margin-bottom: 10px;
+  }
+  .connect-panel-window .panel-page-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: auto;
+  }
+  .connect-panel-window .page-identity {
+    margin-bottom: 4px;
+  }
+  .connect-panel-window .panel-page-sub {
+    margin-top: 3px;
+    line-height: 1.4;
+  }
+
+  /* KPI cards: two columns from 360 up — the panel's own rule — and a tighter
+     anatomy: 12px padding, the value 20px so "€147.90" never wraps, the source
+     chip and the caption on single lines. */
   .connect-panel-window .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .connect-panel-window .stat-card {
+    padding: 12px;
+  }
+  .connect-panel-window .stat-label {
+    font-size: var(--fs-12);
+    line-height: 1.25;
+  }
+  .connect-panel-window .stat-icon {
+    width: 26px;
+    height: 26px;
   }
   .connect-panel-window .stat-value {
+    margin-top: 4px;
+    font-size: var(--fs-20);
+    letter-spacing: -.02em;
+  }
+  .connect-panel-window .stat-row {
+    margin-top: 2px;
+    row-gap: 3px;
+  }
+  .connect-panel-window .stat-foot {
+    line-height: 1.3;
+  }
+
+  /* The two board cards. Same trade: the title block, the floor total and the
+     zone bars keep their spacing rhythm, one step smaller. */
+  .connect-panel-window .panel-section {
+    margin-top: 12px;
+  }
+  .connect-panel-window .panel-grid-hero {
+    gap: 10px;
+  }
+  .connect-panel-window .panel-card-head {
+    margin-bottom: 6px;
+  }
+  .connect-panel-window .panel-card-sub {
+    line-height: 1.35;
+  }
+  .connect-panel-window .floor-total {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .connect-panel-window .floor-total-value {
     font-size: var(--fs-20);
   }
-  /* On a 390px column the 3D tilt only eats reading width, but the approach is
-     exactly what makes the panel read as arriving: keep the scale, drop the
-     rotation and its perspective. */
-  .connect-panel-unfold {
-    perspective: none;
+  .connect-panel-window .floor-total-unit,
+  .connect-panel-window .floor-total-share {
+    font-size: var(--fs-11);
   }
-  .connect-panel-window {
-    transform: scale(calc(0.84 + var(--u) * 0.16));
+  .connect-panel-window .bar-list {
+    gap: 8px;
+  }
+  .connect-panel-window .bar-row-head {
+    margin-bottom: 3px;
+  }
+  .connect-panel-window .bar-track {
+    height: 6px;
+  }
+  .connect-panel-window .bar-row-note {
+    margin-top: 3px;
+    line-height: 1.3;
+  }
+  .connect-panel-window .access-qr {
+    gap: 12px;
+  }
+  .connect-panel-window .access-meta {
+    gap: 8px;
+  }
+  .connect-panel-window .access-meta dt,
+  .connect-panel-window .access-meta dd {
+    line-height: 1.3;
+  }
+
+  /* The sample note is a caveat, not a caption — 12px so it is read. */
+  .connect-panel-sample {
+    margin-top: 10px;
+    font-size: var(--fs-12);
+    line-height: 1.45;
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Zone rows from 360px: the "Guest QR on" line joins the label/value row
+   Every bar row is three lines on the board (label + value, the track, the
+   note), and three rows of three lines is the tallest block in the preview on a
+   phone — while the note is four words and the row line has room left over. The
+   note moves next to the value, leaving label / value on one line and the track
+   under it. Below 360 the note returns to its own line: "Main room", the
+   reading and "Guest QR on" no longer fit on one 224px row.
+   ------------------------------------------------------------------------ */
+@media (min-width: 360px) and (max-width: 767px) {
+  .connect-panel-window .bar-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'label note value'
+      'track track track';
+    column-gap: 10px;
+    row-gap: 3px;
+    align-items: baseline;
+  }
+  /* The head is a flex row around a label and a value that already belong to
+     this grid: unwrap it so its children can take the label and value cells. */
+  .connect-panel-window .bar-row-head {
+    display: contents;
+  }
+  .connect-panel-window .bar-row-label {
+    grid-area: label;
+  }
+  .connect-panel-window .bar-row-value {
+    grid-area: value;
+    justify-self: end;
+  }
+  .connect-panel-window .bar-row-note {
+    grid-area: note;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .connect-panel-window .bar-track {
+    grid-area: track;
+    align-self: center;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   The narrowest phones — 320px
+   Below 360 the panel itself drops to one KPI per row: a value, a source chip
+   and a 26px icon tile no longer share a 250px card. One per row and stacked
+   would be four ~120px blocks, which is most of a screen for four numbers, so
+   the card lies on its side instead: the icon tile becomes a gutter and the
+   label / value + chip / caption stack in the column beside it.
+   ------------------------------------------------------------------------ */
+@media (max-width: 359px) {
+  .connect-panel-window .stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .connect-panel-window .stat-card {
+    position: relative;
+    padding: 10px 12px 12px 48px;
+  }
+  .connect-panel-window .stat-head {
+    display: block;
+  }
+  .connect-panel-window .stat-icon {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    width: 26px;
+    height: 26px;
+  }
+  .connect-panel-window .stat-value {
+    display: inline-block;
+    margin: 2px 8px 0 0;
+    vertical-align: baseline;
+  }
+  .connect-panel-window .stat-row {
+    display: inline-flex;
+    margin-top: 0;
+    vertical-align: baseline;
+  }
+  .connect-panel-window .stat-foot {
+    margin-top: 2px;
+  }
+}
+
+/* A preference change also cancels the Web Animations in the hook. This rule
+   applies immediately, including before its change event is delivered. */
 @media (prefers-reduced-motion: reduce) {
-  .connect-panel-window {
+  .connect-panel-stage .connect-panel-window,
+  .connect-panel-stage .panel-rail,
+  .connect-panel-stage .panel-topbar,
+  .connect-panel-stage .panel-page-head,
+  .connect-panel-stage .stat-card,
+  .connect-panel-stage .panel-grid-hero > .panel-card {
     transform: none !important;
-    will-change: auto;
+    opacity: 1 !important;
   }
 }

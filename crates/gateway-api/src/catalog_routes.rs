@@ -23,12 +23,13 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
-use dropit_common::{ApiError, ErrorEnvelope};
+use dropit_common::{ApiError, ErrorEnvelope, Role};
 use dropit_infra_catalog::{cache_ttl, canonical_key, CatalogHit, SearchQuery};
 use dropit_infra_db::catalog::{
     CatalogRepo, CatalogUpsert, DjProfileRepo, PushTokenRepo, PUSH_PLATFORMS,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 // ============================================================
 // DTO
@@ -103,9 +104,81 @@ pub fn guest_routes() -> Router<ApiEnv> {
 }
 
 /// Поиск каталога авторизуется device-token в мобильном клиенте, а не JWT.
-/// Поэтому маршрут монтируется отдельно от role middleware.
+/// Поэтому маршрут монтируется отдельно от role middleware — саму проверку
+/// делает хендлер ([`authorize_catalog_caller`]).
 pub fn public_catalog_routes() -> Router<ApiEnv> {
     Router::new().route("/v1/catalog/search", get(search_catalog))
+}
+
+/// Кто может искать в каталоге.
+///
+/// Маршрут публичный по монтированию (гостю JWT не выдаётся), поэтому гейт
+/// живёт в хендлере и принимает ровно два удостоверения:
+///   * JWT роли `Guest` — веб-гость и тесты (DJ/клуб/админ → 403: каталог
+///     им не нужен, а давать им гостевой лимит — значит путать роли);
+///   * device-token (`Bearer <uuid из guest_device>`) — мобильный гость.
+///
+/// Без токена → 401. Без этой проверки эндпоинт был открыт всем, то есть
+/// любой мог жечь квоту внешнего каталога (iTunes/Deezer) без идентичности.
+async fn authorize_catalog_caller(
+    state: &ApiEnv,
+    headers: &axum::http::HeaderMap,
+) -> Result<(), Response> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let Some(token) = token else {
+        return Err(err_response(
+            "unauthorized",
+            StatusCode::UNAUTHORIZED,
+            "authorization required",
+        ));
+    };
+
+    // 1) JWT: подпись важнее формы, поэтому пробуем её первой.
+    if let Ok(claims) = state.keys.verify_access(token) {
+        if claims.role != Role::Guest {
+            return Err(err_response(
+                "forbidden",
+                StatusCode::FORBIDDEN,
+                "catalog search is a guest route",
+            ));
+        }
+        return Ok(());
+    }
+
+    // 2) device-token: 128-битный UUID, строка в `guest_device` — единственный
+    //    признак, что устройство реально выдано сервером.
+    let Ok(device_id) = Uuid::parse_str(token) else {
+        return Err(err_response(
+            "unauthorized",
+            StatusCode::UNAUTHORIZED,
+            "invalid token",
+        ));
+    };
+    let Some(repo) = state.repo.as_ref() else {
+        return Err(err_response(
+            "catalog_unavailable",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database not configured",
+        ));
+    };
+    match repo.find_guest_device(device_id).await {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(err_response(
+            "unauthorized",
+            StatusCode::UNAUTHORIZED,
+            "unknown device token",
+        )),
+        Err(_) => Err(err_response(
+            "internal",
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "device lookup failed",
+        )),
+    }
 }
 
 /// Роуты DJ: управление стилями профиля.
@@ -125,8 +198,13 @@ pub fn dj_routes() -> Router<ApiEnv> {
 /// → 503 `catalog_unavailable`.
 async fn search_catalog(
     State(state): State<ApiEnv>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<SearchParams>,
 ) -> Response {
+    // Гейт до валидации: без идентичности не тратим ни БД, ни внешний каталог.
+    if let Err(response) = authorize_catalog_caller(&state, &headers).await {
+        return response;
+    }
     let q = params.q.trim();
     let qlen = q.chars().count();
     if !(2..=80).contains(&qlen) {

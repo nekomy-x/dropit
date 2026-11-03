@@ -5,9 +5,10 @@ import { AuthAlert, AuthScreen, OtpInput, PasswordField } from '../components/au
 import { useLocale } from '../locale';
 
 /**
- * DJ sign-in — the same skin as the club screen (AuthKit, skin A) with the DJ
- * role label and the DJ-only paths under the form. A DJ arrives mid-night with
- * a phone in one hand, so this screen has nothing on it except the way in.
+ * DJ sign-in — the same card as the club screen (AuthKit) with the DJ role
+ * label. A DJ arrives mid-night with a phone in one hand, so the screen holds
+ * two fields and one action; the ways out are password recovery and the club
+ * panel. A DJ has no application form: access comes from a club invitation.
  */
 export default function DjLoginPage() {
   const { t } = useLocale();
@@ -52,25 +53,17 @@ export default function DjLoginPage() {
     <AuthScreen
       role={t('auth.djConsole')}
       title={challenge ? t('auth.enterCode') : t('auth.signIn')}
-      subtitle={
-        challenge
-          ? t('auth.twoFactorFor', { email: form.email })
-          : t('auth.djSignInSubtitle')
-      }
+      subtitle={challenge ? t('auth.twoFactorFor', { email: form.email }) : undefined}
       links={
         <>
           <Link to="/reset-password?role=dj" className="auth-link">
             {t('auth.forgotPassword')}
-          </Link>
-          <Link to="/register?role=dj" className="auth-link auth-link-muted">
-            {t('auth.djSignUp')}
           </Link>
           <Link to="/login" className="auth-link auth-link-muted">
             {t('auth.clubPanel')}
           </Link>
         </>
       }
-      footer={t('auth.djInviteFooter')}
     >
       <form className="auth-form" onSubmit={submit} noValidate>
         {challenge ? (

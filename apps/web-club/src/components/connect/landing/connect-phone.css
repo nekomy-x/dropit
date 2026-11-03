@@ -1,0 +1,367 @@
+/* ---------------------------------------------------------------------------
+   DROP IT /connect — phone and tablet layer (≤1279px)
+   ----------------------------------------------------------------------------
+   The landing is composed for a desktop viewport. On a phone the sprint layer
+   compresses it: 8–10px labels, 32–40px controls and a hero that keeps a fixed
+   min-height for a photo the phone never shows. This file is the phone layer
+   that the audit (`scripts/connect-mobile-audit.mjs`) measures:
+
+     1. TYPE FLOOR — no visible text computes below 11px at ≤640px
+        (docs/ui/PANEL-DESIGN.md §4.6);
+     2. TAP TARGETS — every control reachable by thumb is at least 44×44
+        (PANEL-DESIGN.md §7, WCAG 2.5.8: only links inside running prose are
+        exempt, and a footer or nav row is a control, not prose);
+     3. HERO — the actions row sits < 80px above the hero bottom, so the phone
+        does not scroll through photo-only dead space under the CTAs;
+     4. CLIP — no text is cut by a hidden overflow when the sizes grow.
+
+   Scope rules
+   -----------
+   - Everything below the 1280px desktop navigation uses the touch layout.
+   - Selectors carry the page prefix (`.connect-sprint-page .connect-sprint-frame
+     .connect-linear-main …`) so they out-rank the desktop sprint layer in
+     `src/index.css` and `panel-mock.css` regardless of bundle order.
+   - No colour, radius, shadow or animation is introduced: the phone reuses the
+     tokens and classes the desktop paints.
+   - Phone gutters and group padding are owned here. They deliberately reduce
+     the desktop inset so the public content uses the width of the device.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 1279px) {
+  /* ======================================================================= *
+   * 1. HERO — no photo-only dead zone under the actions row
+   * ======================================================================= */
+
+  /* The desktop hero reserves 580px (770px above 1024) for a composed stage.
+     On a phone the content is a headline, a paragraph and two buttons over a
+     background photo: the fixed height leaves up to 226px of empty photo below
+     the CTAs. The section sizes to its content instead. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero {
+    min-height: 0;
+    padding-bottom: 0;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero > .sprint-hero-content {
+    padding-bottom: 24px;
+  }
+
+  /* The shorter tablet hero no longer has a spare lower third to overlap. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-section {
+    margin-top: 0;
+  }
+
+  /* ======================================================================= *
+   * 2. TYPE FLOOR — 11px minimum for every label the sprint layer shrank
+   * ======================================================================= */
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero-eyebrow {
+    font-size: 11px;
+    letter-spacing: .12em;
+    line-height: 1.5;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-proof-label {
+    font-size: 11px;
+    letter-spacing: .07em;
+    line-height: 1.5;
+  }
+
+  /* The avatar count is a numeral inside a 24px chip: 11px needs the chip to
+     grow, otherwise the text paints outside the rounded background. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-avatars .sprint-avatar-count {
+    width: 34px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-venue-proof {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-how-number {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-how-item p {
+    font-size: 13px;
+    line-height: 1.55;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-eyebrow,
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-mono-label {
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    line-height: 1.5;
+  }
+
+  /* Section copy that the sprint layer sets at 9–10px. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-how-item h2 {
+    font-size: 15px;
+    line-height: 1.3;
+  }
+
+  /* Benefits tag badges and Steps time badges: 9px mono pills. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #benefits .group .rounded-full {
+    padding: 6px 10px;
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #steps .group .rounded-full {
+    padding: 4px 8px;
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+
+  /* Closing CTA free-note ("Бесплатно · без карты · запуск за один вечер"). */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main section.connect-final-cta p.mt-6 {
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+
+  /* ======================================================================= *
+   * 3. TAP TARGETS — 44×44 minimum at ≤640px
+   * ======================================================================= */
+
+  /* Buttons. The hero CTA keeps its 46px emphasis; the rest land on 44. */
+  /* Tablets keep the full header action set, but those links need the same
+     touch height as the phone header rather than the desktop 20–32px rows. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main > header.connect-nav .connect-nav-logo,
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main > header.connect-nav .connect-nav-actions > a {
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-btn-primary,
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-btn-ghost {
+    height: 44px;
+    min-height: 44px;
+    padding-inline: 16px;
+    font-size: 13px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero .connect-btn-primary {
+    height: 46px;
+    min-height: 46px;
+    padding-inline: 18px;
+  }
+
+  /* "Обсудить с командой" is a text link beside the CTA: it has to carry the
+     same 44px hit area, not the 17px of its own line box. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero-secondary {
+    display: inline-flex;
+    min-height: 44px;
+    min-width: 44px;
+    align-items: center;
+    padding-inline: 2px;
+    font-size: 13px;
+  }
+
+  /* Calculator steppers (32×32 in the sprint layer) and the price presets
+     (`h-8` is 32px, and the phone pass only lifted it to 40px). Both are the
+     controls the section exists for, so both get the full target. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #revenue .h-8.w-8 {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #revenue button.h-8 {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #revenue .h-8.min-w-\[46px\] {
+    min-width: 46px;
+  }
+
+  /* FAQ rows: 56px is the comfortable accordion height, and the mail link
+     under them is a control in a footer-like block. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #faq button {
+    min-height: 56px;
+    padding-block: 16px;
+    gap: 16px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #faq .mt-8 > a {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    font-size: 14px;
+  }
+
+  /* Steps CTA (`.connect-btn-primary.h-11`) and every other action row link. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main #steps .connect-btn-primary {
+    min-height: 44px;
+  }
+
+  /* The Steps summary row ("≈ 1 день" + the CTA) is a nowrap flex that needed
+     350px inside a 240px card at 320px: the button painted past the viewport
+     and `.connect-root`'s hidden overflow cut its right edge, which the audit's
+     `overflow` rule cannot see (the clipping ancestor holds scrollWidth at the
+     viewport width). That row is wrapped by the base phone pass in
+     `src/index.css` (`#steps .flex.items-center.gap-6`, ≤639px), so no rule is
+     repeated here — one owner, one value. */
+
+  /* Footer: a link column is a control list, not prose — each row needs both
+     dimensions, and a short label ("Шаги", "Press") is only ~38px wide. */
+  .connect-sprint-page .connect-footer-links .connect-footer-link,
+  .connect-sprint-page .connect-footer-brand > a {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .connect-sprint-page .connect-footer-social a {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    font-size: 12px;
+    letter-spacing: .08em;
+  }
+
+  .connect-sprint-page .connect-footer-legal {
+    font-size: 11px;
+    letter-spacing: .08em;
+  }
+
+  /* Any footer anchor the class hooks do not name (legal/privacy rows, mailto
+     in a column) still has to be a thumb target. */
+  .connect-sprint-page .connect-linear-main > footer a[href] {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  /* ======================================================================= *
+   * 4. CLIP — the zone note must wrap, not ellipsize
+   * ======================================================================= */
+
+  /* panel-mock.css moves "QR для гостей включён" onto the label/value row from
+     360px and cuts it with `overflow: hidden; text-overflow: ellipsis` — the
+     Russian note is 127px wide and gets 67–121px, so it is truncated. The note
+     takes its own line under the track again, at full row width. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .bar-row-note {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  @media (min-width: 360px) {
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .bar-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        'label value'
+        'track track'
+        'note note';
+    }
+
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .bar-row-note {
+      grid-area: note;
+      margin: 0;
+    }
+  }
+
+  /* ======================================================================= *
+   * 5. SECTION RHYTHM — gutters and rhythm that the desktop sprint grid
+   *    squeezes on the narrowest phones
+   * ======================================================================= */
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div {
+    padding: 44px 16px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero > .sprint-hero-content,
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero-details,
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main > footer > div {
+    padding-inline: 16px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main section[id] {
+    scroll-margin-top: 76px;
+  }
+
+  @media (max-width: 640px) {
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main section:not(.connect-hero) > div,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero > .sprint-hero-content,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .sprint-hero-details,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main > footer > div {
+      padding-inline: 12px;
+    }
+
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-calculator,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-fee-split,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-step,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-steps-summary,
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-stats-group {
+      padding-inline: 14px;
+    }
+
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main #panel .connect-panel-section__inner {
+      padding-inline: 12px;
+    }
+
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .panel-content {
+      padding-inline: 12px;
+    }
+
+    .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .panel-card {
+      padding-inline: 14px;
+    }
+  }
+}
+
+/* At the narrowest sizes the fee legend needs the full line. Keep the chart's
+   real size and stack the labels rather than shrinking either to fit. */
+@media (max-width: 430px) {
+  .connect-sprint-page .connect-fee-split-body {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .connect-sprint-page .connect-fee-split-body > :first-child {
+    align-self: center;
+  }
+
+  /* The preview follows the real panel's compact row anatomy: one readable
+     metric across the width, without four tall stacked tiles. */
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-card {
+    position: relative;
+    padding: 12px 14px 12px 50px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-head {
+    display: block;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-icon {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    width: 26px;
+    height: 26px;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-value {
+    display: inline-block;
+    margin: 3px 8px 0 0;
+    vertical-align: baseline;
+  }
+
+  .connect-sprint-page .connect-sprint-frame .connect-linear-main .connect-panel-window .stat-row {
+    display: inline-flex;
+    margin-top: 0;
+    vertical-align: baseline;
+  }
+}

@@ -1,0 +1,1539 @@
+openapi: 3.1.0
+info:
+  title: DROP IT Developer API
+  version: 1.0.0
+  summary: Public API v1 for clubs and their developers.
+  description: |
+    The DROP IT Developer API lets a club automate the operational loop around a
+    night: open a session, place and moderate music requests, watch the queue,
+    pull the night's numbers.
+
+    **Base URL.** All paths in this document are relative to `/v1/developer`
+    (`servers[0].url`), which is served by the same host as the panel API.
+
+    **Authentication.** Every request needs a scoped API key, created in the
+    Club panel (Settings → Developer access). Send it either as
+    `Authorization: Bearer dit_...` or as `X-API-Key: dit_...`. Keys are shown
+    once at creation/rotation, never again. A key belongs to exactly one club;
+    all responses are limited to that club. A foreign or absent resource id
+    answers `404`, never `403`, so ids cannot be enumerated across tenants.
+
+    **Scopes.** There is no wildcard. Every operation declares its scope in
+    `x-required-scope`; a key without that scope receives
+    `403 insufficient_scope` with the missing scope in `details.required_scope`.
+    `GET /v1/developer/me` requires a valid key but no scope (`x-no-scope`).
+    The operations visible in `/v1/developer/openapi.json` are filtered by the
+    calling key's scopes; the panel view (`/v1/club/developers/openapi.json`)
+    shows the whole document.
+
+    **Conventions.** Timestamps are ISO-8601 UTC. Money is an integer number of
+    minor units (cents) plus a currency. Lists use cursor pagination:
+    `{ "items": [...], "next_cursor": "…" | null }`; `cursor` is opaque, and an
+    unknown/malformed cursor is a `422`. Errors share one envelope:
+    `{ "code": "…", "message": "…", "details": { … } }`.
+
+    **Rate limit.** Per key, a fixed 60-second window, configured per key in the
+    range 30–600 requests/minute (default 120). Successful responses carry
+    `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`
+    (seconds until the window resets); a throttled request answers
+    `429 rate_limited` with `Retry-After: 60`.
+
+    **Idempotency.** `POST /v1/developer/sessions/{id}/requests` requires the
+    `Idempotency-Key` header (missing → `422`). Repeating a key returns the
+    original `201` response and does not create a second request.
+
+    **Out of scope in v1.** Payment creation and refunds, webhooks, guest
+    personal data, OAuth2 client credentials. The API is additive: `v1` grows
+    without breaking existing clients.
+servers:
+  - url: /v1/developer
+    description: Same host as the panel API
+security:
+  - apiKeyAuth: []
+  - apiKeyHeader: []
+tags:
+  - name: meta
+    description: Key identity and API metadata
+  - name: docs
+    description: Documentation manifest, guides and this reference
+  - name: profile
+    description: Club profile
+  - name: sessions
+    description: Sessions (nights) and guest entry QR
+  - name: requests
+    description: Music requests and the live queue
+  - name: catalog
+    description: Track catalog search
+  - name: stats
+    description: Aggregated nightly numbers
+paths:
+  /v1/developer/me:
+    get:
+      tags: [meta]
+      operationId: getKeyIdentity
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Describe the calling API key
+      description: |
+        Returns the identity of the key used for the call: its id, public
+        prefix, environment, granted scopes, per-key rate limit and the club it
+        belongs to. Requires a valid API key; no additional scope is needed —
+        the response contains only data about the key itself.
+      x-required-scope: null
+      x-no-scope: true
+      responses:
+        '200':
+          description: Key identity.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKeyIdentity' }
+              examples:
+                live-key:
+                  value:
+                    key_id: 0192f0f5-6f1a-7b2c-9d31-2b0f9c1a4e77
+                    prefix: '0123456789'
+                    environment: live
+                    scopes: [docs:read, profile:read, sessions:read, sessions:write, qr:write, requests:read, requests:write, catalog:read, stats:read]
+                    rate_limit_per_min: 120
+                    club_id: 0192f0f5-9a44-7a11-8f01-4c8f2f4a10cd
+                    api_version: 1.0.0
+                    docs_url: /v1/developer/docs
+                    openapi_url: /v1/developer/openapi.json
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/docs:
+    get:
+      tags: [docs]
+      operationId: getDocsManifest
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Documentation manifest filtered by the key's scopes
+      description: |
+        Lists the long-form guides compiled into this deployment together with
+        the scope catalogue and the scope presets used by the panel. Sections
+        whose `requires` scopes the key does not have are omitted; the full
+        manifest is available to the panel at `/v1/club/developers/docs`.
+      x-required-scope: docs:read
+      responses:
+        '200':
+          description: Manifest of guides and scopes.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocsManifest' }
+              examples:
+                docs-only:
+                  value:
+                    api_version: 1.0.0
+                    base_url: /v1/developer
+                    openapi_url: /v1/developer/openapi.json
+                    sections:
+                      - id: overview
+                        title: Overview
+                        summary: What you can automate and how the API is shaped.
+                        requires: []
+                        order: 10
+                    scopes:
+                      - id: docs:read
+                        title: Documentation
+                        description: Read the developer documentation, guides and this API reference.
+                        group: Documentation
+                        risk: read
+                        docs_section: scopes
+                    presets:
+                      - id: docs-only
+                        title: Documentation only
+                        description: Read the guides and reference. No club data at all.
+                        scopes: [docs:read]
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/docs/{section}:
+    get:
+      tags: [docs]
+      operationId: getDocsSection
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: One documentation guide
+      description: |
+        Returns the markdown body of one guide. Unknown ids are `404`. A guide
+        that needs a scope the key does not hold answers `403
+        insufficient_scope` with `details.required_scope` set to the first
+        missing scope; the body is not returned partially.
+      parameters:
+        - name: section
+          in: path
+          required: true
+          description: Section id (filename without `.md`), e.g. `quickstart`.
+          schema: { type: string }
+          example: quickstart
+      x-required-scope: docs:read
+      responses:
+        '200':
+          description: Section body (markdown without front matter).
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocsSection' }
+              examples:
+                quickstart:
+                  value:
+                    id: quickstart
+                    title: Quickstart
+                    summary: Create a key, call /me, open a session.
+                    requires: []
+                    markdown: "# Quickstart\n\n..."
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/openapi.json:
+    get:
+      tags: [docs]
+      operationId: getOpenApiJson
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: This document as JSON, filtered by the key's scopes
+      description: |
+        The OpenAPI 3.1 document for the public surface with operations the
+        key's scopes do not allow removed, and `x-granted-scopes` added. The
+        panel serves the unfiltered document at
+        `/v1/club/developers/openapi.json`.
+      x-required-scope: docs:read
+      responses:
+        '200':
+          description: OpenAPI 3.1 document.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpenApiDocument' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/profile:
+    get:
+      tags: [profile]
+      operationId: getClubProfile
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: The club profile behind this key
+      description: |
+        Name, slug, address, country, contact and status of the club that owns
+        the key. Contact fields belong to the club itself (not to guests), and
+        are readable only with `profile:read`. Stripe and authentication fields
+        are never exposed.
+      x-required-scope: profile:read
+      responses:
+        '200':
+          description: Club profile.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClubProfileResponse' }
+              examples:
+                club:
+                  value:
+                    club:
+                      id: 0192f0f5-9a44-7a11-8f01-4c8f2f4a10cd
+                      name: Barrio Latino
+                      slug: barrio-latino
+                      address: Carrer de la Marina 12, Barcelona
+                      country: ES
+                      email: hello@barrio-latino.test
+                      phone: '+34 900 000 000'
+                      logo_url: https://cdn.dropit.test/clubs/barrio-latino.png
+                      timezone: Europe/Madrid
+                      status: active
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions:
+    get:
+      tags: [sessions]
+      operationId: listSessions
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: List the club's sessions
+      description: |
+        Sessions (nights) ordered newest first, with optional `status` filter
+        and cursor pagination. `limit` defaults to 50 and must be 1–100. The
+        cursor is opaque; an invalid cursor is a `422`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter by session status.
+          schema:
+            type: string
+            enum: [created, active, paused_acceptance, closed]
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from the previous page's `next_cursor`.
+          schema: { type: string }
+      x-required-scope: sessions:read
+      responses:
+        '200':
+          description: A page of sessions.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionList' }
+              examples:
+                page:
+                  value:
+                    items:
+                      - id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                        status: active
+                        timezone: Europe/Madrid
+                        dj_id: 0192f0f5-2c88-7a4e-b3d2-62f3b1c8e0bb
+                        pricing_policy_id: null
+                        opened_at: '2026-10-28T22:10:00Z'
+                        closed_at: null
+                        created_at: '2026-10-28T21:55:00Z'
+                    next_cursor: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      tags: [sessions]
+      operationId: createSession
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Create a session
+      description: |
+        Creates a session in the `created` state. The DJ and pricing policy, if
+        given, must belong to this club — a foreign or unknown id is `404`.
+        The timezone is an IANA name used for the scheduled 07:00 close and is
+        validated server-side (`422` for an invalid zone). Opening the session
+        for requests stays with the DJ in the console; this endpoint does not
+        accept requests by itself.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateSessionRequest' }
+            examples:
+              minimal:
+                value: { timezone: Europe/Madrid }
+              with-dj:
+                value:
+                  dj_id: 0192f0f5-2c88-7a4e-b3d2-62f3b1c8e0bb
+                  pricing_policy_id: null
+                  timezone: Europe/Madrid
+      x-required-scope: sessions:write
+      responses:
+        '201':
+          description: Session created (status `created`).
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+              examples:
+                created:
+                  value:
+                    id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                    status: created
+                    timezone: Europe/Madrid
+                    dj_id: 0192f0f5-2c88-7a4e-b3d2-62f3b1c8e0bb
+                    pricing_policy_id: null
+                    opened_at: null
+                    closed_at: null
+                    created_at: '2026-10-28T21:55:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions/{id}:
+    get:
+      tags: [sessions]
+      operationId: getSession
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: One session with request counts
+      description: |
+        Returns the session and aggregate request counters for it (total,
+        pending, accepted, rejected, played and the active queue size). A
+        session of another club answers `404`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: sessions:read
+      responses:
+        '200':
+          description: Session with counters.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionWithCounts' }
+              examples:
+                active:
+                  value:
+                    id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                    status: active
+                    timezone: Europe/Madrid
+                    dj_id: null
+                    pricing_policy_id: null
+                    opened_at: '2026-10-28T22:10:00Z'
+                    closed_at: null
+                    created_at: '2026-10-28T21:55:00Z'
+                    counts: { total: 17, pending: 4, accepted: 3, rejected: 2, played: 8, queue: 7 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions/{id}/close:
+    post:
+      tags: [sessions]
+      operationId: closeSession
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Close a session
+      description: |
+        Applies the domain state machine: `created`, `active` or
+        `paused_acceptance` → `closed`. Closing an already closed session is a
+        `409 session_closed`. Queued requests stop accepting new work as soon
+        as the session leaves `active`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: sessions:write
+      responses:
+        '200':
+          description: Session closed.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions/{id}/qr:
+    post:
+      tags: [sessions]
+      operationId: issueSessionQr
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Issue or rotate the guest entry QR token
+      description: |
+        Issues a fresh guest-entry token for the session, rotating any previous
+        one. The plain token is returned **once** and is the same secret a club
+        QR image encodes; the guest client exchanges it at
+        `POST /v1/sessions/join` (`{ "qr_token": "<token>" }`). Only
+        `sha256(token)` is stored.
+
+        `join_url` is optional: it is present only when the deployment sets
+        `DROPIT_GUEST_JOIN_BASE_URL`, and then equals
+        `{base}?token={qr_token}`. Deployments without a hosted join page omit
+        it and put the token into their own QR payload. Never log or cache this
+        response. Issuing for a closed session is `409 session_closed`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: qr:write
+      responses:
+        '200':
+          description: New QR token (shown once).
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+            Cache-Control:
+              description: Always `no-store`.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrIssueResponse' }
+              examples:
+                issued:
+                  value:
+                    session_id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                    qr_token: 9f2c4d6e8a0b1c3d5e7f9a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c0d
+                    expires_at: '2026-10-29T06:00:00Z'
+                    join_url: https://app.example/join?token=9f2c4d6e8a0b
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions/{id}/queue:
+    get:
+      tags: [requests]
+      operationId: getSessionQueue
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: The live queue of a session
+      description: |
+        Active requests of the session (`pending` and `accepted`), ordered by
+        `new` (newest first) or `hot` (most requested song first, then oldest).
+        Track data is normalized; guest identity is never exposed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session id (UUID).
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [new, hot]
+            default: new
+      x-required-scope: requests:read
+      responses:
+        '200':
+          description: Queue items.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueList' }
+              examples:
+                sorted-new:
+                  value:
+                    items:
+                      - id: 0192f0f5-3d99-7b5f-c4e3-73a4c2d9f1cc
+                        session_id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                        status: pending
+                        style: salsa
+                        created_at: '2026-10-28T23:01:00Z'
+                        same_track_count: 3
+                        track:
+                          title: Vivir Mi Vida
+                          artist: Marc Anthony
+                          artwork_url: https://cdn.example/cover.jpg
+                          preview_url: https://cdn.example/preview.m4a
+                          isrc: USSD11300001
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/sessions/{id}/requests:
+    post:
+      tags: [requests]
+      operationId: createSessionRequest
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Place a music request
+      description: |
+        Places a request into a session on behalf of the integration. The
+        request behaves exactly like a guest request: it appears in the DJ
+        queue and follows the same state machine. It is attributed to an
+        internal synthetic guest identity of the API key; that identity is
+        never exposed and there is no guest personal data.
+
+        `Idempotency-Key` is required (`422` without it). Repeating the same
+        key returns the original `201` body without creating a second request.
+        If the session is not `active` (paused, created or closed) the API
+        answers `409 session_not_active`. Payment is out of scope for v1.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Session id (UUID).
+          schema: { type: string, format: uuid }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Client-generated unique key for this placement (1–200 chars).
+          schema: { type: string, minLength: 1, maxLength: 200 }
+          example: order-9f2c4d6e-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateRequestBody' }
+            examples:
+              minimal:
+                value: { track_id: 0192f0f5-4eaa-7c60-d5f4-84b5d3e0a2dd }
+              with-style:
+                value: { track_id: 0192f0f5-4eaa-7c60-d5f4-84b5d3e0a2dd, style: salsa }
+      x-required-scope: requests:write
+      responses:
+        '201':
+          description: Request created (or replayed for the same Idempotency-Key).
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestCard' }
+              examples:
+                created:
+                  value:
+                    id: 0192f0f5-3d99-7b5f-c4e3-73a4c2d9f1cc
+                    session_id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                    status: pending
+                    style: salsa
+                    price_minor: 0
+                    decline_reason: null
+                    played_at: null
+                    created_at: '2026-10-28T23:01:00Z'
+                    track:
+                      title: Vivir Mi Vida
+                      artist: Marc Anthony
+                      artwork_url: https://cdn.example/cover.jpg
+                      preview_url: https://cdn.example/preview.m4a
+                      isrc: USSD11300001
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/requests:
+    get:
+      tags: [requests]
+      operationId: listRequests
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: List the club's requests
+      description: |
+        Requests across all sessions of the club, newest first. Optional filters
+        `status` and `session_id` (a session of another club is `404`), plus
+        cursor pagination (`limit` 1–100, default 50). Guest identity and
+        payment identifiers are never returned.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, accepted, rejected, played, expired]
+        - name: session_id
+          in: query
+          required: false
+          description: Restrict to one session of this club.
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from the previous page's `next_cursor`.
+          schema: { type: string }
+      x-required-scope: requests:read
+      responses:
+        '200':
+          description: A page of requests.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestList' }
+              examples:
+                page:
+                  value:
+                    items:
+                      - id: 0192f0f5-3d99-7b5f-c4e3-73a4c2d9f1cc
+                        session_id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                        status: played
+                        style: salsa
+                        price_minor: 0
+                        decline_reason: null
+                        played_at: '2026-10-28T23:04:12Z'
+                        created_at: '2026-10-28T23:01:00Z'
+                        track:
+                          title: Vivir Mi Vida
+                          artist: Marc Anthony
+                          artwork_url: https://cdn.example/cover.jpg
+                          preview_url: https://cdn.example/preview.m4a
+                          isrc: USSD11300001
+                    next_cursor: bnVsbA
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/requests/{id}:
+    get:
+      tags: [requests]
+      operationId: getRequest
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: One request
+      description: |
+        Track, status, decline reason and timestamps of one request. A request
+        of another club answers `404`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: requests:read
+      responses:
+        '200':
+          description: Request card.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestCard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/requests/{id}/accept:
+    post:
+      tags: [requests]
+      operationId: acceptRequest
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Accept a request
+      description: |
+        Moves a `pending` request to `accepted`. Repeating the action on an
+        `accepted` request is a successful no-op (`noop: true`), not an error.
+        A forbidden transition (for example `accept` after `played`) is
+        `409 invalid_request_transition`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: requests:write
+      responses:
+        '200':
+          description: Request after the action.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestActionResponse' }
+              examples:
+                accepted:
+                  value:
+                    id: 0192f0f5-3d99-7b5f-c4e3-73a4c2d9f1cc
+                    session_id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                    status: accepted
+                    style: salsa
+                    price_minor: 0
+                    decline_reason: null
+                    played_at: null
+                    created_at: '2026-10-28T23:01:00Z'
+                    track:
+                      title: Vivir Mi Vida
+                      artist: Marc Anthony
+                      artwork_url: https://cdn.example/cover.jpg
+                      preview_url: https://cdn.example/preview.m4a
+                      isrc: USSD11300001
+                    noop: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/requests/{id}/reject:
+    post:
+      tags: [requests]
+      operationId: rejectRequest
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Reject a request
+      description: |
+        Moves a `pending` request (or an `accepted` one, before it is played)
+        to `rejected`, optionally with a reason. Repeating `reject` on a
+        rejected request is a successful no-op (`noop: true`). Other
+        transitions are `409 invalid_request_transition`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id (UUID).
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RejectBody' }
+            examples:
+              reason:
+                value: { reason: Already played earlier tonight }
+      x-required-scope: requests:write
+      responses:
+        '200':
+          description: Request after the action.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestActionResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/requests/{id}/played:
+    post:
+      tags: [requests]
+      operationId: markRequestPlayed
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Mark a request as played
+      description: |
+        Marks the request `played` and stamps `played_at`. Playing a `pending`
+        request without accepting it first is allowed (the DJ played it).
+        Repeating the action on a played request is a successful no-op.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Request id (UUID).
+          schema: { type: string, format: uuid }
+      x-required-scope: requests:write
+      responses:
+        '200':
+          description: Request after the action.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RequestActionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/catalog/search:
+    get:
+      tags: [catalog]
+      operationId: searchCatalog
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Search the track catalog
+      description: |
+        Searches the catalog used by the request flow. Results are cached
+        server-side (`cached: true` when served from the cache). Use the
+        returned `id` as `track_id` when placing a request. Provider payloads
+        and provider track ids are never exposed.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search text (2–80 characters).
+          schema: { type: string, minLength: 2, maxLength: 80 }
+          example: vivir mi vida
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 25, default: 10 }
+      x-required-scope: catalog:read
+      responses:
+        '200':
+          description: Search results.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogSearchResponse' }
+              examples:
+                hits:
+                  value:
+                    items:
+                      - id: 0192f0f5-4eaa-7c60-d5f4-84b5d3e0a2dd
+                        title: Vivir Mi Vida
+                        artist: Marc Anthony
+                        album: 3.0
+                        duration_ms: 252000
+                        isrc: USSD11300001
+                        artwork_url: https://cdn.example/cover.jpg
+                        preview_url: https://cdn.example/preview.m4a
+                        explicit: false
+                    cached: false
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /v1/developer/stats/overview:
+    get:
+      tags: [stats]
+      operationId: getStatsOverview
+      security:
+        - apiKeyAuth: []
+        - apiKeyHeader: []
+      summary: Aggregated numbers for a period
+      description: |
+        Sessions, request counters, captured revenue and top tracks for the
+        trailing `day` (24 h), `week` (7 days) or `month` (30 days) window
+        ending now. Money is an integer number of minor units. `active_session`
+        is the club's current non-closed session or `null`. Revenue counts
+        captured payments of this club's requests, net of refunds; payment
+        creation is out of scope for v1.
+      parameters:
+        - name: period
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, week, month]
+            default: day
+      x-required-scope: stats:read
+      responses:
+        '200':
+          description: Aggregated overview.
+          headers:
+            X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatsOverview' }
+              examples:
+                day:
+                  value:
+                    period: day
+                    from: '2026-10-27T23:10:00Z'
+                    to: '2026-10-28T23:10:00Z'
+                    sessions: 3
+                    active_session:
+                      id: 0192f0f5-1b77-7f3d-a2c1-51e2a0b7d9aa
+                      status: active
+                      opened_at: '2026-10-28T22:10:00Z'
+                    requests: { total: 41, pending: 4, accepted: 3, rejected: 5, played: 29 }
+                    revenue: { currency: EUR, captured_minor: 58000 }
+                    top_tracks:
+                      - { title: Vivir Mi Vida, artist: Marc Anthony, count: 7 }
+                      - { title: La Bachata, artist: Manuel Turizo, count: 5 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      description: '`Authorization: Bearer dit_...`'
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  headers:
+    XRateLimitLimit:
+      description: Per-key request limit for the current 60-second window.
+      schema: { type: integer, minimum: 30, maximum: 600 }
+    XRateLimitRemaining:
+      description: Requests left in the current window.
+      schema: { type: integer, minimum: 0 }
+    XRateLimitReset:
+      description: Seconds until the current window resets.
+      schema: { type: integer, minimum: 0, maximum: 60 }
+    RetryAfter:
+      description: Seconds to wait before retrying (`60` for the rate limit window).
+      schema: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Malformed request (invalid JSON or headers).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            invalid_json:
+              value:
+                code: bad_request
+                message: The request body could not be parsed.
+                details: { field: body }
+    Unauthorized:
+      description: |
+        Missing, malformed, unknown, revoked or expired API key. The response
+        does not distinguish "unknown key" from "wrong secret".
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            invalid_key:
+              value:
+                code: invalid_api_key
+                message: "A valid API key is required. Use 'Authorization: Bearer dit_...' or 'X-API-Key'."
+                details: {}
+            revoked:
+              value:
+                code: api_key_revoked
+                message: The API key has been revoked.
+                details: {}
+            expired:
+              value:
+                code: api_key_expired
+                message: The API key has expired. Create a new key in the panel.
+                details: {}
+    Forbidden:
+      description: |
+        The key is valid but not allowed to do this: missing scope
+        (`insufficient_scope`), IP not in the key's allowlist
+        (`ip_not_allowed`), club not active (`club_suspended`), or a test key on
+        a live deployment (`test_key_not_allowed`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            insufficient_scope:
+              value:
+                code: insufficient_scope
+                message: The API key does not grant the scope required by this endpoint.
+                details:
+                  required_scope: stats:read
+                  granted_scopes: [docs:read]
+            ip_not_allowed:
+              value:
+                code: ip_not_allowed
+                message: This IP address is not allowed for the API key.
+                details: {}
+            club_suspended:
+              value:
+                code: club_suspended
+                message: The club account is not active.
+                details: {}
+            test_key_not_allowed:
+              value:
+                code: test_key_not_allowed
+                message: Test keys are refused on a live deployment. Use a live key.
+                details: {}
+    NotFound:
+      description: |
+        The resource does not exist or belongs to another club. Both cases
+        answer `404` so ids cannot be enumerated across tenants.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            session:
+              value:
+                code: not_found
+                message: Session not found.
+                details: { resource: Session }
+    Conflict:
+      description: |
+        The requested change conflicts with the current state: an invalid
+        session or request transition, a closed session, a session that is not
+        accepting requests, or a reused idempotency key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            session_closed:
+              value:
+                code: session_closed
+                message: This session is already closed.
+                details: {}
+            session_not_active:
+              value:
+                code: session_not_active
+                message: This session is not accepting requests right now.
+                details: {}
+            invalid_request_transition:
+              value:
+                code: invalid_request_transition
+                message: This action is not allowed from the request's current state.
+                details: {}
+    ValidationError:
+      description: |
+        A query parameter, header or body field failed validation (range, enum,
+        unknown track, invalid timezone, missing `Idempotency-Key`, malformed
+        cursor).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            limit:
+              value:
+                code: validation_error
+                message: limit must be between 1 and 100
+                details: { field: limit }
+            idempotency_key:
+              value:
+                code: validation_error
+                message: The Idempotency-Key header is required for request creation.
+                details: { field: Idempotency-Key }
+    RateLimited:
+      description: Per-key rate limit exceeded for the current 60-second window.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+        X-RateLimit-Limit: { $ref: '#/components/headers/XRateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/XRateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/XRateLimitReset' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            throttled:
+              value:
+                code: rate_limited
+                message: Rate limit exceeded for this API key. Retry after the window resets.
+                details: { limit: 120, window_seconds: 60 }
+    NoContent:
+      description: |
+        The operation succeeded and there is no body. Reserved for future
+        operations of v1 (cancellation/removal); no public operation returns
+        `204` today, but clients must tolerate it.
+    ServiceUnavailable:
+      description: |
+        A dependency is not available (database or catalog). Retry later;
+        requests with `Idempotency-Key` can be retried safely.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            unavailable:
+              value:
+                code: external_unavailable
+                message: The database is not configured.
+                details: {}
+  schemas:
+    Error:
+      type: object
+      description: The one error envelope used by the whole API.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable code (see the guides and the error examples).
+        message:
+          type: string
+          description: Human-readable explanation; safe to log.
+        details:
+          type: object
+          description: Optional structured context (field name, required scope, limits).
+          additionalProperties: true
+      examples:
+        - code: insufficient_scope
+          message: The API key does not grant the scope required by this endpoint.
+          details: { required_scope: sessions:write, granted_scopes: [sessions:read] }
+    ApiKeyIdentity:
+      type: object
+      required: [key_id, prefix, environment, scopes, rate_limit_per_min, club_id, api_version, docs_url, openapi_url]
+      properties:
+        key_id: { type: string, format: uuid, description: Internal key id (safe to quote in support tickets). }
+        prefix:
+          type: string
+          pattern: '^[0-9a-f]{10}$'
+          description: Public key prefix (10 hex chars); the secret is never shown again.
+        environment:
+          type: string
+          enum: [live, test]
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/ScopeId' }
+        rate_limit_per_min: { type: integer, minimum: 30, maximum: 600 }
+        club_id: { type: string, format: uuid }
+        api_version: { type: string, example: 1.0.0 }
+        docs_url: { type: string, example: /v1/developer/docs }
+        openapi_url: { type: string, example: /v1/developer/openapi.json }
+    ScopeId:
+      type: string
+      enum:
+        - docs:read
+        - profile:read
+        - sessions:read
+        - sessions:write
+        - qr:write
+        - requests:read
+        - requests:write
+        - catalog:read
+        - stats:read
+    DocsManifest:
+      type: object
+      required: [api_version, base_url, openapi_url, sections, scopes, presets]
+      properties:
+        api_version: { type: string, example: 1.0.0 }
+        base_url: { type: string, example: /v1/developer }
+        openapi_url: { type: string, example: /v1/developer/openapi.json }
+        sections:
+          type: array
+          items: { $ref: '#/components/schemas/DocsSectionSummary' }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/ScopeInfo' }
+        presets:
+          type: array
+          items: { $ref: '#/components/schemas/ScopePreset' }
+    DocsSectionSummary:
+      type: object
+      required: [id, title, summary, requires, order]
+      properties:
+        id: { type: string, example: quickstart }
+        title: { type: string, example: Quickstart }
+        summary: { type: string }
+        requires:
+          type: array
+          items: { $ref: '#/components/schemas/ScopeId' }
+        order: { type: integer }
+    DocsSection:
+      type: object
+      required: [id, title, summary, requires, markdown]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        summary: { type: string }
+        requires:
+          type: array
+          items: { $ref: '#/components/schemas/ScopeId' }
+        markdown: { type: string, description: Guide body as markdown (front matter removed). }
+    ScopeInfo:
+      type: object
+      required: [id, title, description, group, risk, docs_section]
+      properties:
+        id: { $ref: '#/components/schemas/ScopeId' }
+        title: { type: string }
+        description: { type: string }
+        group: { type: string, enum: [Documentation, Club, Live room, Orders, Catalog, Analytics] }
+        risk: { type: string, enum: [read, write, sensitive] }
+        docs_section: { type: string }
+    ScopePreset:
+      type: object
+      required: [id, title, description, scopes]
+      properties:
+        id: { type: string, example: full-automation }
+        title: { type: string }
+        description: { type: string }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/ScopeId' }
+    OpenApiDocument:
+      type: object
+      description: An OpenAPI 3.1 document (filtered by the key's scopes, with `x-granted-scopes`).
+      additionalProperties: true
+    ClubProfileResponse:
+      type: object
+      required: [club]
+      properties:
+        club: { $ref: '#/components/schemas/ClubProfile' }
+    ClubProfile:
+      type: object
+      required: [id, name, slug, address, country, email, phone, logo_url, timezone, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        address: { type: [string, 'null'] }
+        country: { type: [string, 'null'], description: ISO-3166 alpha-2. }
+        email: { type: string, format: email, description: The club's own contact address. }
+        phone: { type: [string, 'null'] }
+        logo_url: { type: [string, 'null'], format: uri }
+        timezone: { type: [string, 'null'], description: IANA zone used as the default for sessions. }
+        status: { type: string, enum: [pending_verification, active, suspended, blocked] }
+    Session:
+      type: object
+      required: [id, status, timezone, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [created, active, paused_acceptance, closed] }
+        timezone: { type: string, example: Europe/Madrid }
+        dj_id: { type: [string, 'null'], format: uuid }
+        pricing_policy_id: { type: [string, 'null'], format: uuid }
+        opened_at: { type: [string, 'null'], format: date-time }
+        closed_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+    SessionWithCounts:
+      allOf:
+        - $ref: '#/components/schemas/Session'
+        - type: object
+          required: [counts]
+          properties:
+            counts: { $ref: '#/components/schemas/SessionCounts' }
+    SessionCounts:
+      type: object
+      required: [total, pending, accepted, rejected, played, queue]
+      properties:
+        total: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        accepted: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        played: { type: integer, minimum: 0 }
+        queue: { type: integer, minimum: 0, description: '`pending` + `accepted`: the active queue size.' }
+    CreateSessionRequest:
+      type: object
+      required: [timezone]
+      properties:
+        dj_id:
+          type: string
+          format: uuid
+          description: Must belong to this club (`404` otherwise).
+        pricing_policy_id:
+          type: string
+          format: uuid
+          description: Must belong to this club (`404` otherwise).
+        timezone:
+          type: string
+          description: IANA time zone, e.g. `Europe/Madrid`.
+          example: Europe/Madrid
+    SessionList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Session' }
+        next_cursor:
+          type: [string, 'null']
+          description: Pass as `cursor` to fetch the next page; `null` on the last page.
+    QrIssueResponse:
+      type: object
+      required: [session_id, qr_token, expires_at]
+      properties:
+        session_id: { type: string, format: uuid }
+        qr_token:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: One-time guest entry token (the secret the QR encodes). Never logged or cached.
+        expires_at: { type: string, format: date-time, description: Scheduled session close (next 07:00 in the club timezone). }
+        join_url:
+          type: string
+          format: uri
+          description: Optional hosted join page, present only when the deployment configures `DROPIT_GUEST_JOIN_BASE_URL`.
+    Track:
+      type: object
+      required: [title, artist]
+      properties:
+        title: { type: string }
+        artist: { type: string }
+        artwork_url: { type: [string, 'null'], format: uri }
+        preview_url: { type: [string, 'null'], format: uri }
+        isrc: { type: [string, 'null'] }
+    RequestCard:
+      type: object
+      required: [id, session_id, status, style, price_minor, decline_reason, played_at, created_at, track]
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted, rejected, played, expired] }
+        style: { type: [string, 'null'] }
+        price_minor:
+          type: integer
+          minimum: 0
+          description: Snapshot of the request price in minor units (`0` for API-created requests in v1).
+        decline_reason: { type: [string, 'null'] }
+        played_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        track: { $ref: '#/components/schemas/Track' }
+    RequestActionResponse:
+      allOf:
+        - $ref: '#/components/schemas/RequestCard'
+        - type: object
+          required: [noop]
+          properties:
+            noop:
+              type: boolean
+              description: '`true` when the action was already in effect (repeat of the same action).'
+    RequestList:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/RequestCard' }
+        next_cursor: { type: [string, 'null'] }
+    CreateRequestBody:
+      type: object
+      required: [track_id]
+      properties:
+        track_id:
+          type: string
+          format: uuid
+          description: The `track_cache` id returned by `GET /v1/developer/catalog/search`.
+        style:
+          type: string
+          maxLength: 40
+    RejectBody:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          description: Optional decline reason shown to the guest.
+    QueueList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/QueueItem' }
+    QueueItem:
+      type: object
+      required: [id, session_id, status, style, created_at, same_track_count, track]
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, accepted] }
+        style: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        same_track_count:
+          type: integer
+          minimum: 1
+          description: How many times the same song (canonical key) was requested in the session.
+        track: { $ref: '#/components/schemas/Track' }
+    CatalogSearchResponse:
+      type: object
+      required: [items, cached]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CatalogItem' }
+        cached: { type: boolean, description: '`true` when the answer came from the server cache.' }
+    CatalogItem:
+      type: object
+      required: [id, title, artist, album, duration_ms, isrc, artwork_url, preview_url, explicit]
+      properties:
+        id: { type: string, format: uuid, description: Use this as `track_id` when creating a request. }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: [string, 'null'] }
+        duration_ms: { type: integer, minimum: 0 }
+        isrc: { type: [string, 'null'] }
+        artwork_url: { type: [string, 'null'], format: uri }
+        preview_url: { type: [string, 'null'], format: uri }
+        explicit: { type: boolean }
+    StatsOverview:
+      type: object
+      required: [period, from, to, sessions, active_session, requests, revenue, top_tracks]
+      properties:
+        period: { type: string, enum: [day, week, month] }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        sessions: { type: integer, minimum: 0, description: Sessions created in the window. }
+        active_session:
+          oneOf:
+            - $ref: '#/components/schemas/ActiveSession'
+            - type: 'null'
+        requests: { $ref: '#/components/schemas/RequestCounts' }
+        revenue: { $ref: '#/components/schemas/Revenue' }
+        top_tracks:
+          type: array
+          items: { $ref: '#/components/schemas/TopTrack' }
+    ActiveSession:
+      type: object
+      required: [id, status, opened_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [created, active, paused_acceptance] }
+        opened_at: { type: [string, 'null'], format: date-time }
+    RequestCounts:
+      type: object
+      required: [total, pending, accepted, rejected, played]
+      properties:
+        total: { type: integer, minimum: 0 }
+        pending: { type: integer, minimum: 0 }
+        accepted: { type: integer, minimum: 0 }
+        rejected: { type: integer, minimum: 0 }
+        played: { type: integer, minimum: 0 }
+    Revenue:
+      type: object
+      required: [currency, captured_minor]
+      properties:
+        currency: { type: string, example: EUR }
+        captured_minor:
+          type: integer
+          description: Captured amount net of refunds, in minor units.
+    TopTrack:
+      type: object
+      required: [title, artist, count]
+      properties:
+        title: { type: string }
+        artist: { type: string }
+        count: { type: integer, minimum: 1 }

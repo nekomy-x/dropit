@@ -38,6 +38,7 @@ import {
   CircleCheckBig,
   CircleDashed,
   Clock,
+  Code2,
   Clock3,
   Command,
   Copy,
@@ -113,6 +114,7 @@ const ICONS: Record<string, LucideComponent> = {
   'circle-check': CircleCheck,
   'circle-dashed': CircleDashed,
   clock: Clock,
+  'code-2': Code2,
   'clock-3': Clock3,
   command: Command,
   copy: Copy,
@@ -169,11 +171,14 @@ interface IconProps {
   name: `lucide:${string}`;
   size?: number;
   className?: string;
+  /** Stroke weight in user units. The mark and the wordmark of a brand lockup
+   *  read as one glyph only at one weight, so the lockup overrides the default. */
+  strokeWidth?: number;
   /** Decorative by default; pass a label to expose the icon to assistive tech. */
   label?: string;
 }
 
-export default function Icon({ name, size = 16, className, label }: IconProps) {
+export default function Icon({ name, size = 16, className, strokeWidth, label }: IconProps) {
   const key = name.slice('lucide:'.length);
   const Glyph = ICONS[key];
   const style: CSSProperties = { display: 'inline-flex', flex: '0 0 auto', width: size, height: size };
@@ -190,7 +195,7 @@ export default function Icon({ name, size = 16, className, label }: IconProps) {
 
   return (
     <span className={className} style={style} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
-      <Glyph size={size} strokeWidth={1.75} aria-hidden="true" focusable="false" />
+      <Glyph size={size} strokeWidth={strokeWidth ?? 1.75} aria-hidden="true" focusable="false" />
     </span>
   );
 }

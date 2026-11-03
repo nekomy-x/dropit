@@ -53,7 +53,7 @@ export default function AuditLogPage() {
             </header>
 
             <div className="table-wrap">
-              <table className="data-table" style={{ minWidth: 720 }}>
+              <table className="data-table data-table--stack" style={{ minWidth: 720 }}>
                 <thead>
                   <tr>
                     <th scope="col">{t('auditLog.colWhen')}</th>
@@ -65,12 +65,12 @@ export default function AuditLogPage() {
                 <tbody>
                   {data.items.map((entry) => (
                     <tr key={entry.id}>
-                      <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{new Date(entry.at).toLocaleString(locale)}</td>
-                      <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>
+                      <td data-label="" className="cell-primary is-mono">{new Date(entry.at).toLocaleString(locale)}</td>
+                      <td data-label={t('auditLog.colActor')} className="is-mono" style={{ color: 'var(--c-text-muted)' }}>
                         {entry.actorType}:{entry.actorId.slice(0, 8)}
                       </td>
-                      <td className="is-strong">{entry.action}</td>
-                      <td className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{entry.entity}</td>
+                      <td data-label={t('auditLog.colAction')} className="is-strong">{entry.action}</td>
+                      <td data-label={t('auditLog.colEntity')} className="is-mono" style={{ color: 'var(--c-text-muted)' }}>{entry.entity}</td>
                     </tr>
                   ))}
                 </tbody>

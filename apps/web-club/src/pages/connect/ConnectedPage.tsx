@@ -67,8 +67,8 @@ export default function ConnectedPage() {
       backTo="/connect"
       backLabel={t('wizardHome')}
       hint={offline ? t('wizardSavedDevice') : t('wizardSubmitted')}
-      nextLabel={t('wizardOpenPanel')}
-      onNext={() => navigate('/login')}
+      nextLabel={t('wizardHome')}
+      onNext={() => navigate('/connect')}
     >
       <section className="flex-1 rounded-card border border-drop-line bg-drop-surface p-7">
         <header className="flex items-center gap-3.5">
@@ -77,7 +77,7 @@ export default function ConnectedPage() {
           </span>
           <div className="min-w-0 flex-1">
             <p className="connect-mono-label">{t('wizardConnection')}</p>
-            <p className="mt-1 truncate text-[13px] text-drop-text">
+            <p className="mt-1 text-[13px] text-drop-text sm:truncate">
               {t('wizardDataSaved')}
             </p>
           </div>
@@ -85,7 +85,7 @@ export default function ConnectedPage() {
         </header>
 
         {/* Success row with the animated check */}
-        <div className="mt-6 flex flex-col gap-4 rounded-card border border-drop-accent/25 bg-drop-accent/[0.05] p-5 sm:flex-row sm:items-center">
+        <div className="wizard-inset mt-6 flex flex-col gap-4 rounded-card border border-drop-accent/25 bg-drop-accent/[0.05] p-5 sm:flex-row sm:items-center">
           <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-drop-accent text-drop-ink">
             <span className="absolute inset-0 animate-ring-out rounded-full border border-drop-accent" />
             <svg viewBox="0 0 24 24" width={18} height={18} fill="none" aria-hidden="true">
@@ -201,13 +201,17 @@ export default function ConnectedPage() {
           {t('wizardSupportNote')}
         </p>
 
+        {/* Before approval there is no account to open a panel with: the
+            e-mail invitation is the way in. The success screen therefore sends
+            the visitor back to the public site instead of a login form they
+            cannot pass yet. */}
         <button
           type="button"
-          onClick={() => navigate('/login')}
+          onClick={() => navigate('/connect')}
           className="connect-btn-primary mt-5 w-full"
         >
           <Icon name="arrowRight" size={14} strokeWidth={2} />
-          {t('wizardOpenPanel')}
+          {t('wizardHome')}
         </button>
       </aside>
     </WizardPage>

@@ -94,9 +94,11 @@ class JoinSession {
     required this.room,
     required this.dj,
     required this.priceLabel,
+    this.testPayments = false,
   });
 
   final Room room;
   final String dj;
   final String priceLabel;
+  final bool testPayments;
 }

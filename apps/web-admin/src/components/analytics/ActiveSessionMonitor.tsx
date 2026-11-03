@@ -56,7 +56,7 @@ export default function ActiveSessionMonitor({
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table" style={{ minWidth: 560 }}>
+          <table className="data-table data-table--stack" style={{ minWidth: 560 }}>
             <thead>
               <tr>
                 <th scope="col">{t('analytics.colVenue')}</th>
@@ -71,7 +71,9 @@ export default function ActiveSessionMonitor({
                 const status = STATUS_CHIP[session.status];
                 return (
                   <tr key={session.id}>
-                    <td className="is-strong">
+                    {/* `cell-primary` is the stacked-row identity: on a phone it
+                        is the row's title line and carries no column label. */}
+                    <td className="is-strong cell-primary">
                       {onSessionSelect ? (
                         <button
                           type="button"
@@ -93,12 +95,12 @@ export default function ActiveSessionMonitor({
                         </>
                       )}
                     </td>
-                    <td>
+                    <td data-label={t('analytics.colDj')}>
                       <span style={{ display: 'block', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{session.dj}</span>
                     </td>
-                    <td className="is-num">{session.requests}</td>
-                    <td className="is-num">{session.guests}</td>
-                    <td className="is-num">
+                    <td className="is-num" data-label={t('analytics.colRequests')}>{session.requests}</td>
+                    <td className="is-num" data-label={t('analytics.colGuests')}>{session.guests}</td>
+                    <td className="is-num" data-label={t('analytics.colState')}>
                       <span className={`chip ${status.tone}`}>
                         {t(STATUS_KEY[session.status])}
                       </span>

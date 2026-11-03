@@ -2,6 +2,14 @@ import { Link } from 'react-router-dom';
 import { LogoLockup } from './ConnectNav';
 import { useLocale } from '../../connect/locale';
 
+/**
+ * Footer of the public site.
+ *
+ * The `connect-footer-*` hooks are the phone layout in `src/index.css`: on a
+ * desktop the four columns and the legal row come from the utilities below, on
+ * a phone each link becomes a 44px row and the three link groups pair up under
+ * the brand block. The colour, type and spacing tokens are the same in both.
+ */
 export default function ConnectFooter() {
   const { t } = useLocale();
   const columns = [
@@ -12,8 +20,8 @@ export default function ConnectFooter() {
   return (
     <footer className="border-t border-drop-line bg-drop-bg">
       <div className="mx-auto w-full max-w-[1440px] px-6 py-14 lg:px-12">
-        <div className="grid gap-10 lg:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
-          <div className="max-w-[320px]">
+        <div className="connect-footer-grid grid gap-10 lg:grid-cols-[1.4fr_repeat(3,minmax(0,1fr))]">
+          <div className="connect-footer-brand max-w-[320px]">
             <LogoLockup compact />
             <p className="mt-4 text-[13px] leading-relaxed text-drop-muted">
               {t('footerBlurb')}
@@ -23,20 +31,20 @@ export default function ConnectFooter() {
           {columns.map((col) => (
             <div key={col.title}>
               <h3 className="connect-mono-label">{col.title}</h3>
-              <ul className="mt-4 space-y-2.5">
+              <ul className="connect-footer-links mt-4 space-y-2.5">
                 {col.links.map(([labelKey, to], index) => (
                   <li key={`${col.title}-${labelKey}-${index}`}>
                     {to.startsWith('mailto:') ? (
                       <a
                         href={to}
-                        className="text-[13px] text-drop-muted transition-colors hover:text-drop-accent"
+                        className="connect-footer-link text-[13px] text-drop-muted transition-colors hover:text-drop-accent"
                       >
                         {t(labelKey)}
                       </a>
                     ) : (
                       <Link
                         to={to}
-                        className="text-[13px] text-drop-muted transition-colors hover:text-drop-accent"
+                        className="connect-footer-link text-[13px] text-drop-muted transition-colors hover:text-drop-accent"
                       >
                         {t(labelKey)}
                       </Link>
@@ -48,11 +56,11 @@ export default function ConnectFooter() {
           ))}
         </div>
 
-        <div className="mt-12 flex flex-col gap-4 border-t border-drop-line pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="font-mono text-[10px] uppercase tracking-[1.2px] text-drop-dim">
+        <div className="connect-footer-bottom mt-12 flex flex-col gap-4 border-t border-drop-line pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <p className="connect-footer-legal font-mono text-[10px] uppercase tracking-[1.2px] text-drop-dim">
             {t('copyright')}
           </p>
-          <div className="flex flex-wrap items-center gap-5">
+          <div className="connect-footer-social flex flex-wrap items-center gap-5">
             {['Telegram', 'Instagram', 'SoundCloud'].map((s) => (
               <a
                 key={s}

@@ -936,3 +936,340 @@ async fn e2e_parallel_idempotency_no_duplicate() {
     .unwrap();
     assert_eq!(ob_cnt2, 1, "replay must not duplicate outbox event");
 }
+
+// ============================================================
+// T9: GET /v1/dj/history + GET /v1/dj/stats/session
+// ============================================================
+
+/// Лог смены DJ: пустая смена, сыгранная заявка в истории, пагинация,
+/// RBAC (клуб → 403) и счётчики смены.
+///
+/// Критерии задачи task-9:
+///   * пустая смена → `[]` (200, без ошибки);
+///   * accept → played попадает в историю со временем `played_at` и
+///     `accepted_at` из события `request.accepted`;
+///   * отказ и pending в историю не попадают (лог — только сыгранное);
+///   * keyset-пагинация не повторяет и не теряет строки;
+///   * клубный токен → 403, без токена → 401, мусорный limit/cursor → 400;
+///   * счётчики смены считают смену, а не 24 часа и не «всё время».
+#[tokio::test]
+async fn e2e_dj_history() {
+    let repo = match test_repo().await {
+        Some(r) => r,
+        None => {
+            eprintln!("DATABASE_URL недоступен — e2e T9 (dj history) пропущен");
+            return;
+        }
+    };
+    let sessions = SessionRepo::new(repo.pool());
+    let requests = RequestRepo::new(repo.pool());
+    let env = app_env(
+        Some(repo.clone()),
+        Some(sessions.clone()),
+        Some(requests.clone()),
+    )
+    .await;
+    let pool = repo.pool();
+    let tag = uuid::Uuid::now_v7();
+
+    // --- Фикстуры: клуб, DJ, active-сессия -----------------------
+    let club_id = uuid::Uuid::now_v7();
+    let dj_id = uuid::Uuid::now_v7();
+    sqlx::query(
+        "INSERT INTO club (id, name, slug, email, password_hash) \
+         VALUES ($1, 'T9 Club', $2, $3, 'x')",
+    )
+    .bind(club_id)
+    .bind(format!("t9-club-{tag}"))
+    .bind(format!("t9-{tag}@club.test"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO dj (id, club_id, email, password_hash, display_name) \
+         VALUES ($1, $2, $3, 'x', 'DJ T9')",
+    )
+    .bind(dj_id)
+    .bind(club_id)
+    .bind(format!("t9-{tag}@dj.test"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let session = sessions
+        .create_session(club_id, Some(dj_id), None, "Europe/Madrid")
+        .await
+        .unwrap();
+    sessions
+        .apply_transition(session.id, dropit_domain::SessionTransition::Open)
+        .await
+        .unwrap();
+
+    let dj_token = env
+        .keys
+        .issue_access(dj_id, Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+    let club_token = env
+        .keys
+        .issue_access(club_id, Role::Club, uuid::Uuid::now_v7())
+        .unwrap();
+
+    // --- 1. Пустая смена → пустой лог (200, не 404) --------------
+    let (s, body) = call(&env, "GET", "/v1/dj/history", None, Some(&dj_token)).await;
+    assert_eq!(s, StatusCode::OK, "empty shift history: {body}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(0));
+    assert!(body["next_cursor"].is_null(), "no cursor on an empty log");
+
+    // --- 2. RBAC: клуб → 403, без токена → 401 -------------------
+    let (s, body) = call(&env, "GET", "/v1/dj/history", None, Some(&club_token)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "club token must not read the log");
+    assert_eq!(body["code"], "forbidden");
+    let (s, _) = call(&env, "GET", "/v1/dj/history", None, None).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "history requires auth");
+
+    // --- 3. Гость, грант, треки ----------------------------------
+    let guest_id = uuid::Uuid::now_v7();
+    repo.create_guest_device(guest_id, "ios", None)
+        .await
+        .unwrap();
+    sessions
+        .grant_session_guest(session.id, guest_id)
+        .await
+        .unwrap();
+    let track_a = insert_track(
+        &pool,
+        "itunes",
+        &format!("t9-a-{tag}"),
+        "Song A",
+        "Artist A",
+    )
+    .await;
+    let track_b = insert_track(
+        &pool,
+        "itunes",
+        &format!("t9-b-{tag}"),
+        "Song B",
+        "Artist B",
+    )
+    .await;
+    let track_c = insert_track(
+        &pool,
+        "itunes",
+        &format!("t9-c-{tag}"),
+        "Song C",
+        "Artist C",
+    )
+    .await;
+
+    // Три сыгранные заявки (порядок действий = порядок в логе).
+    let mut played_ids = Vec::new();
+    for (track, key) in [
+        (track_a, "t9-play-a"),
+        (track_b, "t9-play-b"),
+        (track_c, "t9-play-c"),
+    ] {
+        let (s, body) = call_with_key(
+            &env,
+            "POST",
+            "/v1/requests",
+            Some(json!({ "track_id": track })),
+            Some(&guest_id.to_string()),
+            key,
+        )
+        .await;
+        assert_eq!(s, StatusCode::CREATED, "create request: {body}");
+        let id = body["request_id"].as_str().unwrap().to_string();
+        let (s, body) = call(
+            &env,
+            "POST",
+            &format!("/v1/dj/requests/{id}/accept"),
+            None,
+            Some(&dj_token),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "accept: {body}");
+        let (s, body) = call(
+            &env,
+            "POST",
+            &format!("/v1/dj/requests/{id}/played"),
+            None,
+            Some(&dj_token),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "played: {body}");
+        played_ids.push(id);
+    }
+
+    // Ещё две заявки, которые в лог попасть не должны: отклонённая и
+    // висящая в pending (лог — только сыгранное, не «все решения»).
+    let (s, body) = call_with_key(
+        &env,
+        "POST",
+        "/v1/requests",
+        Some(json!({ "track_id": track_b })),
+        Some(&guest_id.to_string()),
+        "t9-reject",
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create request to reject: {body}");
+    let rejected_id = body["request_id"].as_str().unwrap().to_string();
+    let (s, body) = call(
+        &env,
+        "POST",
+        &format!("/v1/dj/requests/{rejected_id}/reject"),
+        Some(json!({ "reason": "too late" })),
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "reject: {body}");
+    let (s, body) = call_with_key(
+        &env,
+        "POST",
+        "/v1/requests",
+        Some(json!({ "track_id": track_b })),
+        Some(&guest_id.to_string()),
+        "t9-pending",
+    )
+    .await;
+    assert_eq!(s, StatusCode::CREATED, "create pending request: {body}");
+
+    // --- 4. Сыгранное попало в историю ---------------------------
+    let (s, body) = call(&env, "GET", "/v1/dj/history", None, Some(&dj_token)).await;
+    assert_eq!(s, StatusCode::OK, "history: {body}");
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "only played requests are logged: {body}");
+    assert!(body["next_cursor"].is_null(), "one page holds three rows");
+    // Новейшая сыгранная — первой.
+    assert_eq!(items[0]["id"], played_ids[2].as_str());
+    assert_eq!(items[0]["title"], "Song C");
+    assert_eq!(items[0]["artist"], "Artist C");
+    assert!(
+        items[0]["played_at"].as_str().is_some(),
+        "played_at must be a timestamp: {body}"
+    );
+    assert!(
+        items[0]["accepted_at"].as_str().is_some(),
+        "accepted_at comes from the request.accepted event: {body}"
+    );
+    // Song B заказана трижды в сессии (played, rejected, pending), но в
+    // историю попала только сыгранная строка — счётчик считает сессию.
+    let song_b = items
+        .iter()
+        .find(|row| row["title"] == "Song B")
+        .expect("played Song B");
+    assert_eq!(song_b["same_track_count"], 3);
+    for item in items {
+        assert_eq!(item["status"], serde_json::Value::Null, "no status field");
+    }
+
+    // --- 5. Keyset-пагинация -------------------------------------
+    let (s, first) = call(&env, "GET", "/v1/dj/history?limit=2", None, Some(&dj_token)).await;
+    assert_eq!(s, StatusCode::OK, "first page: {first}");
+    let first_items = first["items"].as_array().unwrap();
+    assert_eq!(first_items.len(), 2, "limit honoured: {first}");
+    let cursor = first["next_cursor"].as_str().expect("cursor on page 1");
+    let (s, second) = call(
+        &env,
+        "GET",
+        &format!("/v1/dj/history?limit=2&cursor={}", url_escape(cursor)),
+        None,
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "second page: {second}");
+    let second_items = second["items"].as_array().unwrap();
+    assert_eq!(second_items.len(), 1, "rest of the page: {second}");
+    assert!(
+        second["next_cursor"].is_null(),
+        "no third page for three rows"
+    );
+    let mut seen: Vec<String> = first_items
+        .iter()
+        .chain(second_items.iter())
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .collect();
+    let total = seen.len();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), total, "pages must not repeat a row");
+    assert_eq!(seen.len(), 3, "pages must not lose a row: {seen:?}");
+
+    // --- 6. Мусорные limit/cursor → 400 (конверт, не text/plain) --
+    for query in ["?limit=0", "?limit=101", "?limit=abc"] {
+        let (s, body) = call(
+            &env,
+            "GET",
+            &format!("/v1/dj/history{query}"),
+            None,
+            Some(&dj_token),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "bad limit {query}: {body}");
+        assert_eq!(body["code"], "validation_error");
+    }
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/dj/history?cursor=not-a-cursor",
+        None,
+        Some(&dj_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST, "bad cursor: {body}");
+    assert_eq!(body["code"], "validation_error");
+
+    // --- 7. Счётчики смены ---------------------------------------
+    let (s, body) = call(&env, "GET", "/v1/dj/stats/session", None, Some(&dj_token)).await;
+    assert_eq!(s, StatusCode::OK, "session stats: {body}");
+    assert_eq!(body["session"]["id"], session.id.to_string());
+    assert_eq!(body["requests"], 5, "all requests of the shift: {body}");
+    assert_eq!(
+        body["accepted"], 3,
+        "accepted = played + still queued: {body}"
+    );
+    assert_eq!(
+        body["played_session"], 3,
+        "played belongs to the shift: {body}"
+    );
+    assert_eq!(body["rejected"], 1, "rejected: {body}");
+    // Платежей в этом сценарии нет — DJ-доля честный ноль.
+    assert_eq!(body["earned_session_minor"], 0, "earned: {body}");
+    let (s, body) = call(&env, "GET", "/v1/dj/stats/session", None, Some(&club_token)).await;
+    assert_eq!(
+        s,
+        StatusCode::FORBIDDEN,
+        "club token must not read shift stats: {body}"
+    );
+
+    // --- 8. DJ без смены: пустой лог и `session: null` -----------
+    let no_shift_dj = uuid::Uuid::now_v7();
+    let orphan_token = env
+        .keys
+        .issue_access(no_shift_dj, Role::Dj, uuid::Uuid::now_v7())
+        .unwrap();
+    let (s, body) = call(&env, "GET", "/v1/dj/history", None, Some(&orphan_token)).await;
+    assert_eq!(s, StatusCode::OK, "no shift is an empty log, not an error");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(0));
+    let (s, body) = call(
+        &env,
+        "GET",
+        "/v1/dj/stats/session",
+        None,
+        Some(&orphan_token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "no shift stats: {body}");
+    assert!(body["session"].is_null(), "no shift reported honestly");
+}
+
+/// Минимальное экранирование курсора для query-строки: `base64url` курсора
+/// содержит только `A–Z a–z 0–9 - _`, поэтому экранировать достаточно
+/// служебные символы, но тест не должен зависеть от этого совпадения.
+fn url_escape(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            other => format!("%{:02X}", other as u32),
+        })
+        .collect()
+}

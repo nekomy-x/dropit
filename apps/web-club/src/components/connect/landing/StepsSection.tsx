@@ -51,7 +51,7 @@ export default function StepsSection() {
         <div className="mt-14 grid gap-px overflow-hidden rounded-card border border-drop-line bg-drop-line sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((step, index) => (
             <Reveal key={step.number} delay={index * 80}>
-              <div className="group relative flex h-full flex-col gap-4 bg-drop-bg p-6 transition-colors duration-300 hover:bg-drop-surface">
+              <div className="connect-step group relative flex h-full flex-col gap-4 bg-drop-bg p-6 transition-colors duration-300 hover:bg-drop-surface">
                 {/* Rail dot + connector */}
                 <div className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-drop-accent transition-transform duration-300 group-hover:scale-150" />
@@ -73,7 +73,7 @@ export default function StepsSection() {
         </div>
 
         <Reveal delay={100}>
-          <div className="mt-6 flex flex-col justify-between gap-4 rounded-card border border-drop-line bg-drop-surface px-6 py-5 sm:flex-row sm:items-center">
+          <div className="connect-steps-summary mt-6 flex flex-col justify-between gap-4 rounded-card border border-drop-line bg-drop-surface px-6 py-5 sm:flex-row sm:items-center">
             <div>
               <p className="connect-mono-label">{t('totalTime')}</p>
               <p className="mt-1 text-[11px] text-drop-dim">{t('average')}</p>

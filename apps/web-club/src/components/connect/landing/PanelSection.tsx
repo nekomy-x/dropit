@@ -13,9 +13,9 @@
  * token names with the dark values inside this section only: a visitor who
  * switched the panel to light gets a black landing page, not white cards in it.
  *
- * Motion: the window hangs from its top edge, tipped away from the reader, and
- * unfolds flat once as it scrolls into view (`useUnfold`). It never tips back,
- * and the content is fully legible with reduced motion or without JavaScript.
+ * Motion: the window lifts into place once its upper portion is visible, then
+ * the navigation, KPIs and report sections settle in a short sequence. The text
+ * stays sharp throughout; reduced motion shows the finished preview immediately.
  *
  * Copy comes from the panel catalogs through the app-level provider, so the
  * preview shares its sentences with the real panel instead of carrying a second
@@ -24,11 +24,10 @@
  * sample night.
  */
 import { QRCodeSVG } from 'qrcode.react';
-import Reveal from '../Reveal';
 import Icon, { type IconName } from '../Icons';
 import SectionHead from './SectionHead';
 import { useLocale } from '../../../i18n';
-import { useUnfold } from '../../../connect/useMotion';
+import { usePanelEntrance } from '../../../connect/usePanelEntrance';
 import {
   DEFAULT_PRICE_MINOR,
   PANEL_QUEUE_NOW,
@@ -74,7 +73,7 @@ const ZONES = [
 
 export default function PanelSection() {
   const { t, locale } = useLocale();
-  const unfold = useUnfold<HTMLDivElement>();
+  const entrance = usePanelEntrance<HTMLDivElement>();
 
   const money = (minor: number) =>
     new Intl.NumberFormat(locale, {
@@ -134,224 +133,227 @@ export default function PanelSection() {
       <div className="connect-panel-section__inner">
         <SectionHead eyebrow={t('panelEyebrow')} headline={t('panelTitle')} note={t('panelNote')} />
 
-        <Reveal delay={60}>
-          <div ref={unfold} className="connect-panel-unfold">
-            <div className="connect-panel-window">
-              {/* The preview is dressed like a screen — window chrome, URL — but
-                  everything inside is the panel's own shell. */}
-              <div className="connect-panel-chrome">
-                <span className="connect-panel-dots" aria-hidden="true">
-                  <span className="connect-panel-dot" />
-                  <span className="connect-panel-dot" />
-                  <span className="connect-panel-dot" />
-                </span>
-                <p className="connect-panel-url">drop.it/panel — KRAFT Room · {t('panelWindowTitle')}</p>
-              </div>
+        <div ref={entrance} className="connect-panel-stage">
+          <div className="connect-panel-window">
+            {/* The preview is dressed like a screen — window chrome, URL — but
+                everything inside is the panel's own shell. */}
+            <div className="connect-panel-chrome">
+              <span className="connect-panel-dots" aria-hidden="true">
+                <span className="connect-panel-dot" />
+                <span className="connect-panel-dot" />
+                <span className="connect-panel-dot" />
+              </span>
+              {/* A phone cannot hold the whole address at a legible size, so
+                  the bar keeps the two parts that identify the screen — the
+                  product and the club — and drops the date there instead of
+                  cutting the line with an ellipsis mid-word. */}
+              <p className="connect-panel-url">
+                <span className="connect-panel-url-wide">drop.it/panel — KRAFT Room · {t('panelWindowTitle')}</span>
+                <span className="connect-panel-url-short">drop.it/panel — KRAFT Room</span>
+              </p>
+            </div>
 
-              <div className="panel-shell">
-                  <aside className="panel-rail">
-                    <div className="panel-rail-brand">
-                      <span className="connect-panel-brand" aria-hidden="true">DROP IT</span>
-                    </div>
+            <div className="panel-shell">
+                <aside className="panel-rail">
+                  <div className="panel-rail-brand">
+                    <span className="connect-panel-brand" aria-hidden="true">DROP IT</span>
+                  </div>
 
-                    {/* No workspace badge: the preview mirrors the real panel,
-                        which names the club in the page identity instead. */}
-                    <nav className="panel-rail-nav" aria-hidden="true">
-                      {NAV_GROUPS.map((group) => (
-                        <div key={group} className="panel-nav-group">
-                          <p className="panel-nav-label">{t(group)}</p>
-                          <ul className="panel-nav-list">
-                            {NAV.filter((item) => item.group === group).map((item) => (
-                              <li key={item.key}>
-                                <span className={`panel-nav-link ${item.active ? 'is-active' : ''}`.trim()}>
-                                  <span className="panel-nav-icon"><Icon name={item.icon} size={15} /></span>
-                                  {t(item.key)}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ))}
-                    </nav>
+                  {/* No workspace badge: the preview mirrors the real panel,
+                      which names the club in the page identity instead. */}
+                  <nav className="panel-rail-nav" aria-hidden="true">
+                    {NAV_GROUPS.map((group) => (
+                      <div key={group} className="panel-nav-group">
+                        <p className="panel-nav-label">{t(group)}</p>
+                        <ul className="panel-nav-list">
+                          {NAV.filter((item) => item.group === group).map((item) => (
+                            <li key={item.key}>
+                              <span className={`panel-nav-link ${item.active ? 'is-active' : ''}`.trim()}>
+                                <span className="panel-nav-icon"><Icon name={item.icon} size={15} /></span>
+                                {t(item.key)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </nav>
 
-                    <div className="panel-rail-foot">
-                      <span className="panel-account">
+                  <div className="panel-rail-foot">
+                    <span className="panel-account">
+                      <span className="panel-workspace-avatar" aria-hidden="true">KO</span>
+                      <span className="panel-workspace-copy">
+                        <span className="panel-account-name">{t('panelAccountOwner')}</span>
+                        <span className="panel-account-meta">KRAFT Room</span>
+                      </span>
+                    </span>
+                  </div>
+                </aside>
+
+                <div className="panel-main">
+                  <header className="panel-topbar">
+                    <span className="panel-search">
+                      <Icon name="search" size={14} />
+                      <span>{t('shell.jumpTo')}</span>
+                      <kbd aria-hidden="true">⌘K</kbd>
+                    </span>
+                    <span className="panel-icon-button panel-search-compact" aria-hidden="true">
+                      <Icon name="search" size={15} />
+                    </span>
+                    <div className="panel-topbar-actions">
+                      <span className="panel-icon-button" aria-hidden="true">
+                        <Icon name="moon" size={14} />
+                      </span>
+                      {/* The panel moves the account here below the rail
+                          breakpoint, where the rail foot is gone; above it
+                          this element is hidden by the panel's own rule. */}
+                      <span className="panel-topbar-account">
                         <span className="panel-workspace-avatar" aria-hidden="true">KO</span>
-                        <span className="panel-workspace-copy">
-                          <span className="panel-account-name">{t('panelAccountOwner')}</span>
-                          <span className="panel-account-meta">KRAFT Room</span>
-                        </span>
                       </span>
                     </div>
-                  </aside>
+                  </header>
 
-                  <div className="panel-main">
-                    <header className="panel-topbar">
-                      <span className="panel-search">
-                        <Icon name="search" size={14} />
-                        <span>{t('shell.jumpTo')}</span>
-                        <kbd aria-hidden="true">⌘K</kbd>
-                      </span>
-                      <span className="panel-icon-button panel-search-compact" aria-hidden="true">
-                        <Icon name="search" size={15} />
-                      </span>
-                      <div className="panel-topbar-actions">
-                        <span className="panel-icon-button" aria-hidden="true">
-                          <Icon name="moon" size={14} />
-                        </span>
-                        {/* The panel moves the account here below the rail
-                            breakpoint, where the rail foot is gone; above it
-                            this element is hidden by the panel's own rule. */}
-                        <span className="panel-topbar-account">
-                          <span className="panel-workspace-avatar" aria-hidden="true">KO</span>
+                  <div className="panel-content">
+                    <header className="panel-page-head">
+                      <div>
+                        <p className="page-identity">KRAFT Room</p>
+                        <h3 className="panel-page-title">{t('board.headlineActive')}</h3>
+                        <p className="panel-page-sub">{t('board.detailActive')}</p>
+                      </div>
+                      <div className="panel-page-actions">
+                        <span className="freshness">
+                          <span className="connect-panel-live-dot" aria-hidden="true" />
+                          {t('common.updated')}
                         </span>
                       </div>
                     </header>
 
-                    <div className="panel-content">
-                      <header className="panel-page-head">
-                        <div>
-                          <p className="page-identity">KRAFT Room</p>
-                          <h3 className="panel-page-title">{t('board.headlineActive')}</h3>
-                          <p className="panel-page-sub">{t('board.detailActive')}</p>
-                        </div>
-                        <div className="panel-page-actions">
-                          <span className="freshness">
-                            <span className="connect-panel-live-dot" aria-hidden="true" />
-                            {t('common.updated')}
+                    <div className="stat-grid" role="group" aria-label={t('dashboard.kpiRow')}>
+                      {KPI.map((entry) => (
+                        <article key={entry.label} className="stat-card">
+                          <div className="stat-head">
+                            <p className="stat-label">{entry.label}</p>
+                            <span className="stat-icon" aria-hidden="true">
+                              <Icon name={entry.icon} size={16} />
+                            </span>
+                          </div>
+                          <p className="stat-value">{entry.value}</p>
+                          <div className="stat-row">
+                            {/* The panel's own source chip, carrying the word
+                                that is true here: a preview of the product,
+                                not a reading from a club API. */}
+                            <span className="club-source-chip club-source-preview">
+                              {t('source.preview')}
+                            </span>
+                          </div>
+                          <p className="stat-foot">{entry.caption}</p>
+                        </article>
+                      ))}
+                    </div>
+
+                    <div className="panel-section panel-grid-hero">
+                      <div className="panel-card">
+                        <header className="panel-card-head">
+                          <div>
+                            <h4 className="panel-card-title">{t('floor.title')}</h4>
+                            <p className="panel-card-sub">{t('floor.sub')}</p>
+                          </div>
+                          <div className="panel-card-tools">
+                            <span className="club-source-chip club-source-preview">
+                              {t('source.preview')}
+                            </span>
+                          </div>
+                        </header>
+
+                        <div className="floor-total">
+                          <span className="floor-total-value">{count(inside)}</span>
+                          <span className="floor-total-unit">
+                            {t('floor.guestsInside', { count: count(capacity) })}
+                          </span>
+                          <span className="floor-total-share">
+                            {t('dashboard.percentOfCapacity', { percent: share })}
                           </span>
                         </div>
-                      </header>
 
-                      <div className="stat-grid" role="group" aria-label={t('dashboard.kpiRow')}>
-                        {KPI.map((entry) => (
-                          <article key={entry.label} className="stat-card">
-                            <div className="stat-head">
-                              <p className="stat-label">{entry.label}</p>
-                              <span className="stat-icon" aria-hidden="true">
-                                <Icon name={entry.icon} size={16} />
-                              </span>
-                            </div>
-                            <p className="stat-value">{entry.value}</p>
-                            <div className="stat-row">
-                              {/* The panel's own source chip, carrying the word
-                                  that is true here: a preview of the product,
-                                  not a reading from a club API. */}
-                              <span className="club-source-chip club-source-preview">
-                                {t('source.preview')}
-                              </span>
-                            </div>
-                            <p className="stat-foot">{entry.caption}</p>
-                          </article>
-                        ))}
-                      </div>
-
-                      <div className="panel-section panel-grid-hero">
-                        <div className="panel-card">
-                          <header className="panel-card-head">
-                            <div>
-                              <h4 className="panel-card-title">{t('floor.title')}</h4>
-                              <p className="panel-card-sub">{t('floor.sub')}</p>
-                            </div>
-                            <div className="panel-card-tools">
-                              <span className="club-source-chip club-source-preview">
-                                {t('source.preview')}
-                              </span>
-                            </div>
-                          </header>
-
-                          <div className="floor-total">
-                            <span className="floor-total-value">{count(inside)}</span>
-                            <span className="floor-total-unit">
-                              {t('floor.guestsInside', { count: count(capacity) })}
-                            </span>
-                            <span className="floor-total-share">
-                              {t('dashboard.percentOfCapacity', { percent: share })}
-                            </span>
-                          </div>
-
-                          <div
-                            className="bar-list"
-                            role="img"
-                            aria-label={t('floor.aria', {
-                              zones: ZONES.map(
-                                (zone) => `${t(zone.key)} ${count(zone.inside)} / ${count(zone.capacity)}`,
-                              ).join(', '),
-                            })}
-                          >
-                            {ZONES.map((zone) => {
-                              const percent = Math.round((zone.inside / zone.capacity) * 100);
-                              return (
-                                <div key={zone.key} className="bar-row">
-                                  <div className="bar-row-head">
-                                    <span className="bar-row-label">{t(zone.key)}</span>
-                                    <span className="bar-row-value">
-                                      {`${count(zone.inside)} / ${count(zone.capacity)} · ${percent}%`}
-                                    </span>
-                                  </div>
-                                  <div className="bar-track">
-                                    <div className="bar-fill" style={{ width: `${percent}%` }} />
-                                  </div>
-                                  <p className="bar-row-note">{t('floor.qrOn')}</p>
+                        <div
+                          className="bar-list"
+                          role="img"
+                          aria-label={t('floor.aria', {
+                            zones: ZONES.map(
+                              (zone) => `${t(zone.key)} ${count(zone.inside)} / ${count(zone.capacity)}`,
+                            ).join(', '),
+                          })}
+                        >
+                          {ZONES.map((zone) => {
+                            const percent = Math.round((zone.inside / zone.capacity) * 100);
+                            return (
+                              <div key={zone.key} className="bar-row">
+                                <div className="bar-row-head">
+                                  <span className="bar-row-label">{t(zone.key)}</span>
+                                  <span className="bar-row-value">
+                                    {`${count(zone.inside)} / ${count(zone.capacity)} · ${percent}%`}
+                                  </span>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="panel-card">
-                          <header className="panel-card-head">
-                            <div>
-                              <h4 className="panel-card-title">{t('access.title')}</h4>
-                              <p className="panel-card-sub">{t('access.sub')}</p>
-                            </div>
-                          </header>
-
-                          <div className="access-qr">
-                            <div className="access-qr-frame">
-                              <QRCodeSVG
-                                value="drop.it/join/kraft-room"
-                                size={92}
-                                marginSize={2}
-                                bgColor="#FFFFFF"
-                                fgColor="#0A0C11"
-                                level="M"
-                              />
-                            </div>
-                            <dl className="access-meta">
-                              <div>
-                                <dt>{t('access.token')}</dt>
-                                <dd className="is-mono">7f3c·91ad</dd>
+                                <div className="bar-track">
+                                  <div className="bar-fill" style={{ width: `${percent}%` }} />
+                                </div>
+                                <p className="bar-row-note">{t('floor.qrOn')}</p>
                               </div>
-                              <div>
-                                <dt>{t('access.expires')}</dt>
-                                <dd>06:00</dd>
-                              </div>
-                              <div>
-                                <dt>{t('access.guests')}</dt>
-                                <dd>{t('access.guestsValue')}</dd>
-                              </div>
-                            </dl>
-                          </div>
+                            );
+                          })}
                         </div>
                       </div>
 
+                      <div className="panel-card">
+                        <header className="panel-card-head">
+                          <div>
+                            <h4 className="panel-card-title">{t('access.title')}</h4>
+                            <p className="panel-card-sub">{t('access.sub')}</p>
+                          </div>
+                        </header>
+
+                        <div className="access-qr">
+                          <div className="access-qr-frame">
+                            <QRCodeSVG
+                              value="drop.it/join/kraft-room"
+                              size={92}
+                              marginSize={2}
+                              bgColor="#FFFFFF"
+                              fgColor="#0A0A0A"
+                              level="M"
+                            />
+                          </div>
+                          <dl className="access-meta">
+                            <div>
+                              <dt>{t('access.token')}</dt>
+                              <dd className="is-mono">7f3c·91ad</dd>
+                            </div>
+                            <div>
+                              <dt>{t('access.expires')}</dt>
+                              <dd>06:00</dd>
+                            </div>
+                            <div>
+                              <dt>{t('access.guests')}</dt>
+                              <dd>{t('access.guestsValue')}</dd>
+                            </div>
+                          </dl>
+                        </div>
+                      </div>
                     </div>
+
                   </div>
                 </div>
-            </div>
+              </div>
           </div>
-        </Reveal>
+        </div>
 
-        <Reveal delay={120}>
-          <p className="connect-panel-sample">
-            {t('panelSampleNote', {
-              requests: requestsLabel,
-              share: shareLabel,
-              fee: feeLabel,
-            })}
-          </p>
-        </Reveal>
+        <p className="connect-panel-sample">
+          {t('panelSampleNote', {
+            requests: requestsLabel,
+            share: shareLabel,
+            fee: feeLabel,
+          })}
+        </p>
       </div>
     </section>
   );

@@ -21,7 +21,7 @@ export default function SectionHead({
           </h2>
         </div>
         {note && (
-          <div className="max-w-[320px] text-[12px] leading-relaxed text-drop-muted lg:text-right">
+          <div className="connect-section-note max-w-[320px] text-[12px] leading-relaxed text-drop-muted lg:text-right">
             {note}
           </div>
         )}

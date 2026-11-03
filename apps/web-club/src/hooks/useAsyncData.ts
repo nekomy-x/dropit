@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ApiRequestError, NotImplementedStubError } from '../api/client';
+import { ApiRequestError, NotImplementedStubError, isAuthenticated } from '../api/client';
 
 export interface AsyncState<T> {
   data: T | null;
@@ -80,7 +80,16 @@ export function useAsyncData<T>(
       } catch (err: unknown) {
         if (cancelled) return;
         if (err instanceof ApiRequestError && err.status === 401) {
-          navigate(window.location.pathname.startsWith('/dj') ? '/dj/login' : '/login', { replace: true, state: { from: `${location.pathname}${location.search}${location.hash}` } });
+          // A console opened by the club is a borrowed DJ session: when it
+          // cannot be renewed, the person in front of the screen is club
+          // staff, so the honest destination is the panel (where the one
+          // button starts a fresh handoff) — not the DJ login form they
+          // have no credentials for. A real DJ still lands on their login.
+          const inConsole = window.location.pathname.startsWith('/dj');
+          const target = inConsole
+            ? (isAuthenticated('club') ? '/dashboard' : '/dj/login')
+            : '/login';
+          navigate(target, { replace: true, state: { from: `${location.pathname}${location.search}${location.hash}` } });
           return;
         }
         setState((previous) => ({

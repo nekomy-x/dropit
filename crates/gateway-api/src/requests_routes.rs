@@ -10,6 +10,10 @@
 //!     no-op-семантика дублей (не 500!);
 //!   * `POST /v1/dj/acceptance/pause | /resume` — пауза блокирует
 //!     POST /requests (критерий приёмки F4);
+//!   * `GET /v1/dj/history?limit=&cursor=` — лог проигранных заявок
+//!     текущей смены (keyset по `(played_at, id)`; нет смены — пусто);
+//!   * `GET /v1/dj/stats/session` — счётчики и DJ-доля именно за смену
+//!     (`/v1/dj/stats/today` остаётся окном в 24 часа);
 //!   * `POST /v1/ws/ticket` — одноразовый билет WS (TTL 30 с);
 //!     JWT в query НЕ передаётся (утечки в логи Cloudflare/Loki).
 //!
@@ -58,6 +62,8 @@ pub struct RequestCreatedResponse {
     pub queue_position: Option<i64>,
 }
 
+/// Query `GET /v1/dj/queue`: `sort` — `new` | `hot`; любое другое значение
+/// (и пустая строка) → `400 validation_error`, как у `/v1/dj/history`.
 #[derive(Deserialize)]
 pub struct QueueParams {
     pub sort: Option<String>,
@@ -96,6 +102,130 @@ pub struct ActionResultResponse {
     pub request_id: Uuid,
     pub status: String,
     pub noop: bool,
+}
+
+// ============================================================
+// DTO: лог смены DJ (GET /v1/dj/history)
+// ============================================================
+
+/// Query `GET /v1/dj/history`. Оба поля — строки: `?limit=abc` обязан
+/// вернуть конверт `validation_error`, а не text/plain от axum-экстрактора.
+#[derive(Deserialize)]
+pub struct HistoryParams {
+    pub limit: Option<String>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DjHistoryResponse {
+    pub items: Vec<DjHistoryItemDto>,
+    /// Курсор следующей страницы; `null` — страница последняя.
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct DjHistoryItemDto {
+    /// `request.id` — стабильный ключ строки лога.
+    pub id: Uuid,
+    pub title: String,
+    pub artist: String,
+    pub style: Option<String>,
+    /// Время «сыграно». `null` — сыграно, но время неизвестно (см. `DjHistoryItem`).
+    pub played_at: Option<DateTime<Utc>>,
+    /// Время принятия заявки DJ. `null` — события `request.accepted` нет
+    /// (например, заявка пришла из бэкфилла), а не «приняли только что».
+    pub accepted_at: Option<DateTime<Utc>>,
+    /// Сколько раз эту же песню заказали в сессии (canonical-ключ).
+    pub same_track_count: i64,
+    pub cover_url: Option<String>,
+}
+
+// ============================================================
+// DTO: счётчики смены (GET /v1/dj/stats/session)
+// ============================================================
+
+#[derive(Serialize)]
+pub struct DjSessionStatsResponse {
+    /// `null` — открытой смены у DJ нет; тогда и счётчики нулевые по факту.
+    pub session: Option<DjSessionRefDto>,
+    pub requests: i64,
+    pub accepted: i64,
+    /// `played` в пределах смены (не 24 часа и не «за всё время»).
+    pub played_session: i64,
+    pub rejected: i64,
+    /// DJ-доля за смену, minor units.
+    pub earned_session_minor: i64,
+}
+
+#[derive(Serialize)]
+pub struct DjSessionRefDto {
+    pub id: Uuid,
+    pub status: String,
+    pub timezone: String,
+}
+
+// ============================================================
+// Курсор лога: base64url(`timestamp_micros`|`request_id`)
+// ============================================================
+
+/// Разделитель внутри раскодированного курсора.
+const CURSOR_SEP: char = '|';
+
+/// Размер страницы по умолчанию и верхняя граница (`limit`).
+const HISTORY_LIMIT_DEFAULT: i64 = 50;
+const HISTORY_LIMIT_MAX: i64 = 100;
+
+fn encode_history_cursor(at: DateTime<Utc>, id: Uuid) -> String {
+    use base64::Engine as _;
+    let raw = format!("{}{CURSOR_SEP}{id}", at.timestamp_micros());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
+}
+
+/// `None` — первая страница; мусор — `Err(())` (клиент получит 400, а не
+/// молча первую страницу: иначе пагинация зацикливается и выглядит как
+/// потеря заявок).
+fn decode_history_cursor(raw: Option<&str>) -> Result<Option<(DateTime<Utc>, Uuid)>, ()> {
+    use base64::Engine as _;
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(raw)
+        .map_err(|_| ())?;
+    let text = String::from_utf8(bytes).map_err(|_| ())?;
+    let (micros, id) = text.rsplit_once(CURSOR_SEP).ok_or(())?;
+    let micros: i64 = micros.parse().map_err(|_| ())?;
+    let at = DateTime::<Utc>::from_timestamp_micros(micros).ok_or(())?;
+    let id = Uuid::parse_str(id).map_err(|_| ())?;
+    Ok(Some((at, id)))
+}
+
+/// `limit` из query: по умолчанию 50, допустимо `1..=100` (мусор → 400).
+///
+/// `Result<_, Response>` — тот же приём, что у `resolve_guest_device_id`:
+/// ошибка уже собрана в конверт и возвращается из хендлера как есть, без
+/// второй аллокации-обёртки; `result_large_err` подавляем осознанно.
+#[allow(clippy::result_large_err)]
+fn history_limit(raw: Option<&str>) -> Result<i64, Response> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(HISTORY_LIMIT_DEFAULT);
+    };
+    let value: i64 = raw.parse().map_err(|_| {
+        envelope(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            "limit must be an integer between 1 and 100",
+        )
+    })?;
+    if (1..=HISTORY_LIMIT_MAX).contains(&value) {
+        Ok(value)
+    } else {
+        Err(envelope(
+            StatusCode::BAD_REQUEST,
+            "validation_error",
+            "limit must be an integer between 1 and 100",
+        ))
+    }
 }
 
 // ============================================================
@@ -167,6 +297,8 @@ pub fn requests_router() -> Router<ApiEnv> {
         .route("/v1/guest/upgrade", post(guest_upgrade))
         .route("/v1/guest/verify", post(guest_verify))
         .route("/v1/dj/queue", get(dj_queue))
+        .route("/v1/dj/history", get(dj_history))
+        .route("/v1/dj/stats/session", get(dj_session_stats))
         .route("/v1/dj/requests/:id/accept", post(dj_accept))
         .route("/v1/dj/requests/:id/reject", post(dj_reject))
         .route("/v1/dj/requests/:id/played", post(dj_played))
@@ -806,7 +938,20 @@ async fn dj_queue(
     else {
         return (StatusCode::OK, Json(QueueResponse { items: vec![] })).into_response();
     };
-    let sort = params.sort.as_deref().unwrap_or("new");
+    // `sort` валидируется явно (как `limit`/`cursor` у `/v1/dj/history`):
+    // неизвестное значение → `400 validation_error`, а не молчаливое «new».
+    // Иначе опечатка клиента выглядит как «сортировка не работает».
+    let sort = match params.sort.as_deref().map(str::trim) {
+        None | Some("") | Some("new") => "new",
+        Some("hot") => "hot",
+        Some(_) => {
+            return envelope(
+                StatusCode::BAD_REQUEST,
+                "validation_error",
+                "sort must be new or hot",
+            )
+        }
+    };
     match requests.dj_queue(session.id, sort).await {
         Ok(items) => (
             StatusCode::OK,
@@ -819,6 +964,177 @@ async fn dj_queue(
     }
 }
 
+/// GET /v1/dj/history?limit=&cursor= — лог проигранных заявок текущей смены.
+///
+/// Смена — та же, что у очереди (`find_current_dj_session`): открытая сессия
+/// этого DJ. Нет смены → `200 {items: [], next_cursor: null}`: пустая смена —
+/// это пустой лог, а не ошибка и не 404 (консоль открывается до назначения).
+async fn dj_history(
+    ctx: AuthContext,
+    State(state): State<ApiEnv>,
+    Query(params): Query<HistoryParams>,
+) -> Response {
+    if ctx.role() != Role::Dj {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let sessions = match state.sessions.clone() {
+        Some(s) => s,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let requests = match state.requests.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let limit = match history_limit(params.limit.as_deref()) {
+        Ok(limit) => limit,
+        Err(response) => return response,
+    };
+    let after = match decode_history_cursor(params.cursor.as_deref()) {
+        Ok(after) => after,
+        Err(()) => {
+            return envelope(
+                StatusCode::BAD_REQUEST,
+                "validation_error",
+                "cursor is malformed",
+            )
+        }
+    };
+    let Some(session) = sessions
+        .find_current_dj_session(ctx.subject_id())
+        .await
+        .unwrap_or(None)
+    else {
+        return (
+            StatusCode::OK,
+            Json(DjHistoryResponse {
+                items: vec![],
+                next_cursor: None,
+            }),
+        )
+            .into_response();
+    };
+    // limit + 1: лишняя строка говорит, что страница не последняя, и не
+    // попадает в ответ (клиент видит ровно то, что просил).
+    match requests.dj_history(session.id, after, limit + 1).await {
+        Ok(mut rows) => {
+            let has_more = rows.len() as i64 > limit;
+            if has_more {
+                rows.truncate(limit as usize);
+            }
+            let next_cursor = if has_more {
+                rows.last()
+                    .map(|row| encode_history_cursor(row.sort_key, row.id))
+            } else {
+                None
+            };
+            (
+                StatusCode::OK,
+                Json(DjHistoryResponse {
+                    items: rows.into_iter().map(history_item_of).collect(),
+                    next_cursor,
+                }),
+            )
+                .into_response()
+        }
+        Err(_) => api_error(ApiError::Internal, "db error"),
+    }
+}
+
+/// GET /v1/dj/stats/session — счётчики текущей смены DJ.
+///
+/// Сосед `/v1/dj/stats/today` (panel_routes.rs) считает окно в 24 часа и
+/// сумму DJ-долей за всё время; консоли же нужны числа именно за смену —
+/// иначе «Session total» показывает чужую ночь, а «Played» живёт по таймеру.
+/// Поэтому смена считается здесь, в DJ-роутере, и ничего в `/stats/today`
+/// не меняется (его контракт принадлежит другому модулю).
+async fn dj_session_stats(ctx: AuthContext, State(state): State<ApiEnv>) -> Response {
+    if ctx.role() != Role::Dj {
+        return auth_error_response(ApiError::Forbidden);
+    }
+    let sessions = match state.sessions.clone() {
+        Some(s) => s,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let requests = match state.requests.clone() {
+        Some(r) => r,
+        None => {
+            return api_error(
+                ApiError::ExternalServiceUnavailable,
+                "database not configured",
+            )
+        }
+    };
+    let Some(session) = sessions
+        .find_current_dj_session(ctx.subject_id())
+        .await
+        .unwrap_or(None)
+    else {
+        return (
+            StatusCode::OK,
+            Json(DjSessionStatsResponse {
+                session: None,
+                requests: 0,
+                accepted: 0,
+                played_session: 0,
+                rejected: 0,
+                earned_session_minor: 0,
+            }),
+        )
+            .into_response();
+    };
+    match requests
+        .dj_session_totals(session.id, ctx.subject_id())
+        .await
+    {
+        Ok(totals) => (
+            StatusCode::OK,
+            Json(DjSessionStatsResponse {
+                session: Some(DjSessionRefDto {
+                    id: session.id,
+                    status: session.status,
+                    timezone: session.timezone,
+                }),
+                requests: totals.requests,
+                accepted: totals.accepted,
+                played_session: totals.played,
+                rejected: totals.rejected,
+                earned_session_minor: totals.earned_minor,
+            }),
+        )
+            .into_response(),
+        Err(_) => api_error(ApiError::Internal, "db error"),
+    }
+}
+
+fn history_item_of(item: dropit_infra_db::requests::DjHistoryItem) -> DjHistoryItemDto {
+    DjHistoryItemDto {
+        id: item.id,
+        title: item.title,
+        artist: item.artist,
+        style: item.style,
+        played_at: item.played_at,
+        accepted_at: item.accepted_at,
+        same_track_count: item.same_track_count,
+        cover_url: item.cover_url,
+    }
+}
+
+/// POST /v1/dj/requests/:id/accept — принять заявку в очередь смены.
 async fn dj_accept(
     ctx: AuthContext,
     State(state): State<ApiEnv>,

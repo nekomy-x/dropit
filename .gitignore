@@ -8,20 +8,39 @@ Cargo.lock.bak
 
 # Env/secrets — никогда не коммитим
 .env
+.env.*
+!.env.example
 deploy/.env
 *.pem
 *.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Public test-only signing fixtures; never use these keys for real services.
+!crates/infra-push/tests/fixtures/test_rsa.pem
+!crates/infra-push/tests/fixtures/test_key.p8
 
 # Local
 /del/
 .DS_Store
 node_modules/
+.vite/
 dist/
 *.apk
+
+# Private negotiation notes and legal drafts stay on the workstation.
+/docs/legal/
+
+# Local IDE launch configurations.
+apps/mobile-*/.run/
 
 # PROD deploy artifacts and secrets — никогда не коммитим
 /build/
 deploy/prod/.env.local
+deploy/prod/.env.*.local
 deploy/prod/secrets.env
 deploy/prod/state/
 deploy/prod/backup/

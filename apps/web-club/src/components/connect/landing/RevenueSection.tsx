@@ -27,13 +27,13 @@ function FeeSplit() {
     }).format(minor / 100);
 
   return (
-    <div className="mt-10 rounded-lg border border-drop-line bg-drop-surface p-4">
+    <div className="connect-fee-split mt-10 rounded-lg border border-drop-line bg-drop-surface p-4">
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-[11px] text-drop-muted">{t('feeSplitTitle')}</p>
         <p className="text-[13px] font-medium text-drop-text tabular">{money(DEFAULT_PRICE_MINOR)}</p>
       </div>
 
-      <div className="mt-4 flex items-center gap-5">
+      <div className="connect-fee-split-body mt-4 flex items-center gap-5">
         <DonutSplit
           segments={[
             { label: t('calcPerRequest'), value: clubMinor, tone: 'accent' },
